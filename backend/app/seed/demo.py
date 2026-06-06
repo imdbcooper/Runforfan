@@ -3,14 +3,87 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Activity, ActivitySegment, ActivitySplitBlock, LactateThresholdMeasurement, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, LactateThresholdMeasurement, ScreenshotSource, User
 from app.services.auth import get_or_create_demo_user
+
+
+def seed_interval_training(db: Session, user: User) -> None:
+    started_at = datetime(2026, 6, 6, 20, 16)
+    exists = db.scalar(select(Activity).where(Activity.user_id == user.id, Activity.started_at == started_at, Activity.distance_km == 11.74))
+    if exists:
+        return
+
+    sources = []
+    for file_path, screen_type, notes in [
+        ("scrins/training3/photo_2026-06-06_23-23-46.jpg", "workout_pace_tab", "Interval workout pace tab."),
+        ("scrins/training3/photo_2026-06-06_23-23-49.jpg", "workout_segments_tab", "Interval workout structured segments tab."),
+        ("scrins/training3/photo_2026-06-06_23-23-53.jpg", "workout_details_tab", "Interval workout details tab."),
+    ]:
+        source = db.scalar(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id, ScreenshotSource.file_path == file_path))
+        if not source:
+            source = ScreenshotSource(user_id=user.id, file_path=file_path, screen_type=screen_type, captured_at=datetime(2026, 6, 6, 23, 23), source_app="Huawei Health", notes=notes)
+            db.add(source)
+            db.flush()
+        sources.append(source)
+
+    activity = Activity(
+        user_id=user.id,
+        activity_type="outdoor_run_interval",
+        title="Интервальная тренировка: 3 x 2 км",
+        started_at=started_at,
+        distance_km=11.74,
+        duration_seconds=4442,
+        calories_kcal=1022,
+        average_pace_seconds_per_km=378,
+        fastest_pace_seconds_per_km=325,
+        average_speed_kmh=9.51,
+        average_cadence_spm=174,
+        average_stride_cm=91,
+        steps_count=12931,
+        average_heart_rate_bpm=152,
+        elevation_gain_m=26.1,
+        elevation_loss_m=28.2,
+        source_note="Seeded from Huawei interval training screenshots in scrins/training3.",
+    )
+    db.add(activity)
+    db.flush()
+
+    for source in sources:
+        db.add(ActivityScreenshot(activity_id=activity.id, source_id=source.id))
+
+    for idx, distance, duration, pace in [
+        (1, 1.0, 374, 374), (2, 1.0, 425, 425), (3, 1.0, 375, 375),
+        (4, 1.0, 330, 330), (5, 1.0, 325, 325), (6, 1.0, 389, 389),
+        (7, 1.0, 340, 340), (8, 1.0, 413, 413), (9, 1.0, 343, 343),
+        (10, 1.0, 365, 365), (11, 1.0, 466, 466), (12, 0.74, 297, 401),
+    ]:
+        db.add(ActivitySegment(activity_id=activity.id, segment_index=idx, distance_km=distance, duration_seconds=duration, pace_seconds_per_km=pace))
+
+    db.add_all([
+        ActivitySplitBlock(activity_id=activity.id, block_index=1, start_km=0, end_km=5, distance_km=5, duration_seconds=1829, cumulative_duration_seconds=1829),
+        ActivitySplitBlock(activity_id=activity.id, block_index=2, start_km=5, end_km=10, distance_km=5, duration_seconds=1850, cumulative_duration_seconds=3679),
+        ActivitySplitBlock(activity_id=activity.id, block_index=3, start_km=10, end_km=11.74, distance_km=1.74, duration_seconds=763, cumulative_duration_seconds=4442),
+    ])
+
+    for idx, block_type, title, duration, distance, pace, hr in [
+        (1, "warmup", "Разминка", 1168, 2.98, 391, 137),
+        (2, "work", "Бег", 654, 2.0, 327, 161),
+        (3, "recovery", "Отдых", 180, 0.38, 468, 150),
+        (4, "work", "Бег", 682, 2.0, 341, 161),
+        (5, "recovery", "Отдых", 180, 0.31, 590, 151),
+        (6, "work", "Бег", 664, 2.0, 332, 163),
+        (7, "recovery", "Отдых", 180, 0.40, 462, 155),
+        (8, "cooldown", "Низкий", 734, 1.67, 437, 145),
+    ]:
+        db.add(ActivityWorkoutBlock(activity_id=activity.id, block_index=idx, block_type=block_type, title=title, duration_seconds=duration, distance_km=distance, pace_seconds_per_km=pace, average_heart_rate_bpm=hr))
 
 
 def seed_demo_data(db: Session) -> None:
     user = get_or_create_demo_user(db)
     exists = db.scalar(select(Activity).where(Activity.user_id == user.id))
     if exists:
+        seed_interval_training(db, user)
+        db.commit()
         return
 
     first = Activity(
@@ -93,4 +166,5 @@ def seed_demo_data(db: Session) -> None:
         threshold_pace_seconds_per_km=324,
         notes="Seeded lactate threshold measurement.",
     ))
+    seed_interval_training(db, user)
     db.commit()

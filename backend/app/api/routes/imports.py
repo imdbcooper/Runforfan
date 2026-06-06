@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
-from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ImportBatch, ImportBatchSource, ScreenshotSource, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, User
 from app.services.auth import get_current_user
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
 
@@ -26,11 +26,25 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     activity_payload = payload.get("activity") or {}
     if not activity_payload:
         return None
+    started_at = datetime.fromisoformat(activity_payload["started_at"]) if activity_payload.get("started_at") else None
+    existing = None
+    if started_at and activity_payload.get("distance_km") and activity_payload.get("duration_seconds"):
+        existing = db.scalar(select(Activity).where(
+            Activity.user_id == user.id,
+            Activity.started_at == started_at,
+            Activity.distance_km == activity_payload.get("distance_km"),
+            Activity.duration_seconds == activity_payload.get("duration_seconds"),
+        ))
+    if existing:
+        for source_id in source_ids:
+            db.add(ActivityScreenshot(activity_id=existing.id, source_id=source_id))
+        db.flush()
+        return existing
     activity = Activity(
         user_id=user.id,
         activity_type="outdoor_run",
         title=activity_payload.get("title") or "Бег на улице",
-        started_at=datetime.fromisoformat(activity_payload["started_at"]) if activity_payload.get("started_at") else None,
+        started_at=started_at,
         distance_km=activity_payload.get("distance_km"),
         duration_seconds=activity_payload.get("duration_seconds"),
         calories_kcal=activity_payload.get("calories_kcal"),
@@ -55,6 +69,19 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
         db.add(ActivitySegment(activity_id=activity.id, **segment))
     for block in payload.get("split_blocks") or []:
         db.add(ActivitySplitBlock(activity_id=activity.id, **block))
+    for block in payload.get("workout_blocks") or []:
+        db.add(ActivityWorkoutBlock(
+            activity_id=activity.id,
+            block_index=block.get("block_index"),
+            block_type=block.get("block_type") or "unknown",
+            title=block.get("title") or block.get("block_type") or "Блок",
+            distance_km=block.get("distance_km"),
+            duration_seconds=block.get("duration_seconds"),
+            pace_seconds_per_km=block.get("pace_seconds_per_km"),
+            average_heart_rate_bpm=block.get("average_heart_rate_bpm"),
+            average_cadence_spm=block.get("average_cadence_spm"),
+            notes=block.get("notes"),
+        ))
     db.flush()
     return activity
 

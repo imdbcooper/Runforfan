@@ -9,6 +9,16 @@ export type Activity = {
   average_pace_seconds_per_km: number | null
   average_heart_rate_bpm: number | null
   segments: unknown[]
+  workout_blocks: {
+    id: number
+    block_index: number
+    block_type: "warmup" | "work" | "recovery" | "cooldown" | string
+    title: string
+    distance_km: number | null
+    duration_seconds: number
+    pace_seconds_per_km: number | null
+    average_heart_rate_bpm: number | null
+  }[]
 }
 
 export type LlmProvider = {

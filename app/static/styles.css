@@ -704,6 +704,13 @@ tbody tr:hover { background: rgba(255, 132, 42, 0.06); }
 
 .split-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 
+.split-card.accent-card {
+  border-color: rgba(255, 132, 42, 0.38);
+  background: linear-gradient(180deg, rgba(255, 132, 42, 0.12), rgba(7, 11, 18, 0.48));
+}
+
+.split-card small { color: var(--muted); font-size: 12px; }
+
 .delta-positive { color: var(--teal); font-weight: 800; }
 .delta-negative { color: var(--rose); font-weight: 800; }
 

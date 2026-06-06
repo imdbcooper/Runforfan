@@ -126,6 +126,8 @@ function renderMonthFilters() {
 
 function activityCard(activity) {
   const stress = activity.aerobic_training_stress ? Number(activity.aerobic_training_stress).toFixed(1) : "--";
+  const workBlocks = activity.workout_blocks?.filter((block) => block.block_type === "work") || [];
+  const intervalLabel = workBlocks.length ? ` · ${workBlocks.length} x ${formatDistance(workBlocks[0].distance_km)}` : "";
   return `
     <article class="training-card">
       <a class="training-card-link" href="/activity?id=${activity.id}">
@@ -141,7 +143,7 @@ function activityCard(activity) {
           <div><span>Стресс</span><strong>${stress}</strong></div>
         </div>
         <div class="training-card-footer">
-          <span>${activity.segments?.length || 0} ${pluralRu(activity.segments?.length || 0, "сегмент", "сегмента", "сегментов")}</span>
+          <span>${activity.workout_blocks?.length ? `${activity.workout_blocks.length} интервальных блоков${intervalLabel}` : `${activity.segments?.length || 0} ${pluralRu(activity.segments?.length || 0, "сегмент", "сегмента", "сегментов")}`}</span>
           <span>Открыть разбор →</span>
         </div>
       </a>
@@ -208,6 +210,7 @@ function renderActivity(activity) {
 
   renderPaceBars(activity.segments);
   renderSplits(activity.split_blocks);
+  renderWorkoutBlocks(activity.workout_blocks || []);
 }
 
 function renderPaceBars(segments) {
@@ -255,6 +258,27 @@ function renderSplits(blocks) {
       </article>
     `;
   }).join("");
+}
+
+function renderWorkoutBlocks(blocks) {
+  const target = el("workout-blocks");
+  if (!target) return;
+  if (!blocks.length) {
+    target.innerHTML = `<div class="notice">Нет структурных интервальных блоков.</div>`;
+    return;
+  }
+  target.innerHTML = blocks.map((block) => `
+    <article class="split-card ${block.block_type === "work" ? "accent-card" : ""}">
+      <div>
+        <span>${escapeHtml(block.title || block.block_type)}</span>
+        <strong>${formatDuration(block.duration_seconds)}</strong>
+      </div>
+      <div>
+        <span>${formatDistance(block.distance_km)} · ${formatPace(block.pace_seconds_per_km)}</span>
+        <small>${formatHr(block.average_heart_rate_bpm)}</small>
+      </div>
+    </article>
+  `).join("");
 }
 
 function renderThreshold(measurement) {

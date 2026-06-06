@@ -82,6 +82,7 @@ class Activity(Base, TimestampMixin):
     user: Mapped[User] = relationship(back_populates="activities")
     segments: Mapped[list["ActivitySegment"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     split_blocks: Mapped[list["ActivitySplitBlock"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
+    workout_blocks: Mapped[list["ActivityWorkoutBlock"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     screenshots: Mapped[list["ActivityScreenshot"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
 
 
@@ -115,6 +116,25 @@ class ActivitySplitBlock(Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
     activity: Mapped[Activity] = relationship(back_populates="split_blocks")
+
+
+class ActivityWorkoutBlock(Base):
+    __tablename__ = "activity_workout_blocks"
+    __table_args__ = (UniqueConstraint("activity_id", "block_index", name="uq_activity_workout_block"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    activity_id: Mapped[int] = mapped_column(ForeignKey("activities.id", ondelete="CASCADE"), index=True)
+    block_index: Mapped[int] = mapped_column(Integer)
+    block_type: Mapped[str] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(255))
+    distance_km: Mapped[float | None] = mapped_column(Float)
+    duration_seconds: Mapped[int] = mapped_column(Integer)
+    pace_seconds_per_km: Mapped[int | None] = mapped_column(Integer)
+    average_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer)
+    average_cadence_spm: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    activity: Mapped[Activity] = relationship(back_populates="workout_blocks")
 
 
 class ActivityScreenshot(Base):

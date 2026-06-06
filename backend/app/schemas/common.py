@@ -44,6 +44,21 @@ class SplitBlockOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkoutBlockOut(BaseModel):
+    id: int
+    block_index: int
+    block_type: str
+    title: str
+    distance_km: float | None = None
+    duration_seconds: int
+    pace_seconds_per_km: int | None = None
+    average_heart_rate_bpm: int | None = None
+    average_cadence_spm: int | None = None
+    notes: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class ActivityOut(BaseModel):
     id: int
     activity_type: str
@@ -65,6 +80,7 @@ class ActivityOut(BaseModel):
     aerobic_training_effect: str | None = None
     segments: list[SegmentOut] = []
     split_blocks: list[SplitBlockOut] = []
+    workout_blocks: list[WorkoutBlockOut] = []
 
     model_config = {"from_attributes": True}
 

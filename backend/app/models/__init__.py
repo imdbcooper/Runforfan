@@ -3,6 +3,7 @@ from app.models.entities import (  # noqa: F401
     ActivitySegment,
     ActivityScreenshot,
     ActivitySplitBlock,
+    ActivityWorkoutBlock,
     AuthSession,
     ImportBatch,
     ImportBatchSource,

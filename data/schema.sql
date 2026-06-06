@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS activity_split_blocks (
   FOREIGN KEY (activity_id) REFERENCES training_activities(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS activity_workout_blocks (
+  id INTEGER PRIMARY KEY,
+  activity_id INTEGER NOT NULL,
+  block_index INTEGER NOT NULL,
+  block_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  distance_km REAL,
+  duration_seconds INTEGER NOT NULL,
+  pace_seconds_per_km INTEGER,
+  average_heart_rate_bpm INTEGER,
+  average_cadence_spm INTEGER,
+  notes TEXT,
+  UNIQUE (activity_id, block_index),
+  FOREIGN KEY (activity_id) REFERENCES training_activities(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS lactate_threshold_measurements (
   id INTEGER PRIMARY KEY,
   source_id INTEGER NOT NULL,
@@ -132,6 +148,9 @@ CREATE INDEX IF NOT EXISTS idx_training_activities_started_at
 
 CREATE INDEX IF NOT EXISTS idx_activity_segments_activity_id
   ON activity_segments(activity_id);
+
+CREATE INDEX IF NOT EXISTS idx_activity_workout_blocks_activity_id
+  ON activity_workout_blocks(activity_id);
 
 CREATE INDEX IF NOT EXISTS idx_lactate_threshold_measurements_measured_at
   ON lactate_threshold_measurements(measured_at);

@@ -33,6 +33,7 @@ def main() -> None:
             "training_activities": table_count(connection, "training_activities"),
             "activity_segments": table_count(connection, "activity_segments"),
             "activity_split_blocks": table_count(connection, "activity_split_blocks"),
+            "activity_workout_blocks": table_count(connection, "activity_workout_blocks"),
             "lactate_threshold_measurements": table_count(connection, "lactate_threshold_measurements"),
             "import_batches": table_count(connection, "import_batches"),
             "running_goals": table_count(connection, "running_goals"),

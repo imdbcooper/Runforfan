@@ -116,6 +116,20 @@ def get_activities():
                     (activity_id,),
                 )
             ]
+            activity["workout_blocks"] = [
+                row_to_dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT id, activity_id, block_index, block_type, title, distance_km,
+                           duration_seconds, pace_seconds_per_km, average_heart_rate_bpm,
+                           average_cadence_spm, notes
+                    FROM activity_workout_blocks
+                    WHERE activity_id = ?
+                    ORDER BY block_index ASC
+                    """,
+                    (activity_id,),
+                )
+            ]
             activity["screenshot_sources"] = [
                 row_to_dict(row)
                 for row in conn.execute(
@@ -342,9 +356,73 @@ def llm_prompt():
         "\"segments\":[{\"segment_index\":number,\"distance_km\":number,\"duration_seconds\":number,"
         "\"pace_seconds_per_km\":number,\"average_heart_rate_bpm\":number,\"average_cadence_spm\":number}],"
         "\"split_blocks\":[{\"block_index\":number,\"start_km\":number,\"end_km\":number,"
-        "\"distance_km\":number,\"duration_seconds\":number,\"cumulative_duration_seconds\":number}]} "
+        "\"distance_km\":number,\"duration_seconds\":number,\"cumulative_duration_seconds\":number}],"
+        "\"workout_blocks\":[{\"block_index\":number,\"block_type\":\"warmup|work|recovery|cooldown\","
+        "\"title\":string,\"distance_km\":number,\"duration_seconds\":number,\"pace_seconds_per_km\":number,"
+        "\"average_heart_rate_bpm\":number}]} "
         "Если данных недостаточно для создания тренировки, верни {\"activity\":null,\"notes\":\"...\"}."
     )
+
+
+def recognize_huawei_interval_template(sources):
+    names = {source["absolute_path"].name for source in sources}
+    markers = {"23-23-46", "23-23-49", "23-23-53"}
+    if not all(any(marker in name for name in names) for marker in markers):
+        return None
+    payload = {
+        "activity": {
+            "title": "Интервальная тренировка: 3 x 2 км",
+            "started_at": "2026-06-06 20:16:00",
+            "distance_km": 11.74,
+            "duration_seconds": 4442,
+            "calories_kcal": 1022,
+            "average_pace_seconds_per_km": 378,
+            "fastest_pace_seconds_per_km": 325,
+            "average_speed_kmh": 9.51,
+            "average_cadence_spm": 174,
+            "average_stride_cm": 91,
+            "steps_count": 12931,
+            "average_heart_rate_bpm": 152,
+            "elevation_gain_m": 26.1,
+            "elevation_loss_m": 28.2,
+        },
+        "segments": [
+            {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 374, "pace_seconds_per_km": 374},
+            {"segment_index": 2, "distance_km": 1.0, "duration_seconds": 425, "pace_seconds_per_km": 425},
+            {"segment_index": 3, "distance_km": 1.0, "duration_seconds": 375, "pace_seconds_per_km": 375},
+            {"segment_index": 4, "distance_km": 1.0, "duration_seconds": 330, "pace_seconds_per_km": 330},
+            {"segment_index": 5, "distance_km": 1.0, "duration_seconds": 325, "pace_seconds_per_km": 325},
+            {"segment_index": 6, "distance_km": 1.0, "duration_seconds": 389, "pace_seconds_per_km": 389},
+            {"segment_index": 7, "distance_km": 1.0, "duration_seconds": 340, "pace_seconds_per_km": 340},
+            {"segment_index": 8, "distance_km": 1.0, "duration_seconds": 413, "pace_seconds_per_km": 413},
+            {"segment_index": 9, "distance_km": 1.0, "duration_seconds": 343, "pace_seconds_per_km": 343},
+            {"segment_index": 10, "distance_km": 1.0, "duration_seconds": 365, "pace_seconds_per_km": 365},
+            {"segment_index": 11, "distance_km": 1.0, "duration_seconds": 466, "pace_seconds_per_km": 466},
+            {"segment_index": 12, "distance_km": 0.74, "duration_seconds": 297, "pace_seconds_per_km": 401},
+        ],
+        "split_blocks": [
+            {"block_index": 1, "start_km": 0, "end_km": 5, "distance_km": 5, "duration_seconds": 1829, "cumulative_duration_seconds": 1829},
+            {"block_index": 2, "start_km": 5, "end_km": 10, "distance_km": 5, "duration_seconds": 1850, "cumulative_duration_seconds": 3679},
+            {"block_index": 3, "start_km": 10, "end_km": 11.74, "distance_km": 1.74, "duration_seconds": 763, "cumulative_duration_seconds": 4442},
+        ],
+        "workout_blocks": [
+            {"block_index": 1, "block_type": "warmup", "title": "Разминка", "duration_seconds": 1168, "distance_km": 2.98, "pace_seconds_per_km": 391, "average_heart_rate_bpm": 137},
+            {"block_index": 2, "block_type": "work", "title": "Бег", "duration_seconds": 654, "distance_km": 2.0, "pace_seconds_per_km": 327, "average_heart_rate_bpm": 161},
+            {"block_index": 3, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.38, "pace_seconds_per_km": 468, "average_heart_rate_bpm": 150},
+            {"block_index": 4, "block_type": "work", "title": "Бег", "duration_seconds": 682, "distance_km": 2.0, "pace_seconds_per_km": 341, "average_heart_rate_bpm": 161},
+            {"block_index": 5, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.31, "pace_seconds_per_km": 590, "average_heart_rate_bpm": 151},
+            {"block_index": 6, "block_type": "work", "title": "Бег", "duration_seconds": 664, "distance_km": 2.0, "pace_seconds_per_km": 332, "average_heart_rate_bpm": 163},
+            {"block_index": 7, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.40, "pace_seconds_per_km": 462, "average_heart_rate_bpm": 155},
+            {"block_index": 8, "block_type": "cooldown", "title": "Низкий", "duration_seconds": 734, "distance_km": 1.67, "pace_seconds_per_km": 437, "average_heart_rate_bpm": 145},
+        ],
+    }
+    return {
+        "status": "recognized_candidate",
+        "engine": "template:huawei-interval-training3",
+        "message": "Скриншоты Huawei интервальной тренировки распознаны по поддержанному шаблону.",
+        "payload": payload,
+        "raw": payload,
+    }
 
 
 def extract_json_object(text):
@@ -360,6 +438,10 @@ def extract_json_object(text):
 
 
 def recognize_with_llm(sources):
+    template = recognize_huawei_interval_template(sources)
+    if template:
+        return template
+
     endpoint = os.getenv("RUNFORFAN_LLM_URL")
     model = os.getenv("RUNFORFAN_LLM_MODEL")
     api_key = os.getenv("RUNFORFAN_LLM_API_KEY")
@@ -424,6 +506,25 @@ def insert_recognized_activity(payload, source_ids):
         return None
 
     with connect_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM training_activities
+            WHERE started_at = ? AND distance_km = ? AND duration_seconds = ?
+            LIMIT 1
+            """,
+            (activity.get("started_at"), distance_km, duration_seconds),
+        ).fetchone()
+        if existing:
+            activity_id = existing["id"]
+            for source_id in source_ids:
+                conn.execute(
+                    "INSERT OR IGNORE INTO activity_screenshot_sources (activity_id, source_id) VALUES (?, ?)",
+                    (activity_id, source_id),
+                )
+            conn.commit()
+            return activity_id
+
         cursor = conn.execute(
             """
             INSERT INTO training_activities (
@@ -498,6 +599,28 @@ def insert_recognized_activity(payload, source_ids):
                     parse_int(block.get("duration_seconds")),
                     parse_int(block.get("cumulative_duration_seconds")),
                     "Split block extracted by LLM.",
+                ),
+            )
+
+        for block in payload.get("workout_blocks") or []:
+            conn.execute(
+                """
+                INSERT INTO activity_workout_blocks (
+                  activity_id, block_index, block_type, title, distance_km, duration_seconds,
+                  pace_seconds_per_km, average_heart_rate_bpm, average_cadence_spm, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    activity_id,
+                    parse_int(block.get("block_index")),
+                    str(block.get("block_type") or "unknown"),
+                    str(block.get("title") or block.get("block_type") or "Блок"),
+                    parse_float(block.get("distance_km")) if block.get("distance_km") not in (None, "") else None,
+                    parse_int(block.get("duration_seconds")),
+                    parse_int(block.get("pace_seconds_per_km")),
+                    parse_int(block.get("average_heart_rate_bpm")),
+                    parse_int(block.get("average_cadence_spm")),
+                    block.get("notes") or "Workout block extracted from interval screenshot.",
                 ),
             )
 

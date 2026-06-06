@@ -28,6 +28,22 @@ function formatDistance(km?: number | null) {
   return km ? `${km.toFixed(2)} км` : "--"
 }
 
+function formatDuration(seconds?: number | null) {
+  if (!seconds) return "--"
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const rest = seconds % 60
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`
+}
+
+function workoutBlockSummary(activity: ActivityType) {
+  const workBlocks = activity.workout_blocks?.filter((block) => block.block_type === "work") || []
+  if (!workBlocks.length) return null
+  const distance = workBlocks[0]?.distance_km
+  const sameDistance = distance && workBlocks.every((block) => block.distance_km === distance)
+  return sameDistance ? `${workBlocks.length} x ${distance.toFixed(2)} км` : `${workBlocks.length} рабочих блока`
+}
+
 function App() {
   const [page, setPage] = useState<Page>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -136,10 +152,19 @@ function Activities({ activities, compact = false }: { activities: ActivityType[
     <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm">+ Import</Button></CardHeader>
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-xs">
-        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Name</th><th>Distance</th><th>Pace</th><th>HR</th><th>Segments</th><th>ID</th></tr></thead>
-        <tbody>{activities.slice(0, compact ? 6 : undefined).map((activity) => <tr key={activity.id} className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div></td><td>{formatDistance(activity.distance_km)}</td><td>{formatPace(activity.average_pace_seconds_per_km)}/км</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{activity.segments.length}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>)}</tbody>
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Name</th><th>Distance</th><th>Pace</th><th>HR</th><th>Structure</th><th>ID</th></tr></thead>
+        <tbody>{activities.slice(0, compact ? 6 : undefined).map((activity) => {
+          const summary = workoutBlockSummary(activity)
+          return <tr key={activity.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</td><td>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></td><td>{formatPace(activity.average_pace_seconds_per_km)}/км</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>
+        })}</tbody>
       </table>
     </div>
+    {!compact && activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
+      {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+        <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+        <div className="grid gap-1">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}/км</span></div>)}</div>
+      </div>)}
+    </div>}
   </Card>
 }
 

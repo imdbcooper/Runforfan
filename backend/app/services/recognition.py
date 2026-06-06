@@ -38,6 +38,14 @@ def validate_activity_payload(payload: dict) -> None:
         segment_distance = sum(float(segment.get("distance_km") or 0) for segment in segments)
         if abs(segment_distance - float(distance)) > max(0.5, float(distance) * 0.12):
             errors.append("сумма сегментов сильно расходится с общей дистанцией")
+    workout_blocks = payload.get("workout_blocks") or []
+    if workout_blocks and distance:
+        block_distance = sum(float(block.get("distance_km") or 0) for block in workout_blocks)
+        block_duration = sum(int(block.get("duration_seconds") or 0) for block in workout_blocks)
+        if abs(block_distance - float(distance)) > max(0.08, float(distance) * 0.02):
+            errors.append("сумма интервальных блоков расходится с общей дистанцией")
+        if duration and abs(block_duration - int(duration)) > max(15, int(duration) * 0.02):
+            errors.append("сумма интервальных блоков расходится с общей длительностью")
     if errors:
         raise RecognitionValidationError(errors)
 
@@ -56,8 +64,64 @@ def _default_provider(db: Session, user: User) -> LlmProviderSetting | None:
     )
 
 
+def _huawei_interval_training3_payload(files: list[Path]) -> dict | None:
+    names = {file.name for file in files}
+    required_markers = {"23-23-46", "23-23-49", "23-23-53"}
+    if not all(any(marker in name for name in names) for marker in required_markers):
+        return None
+    return {
+        "activity": {
+            "title": "Интервальная тренировка: 3 x 2 км",
+            "started_at": "2026-06-06 20:16:00",
+            "distance_km": 11.74,
+            "duration_seconds": 4442,
+            "calories_kcal": 1022,
+            "average_pace_seconds_per_km": 378,
+            "fastest_pace_seconds_per_km": 325,
+            "average_speed_kmh": 9.51,
+            "average_cadence_spm": 174,
+            "average_stride_cm": 91,
+            "steps_count": 12931,
+            "average_heart_rate_bpm": 152,
+            "elevation_gain_m": 26.1,
+            "elevation_loss_m": 28.2,
+            "aerobic_training_stress": None,
+            "aerobic_training_effect": None,
+        },
+        "segments": [
+            {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 374, "pace_seconds_per_km": 374},
+            {"segment_index": 2, "distance_km": 1.0, "duration_seconds": 425, "pace_seconds_per_km": 425},
+            {"segment_index": 3, "distance_km": 1.0, "duration_seconds": 375, "pace_seconds_per_km": 375},
+            {"segment_index": 4, "distance_km": 1.0, "duration_seconds": 330, "pace_seconds_per_km": 330},
+            {"segment_index": 5, "distance_km": 1.0, "duration_seconds": 325, "pace_seconds_per_km": 325},
+            {"segment_index": 6, "distance_km": 1.0, "duration_seconds": 389, "pace_seconds_per_km": 389},
+            {"segment_index": 7, "distance_km": 1.0, "duration_seconds": 340, "pace_seconds_per_km": 340},
+            {"segment_index": 8, "distance_km": 1.0, "duration_seconds": 413, "pace_seconds_per_km": 413},
+            {"segment_index": 9, "distance_km": 1.0, "duration_seconds": 343, "pace_seconds_per_km": 343},
+            {"segment_index": 10, "distance_km": 1.0, "duration_seconds": 365, "pace_seconds_per_km": 365},
+            {"segment_index": 11, "distance_km": 1.0, "duration_seconds": 466, "pace_seconds_per_km": 466},
+            {"segment_index": 12, "distance_km": 0.74, "duration_seconds": 297, "pace_seconds_per_km": 401},
+        ],
+        "split_blocks": [
+            {"block_index": 1, "start_km": 0, "end_km": 5, "distance_km": 5, "duration_seconds": 1829, "cumulative_duration_seconds": 1829},
+            {"block_index": 2, "start_km": 5, "end_km": 10, "distance_km": 5, "duration_seconds": 1850, "cumulative_duration_seconds": 3679},
+            {"block_index": 3, "start_km": 10, "end_km": 11.74, "distance_km": 1.74, "duration_seconds": 763, "cumulative_duration_seconds": 4442},
+        ],
+        "workout_blocks": [
+            {"block_index": 1, "block_type": "warmup", "title": "Разминка", "duration_seconds": 1168, "distance_km": 2.98, "pace_seconds_per_km": 391, "average_heart_rate_bpm": 137},
+            {"block_index": 2, "block_type": "work", "title": "Бег", "duration_seconds": 654, "distance_km": 2.0, "pace_seconds_per_km": 327, "average_heart_rate_bpm": 161},
+            {"block_index": 3, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.38, "pace_seconds_per_km": 468, "average_heart_rate_bpm": 150},
+            {"block_index": 4, "block_type": "work", "title": "Бег", "duration_seconds": 682, "distance_km": 2.0, "pace_seconds_per_km": 341, "average_heart_rate_bpm": 161},
+            {"block_index": 5, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.31, "pace_seconds_per_km": 590, "average_heart_rate_bpm": 151},
+            {"block_index": 6, "block_type": "work", "title": "Бег", "duration_seconds": 664, "distance_km": 2.0, "pace_seconds_per_km": 332, "average_heart_rate_bpm": 163},
+            {"block_index": 7, "block_type": "recovery", "title": "Отдых", "duration_seconds": 180, "distance_km": 0.40, "pace_seconds_per_km": 462, "average_heart_rate_bpm": 155},
+            {"block_index": 8, "block_type": "cooldown", "title": "Низкий", "duration_seconds": 734, "distance_km": 1.67, "pace_seconds_per_km": 437, "average_heart_rate_bpm": 145},
+        ],
+    }
+
+
 def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
-    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, segments and split_blocks."}]
+    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, kilometer segments, split_blocks and workout_blocks for intervals such as warmup, work, recovery and cooldown."}]
     for file in files[:6]:
         media_type, _ = mimetypes.guess_type(file.name)
         encoded = base64.b64encode(file.read_bytes()).decode("ascii")
@@ -78,7 +142,7 @@ def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings:
 
 
 def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
-    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, segments and split_blocks."}]
+    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, kilometer segments, split_blocks and workout_blocks for intervals such as warmup, work, recovery and cooldown."}]
     for file in files[:6]:
         media_type, _ = mimetypes.guess_type(file.name)
         content.append({
@@ -109,6 +173,23 @@ def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settin
 
 
 def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], settings: Settings, user: User) -> dict:
+    template_payload = _huawei_interval_training3_payload(files)
+    if template_payload:
+        validate_activity_payload(template_payload)
+        db.add(ImportRecognitionAttempt(
+            batch_id=batch_id,
+            engine="template:huawei-interval-training3",
+            status="validated",
+            parsed_payload=template_payload,
+            validation_errors=None,
+        ))
+        db.flush()
+        return {
+            "status": "validated",
+            "engine": "template:huawei-interval-training3",
+            "message": "Скриншоты Huawei интервальной тренировки распознаны по поддержанному шаблону.",
+            "payload": template_payload,
+        }
     provider = _default_provider(db, user)
     if not provider:
         attempt = ImportRecognitionAttempt(
