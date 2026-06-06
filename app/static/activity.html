@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan | Детали тренировки</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="activity-detail">
+    <div class="grid-glow" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero detail-hero">
+        <div>
+          <a class="back-link" href="/">← Все тренировки</a>
+          <p class="eyebrow">Детальный разбор</p>
+          <h1>Runforfan</h1>
+          <p class="hero-copy">Темп, пульс, каденс, сплиты и источники данных по выбранной тренировке.</p>
+          <nav class="top-nav" aria-label="Основная навигация">
+            <a href="/">Тренировки</a>
+            <a href="/analytics">Аналитика</a>
+            <a href="/goals">Цели</a>
+            <a href="/import">Добавить скрины</a>
+          </nav>
+        </div>
+        <div class="status-card" id="data-status" role="status">Загрузка данных...</div>
+      </header>
+
+      <section id="error-panel" class="notice error hidden"></section>
+      <section id="empty-panel" class="notice hidden">Тренировка не найдена. Вернитесь к списку и выберите другую запись.</section>
+
+      <div id="dashboard" class="dashboard hidden">
+        <section class="panel workout-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Тренировка</p>
+              <h2 id="activity-title">--</h2>
+            </div>
+            <span class="pill" id="activity-date">--</span>
+          </div>
+          <div class="summary-strip" id="activity-summary"></div>
+          <p class="scroll-hint">На узких экранах таблица сегментов прокручивается по горизонтали.</p>
+          <div class="table-scroll" aria-label="Прокручиваемая таблица отрезков">
+            <table>
+              <thead>
+                <tr>
+                  <th>Км</th>
+                  <th>Дистанция</th>
+                  <th>Время</th>
+                  <th>Темп</th>
+                  <th>Пульс</th>
+                  <th>Каденс</th>
+                </tr>
+              </thead>
+              <tbody id="segments-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="side-stack">
+          <section class="panel pace-panel">
+            <div class="panel-heading compact">
+              <h2>Пейсинг по километрам</h2>
+              <span class="pill teal">быстрее = ярче</span>
+            </div>
+            <div id="pace-bars" class="pace-bars"></div>
+          </section>
+
+          <section class="panel splits-panel">
+            <div class="panel-heading compact">
+              <h2>Сплит-блоки</h2>
+            </div>
+            <div id="split-blocks" class="split-blocks"></div>
+          </section>
+
+          <section class="panel threshold-panel">
+            <div class="panel-heading compact">
+              <h2>Лактатный порог</h2>
+              <span class="pulse-dot" aria-hidden="true"></span>
+            </div>
+            <div id="threshold-content"></div>
+          </section>
+
+          <section class="panel sources-panel">
+            <div class="panel-heading compact">
+              <h2>Источники данных</h2>
+            </div>
+            <div id="sources-list" class="sources-list"></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

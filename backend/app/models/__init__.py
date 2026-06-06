@@ -1,0 +1,17 @@
+from app.models.entities import (  # noqa: F401
+    Activity,
+    ActivitySegment,
+    ActivityScreenshot,
+    ActivitySplitBlock,
+    AuthSession,
+    ImportBatch,
+    ImportBatchSource,
+    ImportRecognitionAttempt,
+    LactateThresholdMeasurement,
+    LlmProviderSetting,
+    RunningGoal,
+    ScreenshotSource,
+    TrainingPlan,
+    TrainingPlanWorkout,
+    User,
+)

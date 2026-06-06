@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan | Аналитика</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="analytics">
+    <div class="grid-glow" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Статистика</p>
+          <h1>Runforfan</h1>
+          <p class="hero-copy">Сводка прогресса по тренировкам: объем, средний темп, пульс, длинная тренировка и месячные объемы.</p>
+          <nav class="top-nav" aria-label="Основная навигация">
+            <a href="/">Тренировки</a>
+            <a class="active" href="/analytics">Аналитика</a>
+            <a href="/goals">Цели</a>
+            <a href="/import">Добавить скрины</a>
+          </nav>
+        </div>
+        <div class="status-card" id="data-status" role="status">Загрузка данных...</div>
+      </header>
+
+      <section id="error-panel" class="notice error hidden"></section>
+      <section class="metrics analytics-metrics" aria-label="Аналитика тренировок">
+        <article class="metric-card orange"><span>Объем</span><strong id="analytics-distance">--</strong><small>все тренировки</small></article>
+        <article class="metric-card teal"><span>Средний темп</span><strong id="analytics-pace">--</strong><small>по общему времени</small></article>
+        <article class="metric-card rose"><span>Самая длинная</span><strong id="analytics-longest">--</strong><small>тренировка</small></article>
+        <article class="metric-card red"><span>Средний пульс</span><strong id="analytics-hr">--</strong><small>по тренировкам</small></article>
+      </section>
+
+      <section class="dashboard analytics-dashboard">
+        <article class="panel">
+          <div class="panel-heading compact"><h2>Объем по месяцам</h2><span class="pill teal">км</span></div>
+          <div id="monthly-bars" class="monthly-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading compact"><h2>Ключевые показатели</h2></div>
+          <div id="analytics-summary" class="threshold-grid"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

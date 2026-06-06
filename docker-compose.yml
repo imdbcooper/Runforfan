@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: runforfan
+      POSTGRES_USER: runforfan
+      POSTGRES_PASSWORD: runforfan
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runforfan -d runforfan"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - runforfan_net
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      RUNFORFAN_DATABASE_URL: postgresql+psycopg://runforfan:runforfan@db:5432/runforfan
+      RUNFORFAN_APP_ENV: development
+      RUNFORFAN_DEMO_SEED: "true"
+      RUNFORFAN_UPLOAD_DIR: /app/storage/uploads
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/app/storage/uploads:/app/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - runforfan_net
+
+volumes:
+  postgres_data:
+
+networks:
+  runforfan_net:
+    ipam:
+      config:
+        - subnet: 172.24.50.0/24

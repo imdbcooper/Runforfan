@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan | Добавить скрины</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="import">
+    <div class="grid-glow" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Импорт данных</p>
+          <h1>Runforfan</h1>
+          <p class="hero-copy">Загрузите 1-6 скриншотов одной тренировки. Если настроен LLM, сервер попробует распознать данные и создать тренировку. Если LLM недоступен, скрины сохранятся для ручной обработки.</p>
+          <nav class="top-nav" aria-label="Основная навигация">
+            <a href="/">Тренировки</a>
+            <a href="/analytics">Аналитика</a>
+            <a href="/goals">Цели</a>
+            <a class="active" href="/import">Добавить скрины</a>
+          </nav>
+        </div>
+        <div class="status-card" id="data-status" role="status">Готов к загрузке.</div>
+      </header>
+
+      <section id="error-panel" class="notice error hidden"></section>
+
+      <section class="panel upload-panel">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">Скриншоты</p>
+            <h2>Новая загрузка</h2>
+          </div>
+          <span class="pill">JPG / PNG / WebP</span>
+        </div>
+        <form id="upload-form" class="upload-form">
+          <label class="file-drop">
+            <input id="screenshots-input" name="screenshots" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+            <span>Выберите скрины тренировки</span>
+            <strong id="selected-files-label">Файлы не выбраны</strong>
+          </label>
+          <button class="primary-action" type="submit">Загрузить и распознать</button>
+        </form>
+        <div id="upload-result" class="notice hidden"></div>
+      </section>
+
+      <section class="panel import-history-panel">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">История</p>
+            <h2>Последние импорты</h2>
+          </div>
+        </div>
+        <div id="import-batches" class="import-batches"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

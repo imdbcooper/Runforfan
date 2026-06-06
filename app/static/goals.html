@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan | Цели</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="goals">
+    <div class="grid-glow" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Зачем ты бегаешь</p>
+          <h1>Runforfan</h1>
+          <p class="hero-copy">Добавьте цели: марафон, месячный объем, количество тренировок или личную причину. Прогресс считается по сохраненным тренировкам.</p>
+          <nav class="top-nav" aria-label="Основная навигация">
+            <a href="/">Тренировки</a>
+            <a href="/analytics">Аналитика</a>
+            <a class="active" href="/goals">Цели</a>
+            <a href="/import">Добавить скрины</a>
+          </nav>
+        </div>
+        <div class="status-card" id="data-status" role="status">Загрузка данных...</div>
+      </header>
+
+      <section id="error-panel" class="notice error hidden"></section>
+
+      <section class="dashboard goals-dashboard">
+        <article class="panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Новая цель</p>
+              <h2>Добавить цель</h2>
+            </div>
+          </div>
+          <form id="goal-form" class="goal-form">
+            <label>Название<input name="title" required placeholder="Например: подготовиться к марафону" /></label>
+            <label>Тип<select name="goal_type">
+              <option value="race">Забег / марафон</option>
+              <option value="monthly_distance">Километры за период</option>
+              <option value="workout_count">Количество тренировок</option>
+              <option value="longest_run">Длинная тренировка</option>
+              <option value="custom">Личная причина</option>
+            </select></label>
+            <label>Целевое значение<input name="target_value" type="number" step="0.1" placeholder="Например: 42.2" /></label>
+            <label>Единица<input name="unit" placeholder="км, тренировок, минут" /></label>
+            <label>Начало периода<input name="period_start" type="date" /></label>
+            <label>Конец периода<input name="period_end" type="date" /></label>
+            <label class="wide-field">Причина<textarea name="reason" rows="4" placeholder="Почему эта цель важна?"></textarea></label>
+            <button class="primary-action" type="submit">Сохранить цель</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Прогресс</p>
+              <h2>Мои цели</h2>
+            </div>
+          </div>
+          <div id="goals-list" class="goals-list"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

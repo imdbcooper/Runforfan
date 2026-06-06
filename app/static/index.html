@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan | Тренировки</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="activities">
+    <div class="grid-glow" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Архив тренировочной телеметрии</p>
+          <h1>Runforfan</h1>
+          <p class="hero-copy">Выберите тренировку из базы, отфильтруйте список по месяцу и откройте детальный разбор отрезков, пульса и темпа.</p>
+          <nav class="top-nav" aria-label="Основная навигация">
+            <a class="active" href="/">Тренировки</a>
+            <a href="/analytics">Аналитика</a>
+            <a href="/goals">Цели</a>
+            <a href="/import">Добавить скрины</a>
+          </nav>
+        </div>
+        <div class="status-card" id="data-status" role="status">Загрузка данных...</div>
+      </header>
+
+      <section class="metrics" aria-label="Обзор метрик">
+        <article class="metric-card orange">
+          <span>Тренировки</span>
+          <strong id="metric-workouts">--</strong>
+          <small>в базе данных</small>
+        </article>
+        <article class="metric-card teal">
+          <span>Дистанция</span>
+          <strong id="metric-distance">--</strong>
+          <small>общий объем</small>
+        </article>
+        <article class="metric-card rose">
+          <span>Лучший темп LT</span>
+          <strong id="metric-threshold-pace">--</strong>
+          <small>лактатный порог</small>
+        </article>
+        <article class="metric-card red">
+          <span>Пульс LT</span>
+          <strong id="metric-threshold-hr">--</strong>
+          <small>пороговый пульс</small>
+        </article>
+      </section>
+
+      <section id="error-panel" class="notice error hidden"></section>
+      <section id="empty-panel" class="notice hidden">В базе пока нет тренировок.</section>
+
+      <section class="panel filters-panel" aria-label="Фильтры тренировок">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">Фильтр по месяцу</p>
+            <h2>Список тренировок</h2>
+          </div>
+          <span class="pill" id="filtered-count-pill">--</span>
+        </div>
+        <div id="month-chips" class="month-chips" role="list"></div>
+      </section>
+
+      <section id="activity-list" class="training-list" aria-label="Тренировки"></section>
+      <section id="filtered-empty-panel" class="notice hidden">За выбранный месяц тренировок пока нет.</section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

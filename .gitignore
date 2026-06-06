@@ -1,0 +1,85 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local databases and volumes
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+pgdata/
+postgres-data/
+
+# Local uploads and private source media
+uploads/
+backend/app/storage/
+scrins/
+
+# Browser, screenshots and test artifacts
+.playwright-mcp/
+playwright-report/
+test-results/
+runforfan-*.png
+*.screenshot.png
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.local
+*.bak
+*.swp
+*.swo
+tmp/
+temp/
+.cache/
+.DS_Store
+Thumbs.db
+
+# Local editor and compose overrides
+.idea/
+.vscode/
+docker-compose.override.yml
+
+# Agent scratch plans must live in Docs/
+.kilo/plans/
+.plans/
+.opencode/plans/
