@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type PlanWorkout, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "analytics" | "profile" | "planning" | "settings"
@@ -381,21 +381,48 @@ function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
 }
 
 function Planning() {
+  const [plans, setPlans] = useState<Plan[]>([])
   const [result, setResult] = useState<Plan | null>(null)
+
+  async function loadPlans() {
+    await devLogin()
+    const nextPlans = await api.plans()
+    setPlans(nextPlans)
+    setResult((current) => current ? nextPlans.find((plan) => plan.id === current.id) || current : nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null)
+  }
+
   async function generate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    setResult(await api.generatePlan({
+    const plan = await api.generatePlan({
       title: stringOrNull(data.get("title")) || "Марафонская программа",
       goal_type: stringOrNull(data.get("goal_type")) || "marathon",
       race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
       target_date: stringOrNull(data.get("target_date")),
       available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
       current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
-    }))
+    })
+    setResult(plan)
+    await loadPlans()
   }
-  const firstWeek = result?.workouts.filter((workout) => workout.week_index === 1) || []
-  const conservative = result?.explanation?.includes("Safety gates: no active safety gates") === false
+
+  async function activate(id: number) {
+    setResult(await api.activatePlan(id))
+    await loadPlans()
+  }
+
+  async function updateWorkout(workout: PlanWorkout, status: string) {
+    await api.updatePlanWorkout(workout.id, { status })
+    if (result) setResult(await api.plan(result.id))
+    await loadPlans()
+  }
+
+  useEffect(() => { void loadPlans() }, [])
+
+  const weeks = Array.from(new Set(result?.workouts.map((workout) => workout.week_index) || [])).slice(0, 4)
+  const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
+  const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
+  const planMode = !result ? null : !hasSafetyInfo ? "legacy" : conservative ? "safety gated" : "standard"
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
       <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
@@ -408,26 +435,42 @@ function Planning() {
         <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
         <Button type="submit">Generate profile-aware plan</Button>
       </form>
+      <div className="border-t border-zinc-800 p-4">
+        <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-white">Saved plans</p><Badge>{plans.length} total</Badge></div>
+        <div className="grid gap-2">{plans.slice(0, 6).map((plan) => <button key={plan.id} onClick={() => setResult(plan)} className={cn("rounded-md border px-2 py-2 text-left text-xs", result?.id === plan.id ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950 hover:bg-zinc-900")}><span className="font-medium text-white">{plan.title}</span><span className="ml-2 text-zinc-500">#{plan.id}</span><div className="mt-1 flex items-center gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{plan.status}</Badge><span className="text-zinc-500">{plan.workouts.length} workouts</span></div></button>)}</div>
+      </div>
     </Card>
     <Card>
-      <CardHeader><div><CardTitle>Plan output</CardTitle><p className="text-xs text-zinc-500">Safety, zones and first-week prescription.</p></div>{result && <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{conservative ? "safety gated" : "standard"}</Badge>}</CardHeader>
+      <CardHeader><div><CardTitle>Plan output</CardTitle><p className="text-xs text-zinc-500">Safety, zones and first-week prescription.</p></div>{result && <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{planMode}</Badge>}</CardHeader>
       <div className="grid gap-4 p-4 text-sm text-zinc-400">
         {result ? <>
           <p className="leading-6">{result.explanation}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Activate plan</Button> : <Badge>active plan</Badge>}
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round((result.adherence?.completion_rate || 0) * 100)}% adherence</Badge>
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} км</Badge>
+          </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="weeks" value={Math.max(...result.workouts.map((workout) => workout.week_index))} />
             <Stat label="workouts" value={result.workouts.length} />
             <Stat label="days/week" value={result.available_days_per_week} />
           </div>
-          <div className="overflow-x-auto rounded-md border border-zinc-800">
-            <table className="w-full min-w-[720px] text-left text-xs">
-              <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Day</th><th>Workout</th><th>Distance</th><th>Intensity</th><th>Target</th></tr></thead>
-              <tbody>{firstWeek.map((workout) => <tr key={`${workout.week_index}-${workout.day_index}`} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-3 py-2 font-mono text-zinc-500">D{workout.day_index}</td><td className="font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">{workout.workout_type}</div></td><td>{workout.distance_km?.toFixed(1) || "--"} км</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.intensity || "--"}</Badge></td><td className="max-w-md leading-5">{workout.description}</td></tr>)}</tbody>
-            </table>
-          </div>
+          <div className="grid gap-3">{weeks.map((week) => <PlanWeek key={week} week={week} workouts={result.workouts.filter((workout) => workout.week_index === week)} onUpdate={updateWorkout} />)}</div>
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
       </div>
     </Card>
+  </div>
+}
+
+function PlanWeek({ week, workouts, onUpdate }: { week: number; workouts: PlanWorkout[]; onUpdate: (workout: PlanWorkout, status: string) => Promise<void> }) {
+  const plannedDistance = workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
+  return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
+    <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">Week {week}</p><Badge>{plannedDistance.toFixed(1)} км</Badge></div>
+    <div className="grid gap-2 p-3">{workouts.map((workout) => <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
+      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><Badge className={workout.status === "done" ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div>
+      <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
+      <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => onUpdate(workout, "done")}>Done</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></div>
+    </div>)}</div>
   </div>
 }
 

@@ -1,11 +1,11 @@
-from datetime import date
+from datetime import date, timedelta
 from math import ceil
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
-from app.schemas.common import PlanGenerateRequest
+from app.schemas.common import PlanGenerateRequest, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import zones_response
 
@@ -73,6 +73,24 @@ def target_text(zones: dict, pace_key: str | None = None, hr_key: str | None = N
         if hr_range:
             parts.append(f"HR {hr_key}: {hr_range}")
     return "; ".join(parts) if parts else fallback
+
+
+def schedule_offsets(days: int) -> list[int]:
+    schedules = {
+        2: [0, 3],
+        3: [0, 2, 5],
+        4: [0, 2, 4, 6],
+        5: [0, 1, 3, 5, 6],
+        6: [0, 1, 2, 4, 5, 6],
+        7: [0, 1, 2, 3, 4, 5, 6],
+    }
+    return schedules.get(days, schedules[4])
+
+
+def scheduled_workout_date(start_date: date, week_index: int, day_index: int, days: int) -> date:
+    offsets = schedule_offsets(days)
+    offset = offsets[min(day_index - 1, len(offsets) - 1)]
+    return start_date + timedelta(days=(week_index - 1) * 7 + offset)
 
 
 def recent_training_context(db: Session, user: User) -> dict[str, object]:
@@ -162,6 +180,62 @@ def workout_description(workout_type: str, intensity: str, zones: dict, conserva
     return f"Комфортный бег в разговорном темпе. Цель: {target}."
 
 
+def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
+    activity = workout.completed_activity
+    return {
+        "id": workout.id,
+        "plan_id": workout.plan_id,
+        "week_index": workout.week_index,
+        "day_index": workout.day_index,
+        "scheduled_date": workout.scheduled_date,
+        "status": workout.status,
+        "completed_activity_id": workout.completed_activity_id,
+        "actual_distance_km": activity.distance_km if activity else None,
+        "actual_duration_seconds": activity.duration_seconds if activity else None,
+        "workout_type": workout.workout_type,
+        "title": workout.title,
+        "distance_km": workout.distance_km,
+        "duration_seconds": workout.duration_seconds,
+        "intensity": workout.intensity,
+        "description": workout.description,
+    }
+
+
+def adherence_summary(workouts: list[TrainingPlanWorkout]) -> dict[str, object]:
+    total = len(workouts)
+    done = [workout for workout in workouts if workout.status == "done"]
+    missed = [workout for workout in workouts if workout.status == "missed"]
+    skipped = [workout for workout in workouts if workout.status == "skipped"]
+    planned_distance = sum(workout.distance_km or 0 for workout in workouts)
+    completed_distance = sum((workout.completed_activity.distance_km or 0) for workout in done if workout.completed_activity)
+    return {
+        "total_workouts": total,
+        "done_workouts": len(done),
+        "missed_workouts": len(missed),
+        "skipped_workouts": len(skipped),
+        "planned_distance_km": round(planned_distance, 1),
+        "completed_distance_km": round(completed_distance, 1),
+        "completion_rate": round(len(done) / total, 2) if total else 0,
+        "distance_completion_rate": round(completed_distance / planned_distance, 2) if planned_distance else 0,
+    }
+
+
+def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
+    workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
+    return {
+        "id": plan.id,
+        "title": plan.title,
+        "goal_type": plan.goal_type,
+        "race_distance_km": plan.race_distance_km,
+        "target_date": plan.target_date,
+        "available_days_per_week": plan.available_days_per_week,
+        "status": plan.status,
+        "explanation": plan.explanation,
+        "workouts": [workout_to_dict(workout) for workout in workouts],
+        "adherence": adherence_summary(workouts),
+    }
+
+
 def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> TrainingPlan:
     weeks = weeks_until(request.target_date)
     days = request.available_days_per_week
@@ -171,6 +245,7 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
     zones = zones_response(db, user)
     context = recent_training_context(db, user)
     goal_distance = request.race_distance_km or 10.0
+    start_date = date.today()
     current_volume = request.current_weekly_distance_km or context["recent_weekly_distance_km"] or 15.0
     safety = build_safety_context(profile, completeness, context, goal_distance)
     conservative = bool(safety["conservative"])
@@ -221,6 +296,8 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
                 plan_id=plan.id,
                 week_index=week,
                 day_index=day_index,
+                scheduled_date=scheduled_workout_date(start_date, week, day_index, days),
+                status="planned",
                 workout_type=workout_type,
                 title=title,
                 distance_km=round(distance, 1),
@@ -231,3 +308,35 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
     db.commit()
     db.refresh(plan)
     return plan
+
+
+def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
+    active_plans = list(db.scalars(select(TrainingPlan).where(TrainingPlan.user_id == user.id, TrainingPlan.status == "active")))
+    for active_plan in active_plans:
+        if active_plan.id != plan.id:
+            active_plan.status = "archived"
+    plan.status = "active"
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:
+    updates = payload.model_dump(exclude_unset=True)
+    activity_id = updates.get("completed_activity_id")
+    if activity_id is not None:
+        activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
+        if activity is None:
+            raise ValueError("Activity not found")
+        workout.completed_activity_id = activity.id
+        if "status" not in updates:
+            workout.status = "done"
+    if "scheduled_date" in updates:
+        workout.scheduled_date = updates["scheduled_date"]
+        if workout.status == "planned":
+            workout.status = "rescheduled"
+    if "status" in updates and updates["status"] is not None:
+        workout.status = updates["status"]
+    db.commit()
+    db.refresh(workout)
+    return workout

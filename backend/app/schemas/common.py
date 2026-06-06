@@ -252,9 +252,33 @@ class PlanGenerateRequest(BaseModel):
     current_weekly_distance_km: float | None = None
 
 
+class PlanWorkoutUpdate(BaseModel):
+    scheduled_date: date | None = None
+    status: str | None = Field(default=None, pattern="^(planned|done|missed|skipped|rescheduled)$")
+    completed_activity_id: int | None = None
+
+
+class PlanAdherenceOut(BaseModel):
+    total_workouts: int
+    done_workouts: int
+    missed_workouts: int
+    skipped_workouts: int
+    planned_distance_km: float
+    completed_distance_km: float
+    completion_rate: float
+    distance_completion_rate: float
+
+
 class PlanWorkoutOut(BaseModel):
+    id: int
+    plan_id: int
     week_index: int
     day_index: int
+    scheduled_date: date | None = None
+    status: str = "planned"
+    completed_activity_id: int | None = None
+    actual_distance_km: float | None = None
+    actual_duration_seconds: int | None = None
     workout_type: str
     title: str
     distance_km: float | None = None
@@ -275,5 +299,6 @@ class PlanOut(BaseModel):
     status: str
     explanation: str | None = None
     workouts: list[PlanWorkoutOut]
+    adherence: PlanAdherenceOut | None = None
 
     model_config = {"from_attributes": True}

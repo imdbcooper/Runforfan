@@ -324,6 +324,9 @@ class TrainingPlanWorkout(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    scheduled_date: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(64), default="planned")
+    completed_activity_id: Mapped[int | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"), index=True)
     week_index: Mapped[int] = mapped_column(Integer)
     day_index: Mapped[int] = mapped_column(Integer)
     workout_type: Mapped[str] = mapped_column(String(64))
@@ -334,3 +337,4 @@ class TrainingPlanWorkout(Base):
     description: Mapped[str | None] = mapped_column(Text)
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="workouts")
+    completed_activity: Mapped[Activity | None] = relationship()

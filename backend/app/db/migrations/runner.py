@@ -67,6 +67,28 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_training_zones_user_id ON training_zones (user_id)",
         ),
     ),
+    (
+        "20260607_0002_plan_execution_fields",
+        (
+            "ALTER TABLE training_plan_workouts ADD COLUMN IF NOT EXISTS scheduled_date DATE",
+            "ALTER TABLE training_plan_workouts ADD COLUMN IF NOT EXISTS status VARCHAR(64) NOT NULL DEFAULT 'planned'",
+            "ALTER TABLE training_plan_workouts ADD COLUMN IF NOT EXISTS completed_activity_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_workouts_scheduled_date ON training_plan_workouts (scheduled_date)",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_workouts_completed_activity_id ON training_plan_workouts (completed_activity_id)",
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'fk_training_plan_workouts_completed_activity_id'
+                ) THEN
+                    ALTER TABLE training_plan_workouts
+                    ADD CONSTRAINT fk_training_plan_workouts_completed_activity_id
+                    FOREIGN KEY (completed_activity_id) REFERENCES activities(id) ON DELETE SET NULL;
+                END IF;
+            END $$
+            """,
+        ),
+    ),
 )
 
 

@@ -119,14 +119,32 @@ export type Zones = {
 }
 
 export type PlanWorkout = {
+  id: number
+  plan_id: number
   week_index: number
   day_index: number
+  scheduled_date: string | null
+  status: "planned" | "done" | "missed" | "skipped" | "rescheduled" | string
+  completed_activity_id: number | null
+  actual_distance_km: number | null
+  actual_duration_seconds: number | null
   workout_type: string
   title: string
   distance_km: number | null
   duration_seconds: number | null
   intensity: string | null
   description: string | null
+}
+
+export type PlanAdherence = {
+  total_workouts: number
+  done_workouts: number
+  missed_workouts: number
+  skipped_workouts: number
+  planned_distance_km: number
+  completed_distance_km: number
+  completion_rate: number
+  distance_completion_rate: number
 }
 
 export type Plan = {
@@ -139,6 +157,7 @@ export type Plan = {
   status: string
   explanation: string | null
   workouts: PlanWorkout[]
+  adherence: PlanAdherence | null
 }
 
 let token = localStorage.getItem("runforfan_token")
@@ -176,6 +195,10 @@ export const api = {
   recalculateZones: () => request<Zones>("/zones/recalculate", { method: "POST", body: "{}" }),
   replaceHrZones: (payload: ZoneWrite[]) => request<Zones>("/zones/hr", { method: "PUT", body: JSON.stringify(payload) }),
   replacePaceZones: (payload: ZoneWrite[]) => request<Zones>("/zones/pace", { method: "PUT", body: JSON.stringify(payload) }),
+  plans: () => request<Plan[]>("/planning/plans"),
+  plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
+  activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
+  updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
