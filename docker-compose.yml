@@ -23,6 +23,7 @@ services:
     environment:
       RUNFORFAN_DATABASE_URL: postgresql+psycopg://runforfan:runforfan@db:5432/runforfan
       RUNFORFAN_APP_ENV: development
+      RUNFORFAN_AUTO_CREATE_SCHEMA: "true"
       RUNFORFAN_DEMO_SEED: "true"
       RUNFORFAN_UPLOAD_DIR: /app/storage/uploads
     ports:

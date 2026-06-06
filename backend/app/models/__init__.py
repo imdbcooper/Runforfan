@@ -4,6 +4,8 @@ from app.models.entities import (  # noqa: F401
     ActivityScreenshot,
     ActivitySplitBlock,
     ActivityWorkoutBlock,
+    AthleteMeasurement,
+    AthleteProfile,
     AuthSession,
     ImportBatch,
     ImportBatchSource,
@@ -14,5 +16,6 @@ from app.models.entities import (  # noqa: F401
     ScreenshotSource,
     TrainingPlan,
     TrainingPlanWorkout,
+    TrainingZone,
     User,
 )

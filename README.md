@@ -40,7 +40,7 @@ GET /health
 - `backend/app/main.py` — FastAPI-приложение и подключение роутеров.
 - `backend/app/models/entities.py` — SQLAlchemy-модели.
 - `backend/app/api/routes/` — API-роутеры.
-- `backend/app/services/` — бизнес-логика: auth, analytics, recognition, planning.
+- `backend/app/services/` — бизнес-логика: auth, analytics, recognition, planning, calculations, profile/zones.
 - `backend/app/seed/demo.py` — перенос текущих тренировок в demo-user.
 - `backend/app/storage/uploads/` — uploads volume для скриншотов.
 - `frontend/` — новый React/Vite frontend на Tailwind и shadcn-style компонентах.
@@ -58,6 +58,16 @@ GET /health
 - `POST /api/goals` — создание цели.
 - `DELETE /api/goals/{id}` — удаление цели.
 - `GET /api/analytics/summary` — аналитика пользователя.
+- `GET /api/profile` — профиль спортсмена текущего пользователя.
+- `PUT /api/profile` — обновление физиологических параметров, порогов и safety-настроек.
+- `GET /api/profile/completeness` — оценка полноты данных для расчетов.
+- `POST /api/profile/safety-check` — safety warnings для планировщика.
+- `GET /api/profile/measurements` — история измерений спортсмена.
+- `POST /api/profile/measurements` — добавление измерения и обновление профиля.
+- `GET /api/zones` — расчетные и сохраненные зоны по пульсу/темпу.
+- `POST /api/zones/recalculate` — пересчитать и сохранить расчетные зоны.
+- `PUT /api/zones/hr` — заменить ручные HR-зоны.
+- `PUT /api/zones/pace` — заменить ручные pace-зоны.
 - `POST /api/planning/generate` — генерация тренировочной программы.
 - `GET /api/planning/plans` — список программ.
 
@@ -87,8 +97,25 @@ API настроек AI:
 - Если настроен LLM с vision-моделью, backend отправляет скрины на распознавание.
 - После LLM выполняются sanity-checks: дистанция, длительность, темп, пульс, сумма сегментов.
 - Если данные проходят проверку, создается тренировка.
-- Если LLM не настроен, backend не принимает неизвестные скрины как тренировку. Он возвращает статус `rejected_no_llm_template`, потому что шаблонное распознавание для fallback еще не реализовано.
+- Если LLM не настроен, backend принимает только поддержанные template fallback-сценарии. Сейчас поддержан Huawei interval template для `scrins/training3`; неизвестные скрины возвращают `rejected_no_llm_template`.
 - Это сделано специально, чтобы не загрязнять аналитику ошибочными тренировками.
+
+Профиль, расчеты и зоны:
+
+- Профиль спортсмена хранит дату рождения, пол, рост, вес, timezone/locale, пульс покоя, HRmax, lactate threshold HR/pace, conservative mode и injury notes.
+- История измерений хранится отдельно в `athlete_measurements` и может обновлять актуальные поля профиля.
+- `GET /api/profile/measurements` отдает bounded timeline с `limit`/`offset` и включает legacy `lactate_threshold_measurements`, чтобы старые импортированные пороги были видны рядом с новыми ручными измерениями.
+- Расчеты вынесены в `backend/app/services/calculations.py` и возвращают `value`, `unit`, `method`, `confidence`, `source_reference`.
+- HR-зоны считаются через HRR/Karvonen, если есть HRmax и пульс покоя; иначе через HRmax/Tanaka-derived estimate при наличии даты рождения.
+- Pace-зоны считаются от lactate threshold pace.
+- Ручные зоны сохраняются отдельно и имеют приоритет над расчетными зонами соответствующего типа.
+- При изменении полей профиля, влияющих на зоны, сохраненные расчетные зоны инвалидируются и пересчитываются из актуальных входов.
+
+Миграции backend:
+
+- Для локальной разработки по умолчанию включен `RUNFORFAN_AUTO_CREATE_SCHEMA=true`, поэтому пустая база может быть создана через SQLAlchemy metadata.
+- Новые таблицы profile/measurements/zones также создаются явной версионированной миграцией `20260607_0001_profile_measurements_zones` через `schema_migrations`.
+- Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
 
@@ -141,10 +168,13 @@ npm run build
 - Панель.
 - Тренировки.
 - Аналитика.
+- Profile & zones.
 - Планы.
 - AI настройки.
 
 Страница `AI настройки` позволяет пользователю добавить OpenAI-compatible или Anthropic provider, выбрать модель, указать base URL и сохранить API key.
+
+Страница `Profile & zones` позволяет редактировать физиологические параметры, видеть полноту профиля, safety warnings, расчетные HR/pace зоны с method/source/confidence metadata и добавлять измерения.
 
 UI-стиль frontend:
 
@@ -520,6 +550,7 @@ API сервера:
 ## Возможные следующие шаги
 
 - Добавить больше тренировок и измерений порога.
-- Добавить таблицу тренировочных зон по пульсу и темпу.
+- Добавить полноценный редактор ручных тренировочных зон в frontend.
+- Добавить миграции схемы вместо `Base.metadata.create_all`.
 - Добавить расчет тренда формы, прогресса и отклонений от плана.
 - Добавить ручное подтверждение и редактирование LLM-распознавания перед созданием тренировки.

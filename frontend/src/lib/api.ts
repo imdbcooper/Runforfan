@@ -32,6 +32,92 @@ export type LlmProvider = {
   created_at: string
 }
 
+export type AthleteProfile = {
+  id: number
+  user_id: number
+  date_of_birth: string | null
+  sex: "male" | "female" | "other" | "unspecified"
+  height_cm: number | null
+  weight_kg: number | null
+  timezone: string | null
+  locale: string | null
+  resting_heart_rate_bpm: number | null
+  max_heart_rate_bpm: number | null
+  max_hr_source: string | null
+  lactate_threshold_hr_bpm: number | null
+  lactate_threshold_pace_seconds_per_km: number | null
+  conservative_mode: boolean
+  injury_notes: string | null
+  estimated_max_heart_rate: {
+    value: number | null
+    unit: string
+    method: string
+    confidence: string
+    source_reference: string
+  } | null
+  created_at: string
+  updated_at: string
+}
+
+export type AthleteMeasurement = {
+  id: number
+  user_id: number
+  source_model: "athlete_measurement" | "lactate_threshold_measurement" | string
+  measurement_type: "weight" | "resting_hr" | "max_hr" | "lactate_threshold" | "vo2max" | "note"
+  measured_at: string | null
+  value_numeric: number | null
+  value_json: Record<string, unknown> | null
+  source: "manual" | "screenshot" | "device" | "calculated"
+  confidence: number | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProfileCompleteness = {
+  score: number
+  missing: string[]
+  can_calculate_hr_zones: boolean
+  can_calculate_hrr_zones: boolean
+  can_calculate_pace_zones: boolean
+  confidence: string
+}
+
+export type SafetyCheck = {
+  conservative_mode: boolean
+  warnings: string[]
+  message: string
+}
+
+export type Zone = {
+  id: number | null
+  zone_type: string
+  method: string
+  zone_key: string
+  label: string | null
+  lower_value: number | null
+  upper_value: number | null
+  unit: string
+  confidence: string
+  source_reference: string | null
+  is_active: boolean
+}
+
+export type ZoneWrite = {
+  zone_key: string
+  lower_value: number | null
+  upper_value: number | null
+  unit: string
+  label?: string | null
+}
+
+export type Zones = {
+  hr: Zone[]
+  pace: Zone[]
+  rpe: Zone[]
+  metadata: Record<string, unknown>
+}
+
 let token = localStorage.getItem("runforfan_token")
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -57,6 +143,16 @@ export async function devLogin() {
 export const api = {
   activities: () => request<Activity[]>("/activities"),
   analytics: () => request<Record<string, any>>("/analytics/summary"),
+  profile: () => request<AthleteProfile>("/profile"),
+  updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),
+  profileCompleteness: () => request<ProfileCompleteness>("/profile/completeness"),
+  safetyCheck: () => request<SafetyCheck>("/profile/safety-check", { method: "POST", body: "{}" }),
+  measurements: (limit = 50, offset = 0) => request<AthleteMeasurement[]>(`/profile/measurements?limit=${limit}&offset=${offset}`),
+  createMeasurement: (payload: Record<string, unknown>) => request<AthleteMeasurement>("/profile/measurements", { method: "POST", body: JSON.stringify(payload) }),
+  zones: () => request<Zones>("/zones"),
+  recalculateZones: () => request<Zones>("/zones/recalculate", { method: "POST", body: "{}" }),
+  replaceHrZones: (payload: ZoneWrite[]) => request<Zones>("/zones/hr", { method: "PUT", body: JSON.stringify(payload) }),
+  replacePaceZones: (payload: ZoneWrite[]) => request<Zones>("/zones/pace", { method: "PUT", body: JSON.stringify(payload) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),

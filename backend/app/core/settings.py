@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://runforfan:runforfan@localhost:5432/runforfan"
+    auto_create_schema: bool = True
     demo_seed: bool = True
     upload_dir: Path = Path("backend/app/storage/uploads")
     secret_key: str = "dev-secret-change-me"

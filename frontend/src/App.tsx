@@ -1,20 +1,21 @@
-import { Activity, Bot, ChartSpline, Goal, Menu, Moon, Settings, Shield, X, Zap } from "lucide-react"
-import { FormEvent, useEffect, useState } from "react"
+import { Activity, Bot, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, X, Zap } from "lucide-react"
+import { type FormEvent, type ReactNode, useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, devLogin, type LlmProvider } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "analytics" | "planning" | "settings"
+type Page = "overview" | "activities" | "analytics" | "profile" | "planning" | "settings"
 
 const nav = [
   ["overview", "Dashboard", Zap],
   ["activities", "Activities", Activity],
   ["analytics", "Analytics", ChartSpline],
+  ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
   ["settings", "LLM providers", Settings],
 ] as const
@@ -36,6 +37,39 @@ function formatDuration(seconds?: number | null) {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`
 }
 
+function numberOrNull(value: FormDataEntryValue | null) {
+  if (value === null || value === "") return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function stringOrNull(value: FormDataEntryValue | null) {
+  return value === null || value === "" ? null : String(value)
+}
+
+function formatZoneValue(zone: Zone, value: number | null) {
+  if (value === null) return "--"
+  if (zone.unit === "seconds_per_km") return `${formatPace(Math.round(value))}/км`
+  if (zone.unit === "bpm") return `${Math.round(value)} bpm`
+  return `${value}`
+}
+
+function formatZoneRange(zone: Zone) {
+  return `${formatZoneValue(zone, zone.lower_value)} - ${formatZoneValue(zone, zone.upper_value)}`
+}
+
+function missingLabel(field: string) {
+  const labels: Record<string, string> = {
+    date_of_birth: "дата рождения",
+    resting_heart_rate_bpm: "пульс покоя",
+    max_heart_rate_bpm_or_birthdate: "HRmax или дата рождения",
+    lactate_threshold_pace_seconds_per_km: "пороговый темп",
+    lactate_threshold_hr_bpm: "пороговый пульс",
+    weight_kg: "вес",
+  }
+  return labels[field] || field
+}
+
 function workoutBlockSummary(activity: ActivityType) {
   const workBlocks = activity.workout_blocks?.filter((block) => block.block_type === "work") || []
   if (!workBlocks.length) return null
@@ -50,12 +84,21 @@ function App() {
   const [activities, setActivities] = useState<ActivityType[]>([])
   const [analytics, setAnalytics] = useState<Record<string, any>>({})
   const [providers, setProviders] = useState<LlmProvider[]>([])
+  const [profile, setProfile] = useState<AthleteProfile | null>(null)
+  const [completeness, setCompleteness] = useState<ProfileCompleteness | null>(null)
+  const [safety, setSafety] = useState<SafetyCheck | null>(null)
+  const [zones, setZones] = useState<Zones | null>(null)
+  const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
   const [status, setStatus] = useState("LOADING")
 
-  async function refresh() {
+  async function refreshGlobal() {
     try {
       await devLogin()
-      const [nextActivities, nextAnalytics, nextProviders] = await Promise.all([api.activities(), api.analytics(), api.providers()])
+      const [nextActivities, nextAnalytics, nextProviders] = await Promise.all([
+        api.activities(),
+        api.analytics(),
+        api.providers(),
+      ])
       setActivities(nextActivities)
       setAnalytics(nextAnalytics)
       setProviders(nextProviders)
@@ -66,7 +109,32 @@ function App() {
     }
   }
 
-  useEffect(() => { void refresh() }, [])
+  async function refreshProfileData() {
+    try {
+      await devLogin()
+      const nextProfile = await api.profile()
+      const [nextCompleteness, nextSafety, nextZones, nextMeasurements] = await Promise.all([
+        api.profileCompleteness(),
+        api.safetyCheck(),
+        api.zones(),
+        api.measurements(50, 0),
+      ])
+      setProfile(nextProfile)
+      setCompleteness(nextCompleteness)
+      setSafety(nextSafety)
+      setZones(nextZones)
+      setMeasurements(nextMeasurements)
+      setStatus("DEMO USER")
+    } catch (error) {
+      setStatus("API ERROR")
+      console.error(error)
+    }
+  }
+
+  useEffect(() => { void refreshGlobal() }, [])
+  useEffect(() => {
+    if (page === "profile") void refreshProfileData()
+  }, [page])
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -86,8 +154,9 @@ function App() {
             {page === "overview" && <Overview activities={activities} analytics={analytics} providers={providers} />}
             {page === "activities" && <Activities activities={activities} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
+            {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
-            {page === "settings" && <SettingsPage providers={providers} onChanged={refresh} />}
+            {page === "settings" && <SettingsPage providers={providers} onChanged={refreshGlobal} />}
           </main>
         </div>
       </div>
@@ -172,6 +241,143 @@ function Analytics({ analytics }: { analytics: Record<string, any> }) {
   const months = analytics.months || []
   const max = Math.max(1, ...months.map((month: any) => month.distance_km))
   return <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{analytics.total_distance_km || 0} km total</Badge></CardHeader><div className="space-y-3 p-4">{months.map((month: any) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / max * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} км</strong></div>)}</div></Card>
+}
+
+function ProfileZones({ profile, completeness, safety, zones, measurements, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onChanged: () => Promise<void> }) {
+  if (!profile) return <Card className="p-4 text-sm text-zinc-400">Loading profile...</Card>
+
+  async function submitProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const maxHr = numberOrNull(data.get("max_heart_rate_bpm"))
+    await api.updateProfile({
+      date_of_birth: stringOrNull(data.get("date_of_birth")),
+      sex: stringOrNull(data.get("sex")) || "unspecified",
+      height_cm: numberOrNull(data.get("height_cm")),
+      weight_kg: numberOrNull(data.get("weight_kg")),
+      timezone: stringOrNull(data.get("timezone")),
+      locale: stringOrNull(data.get("locale")),
+      resting_heart_rate_bpm: numberOrNull(data.get("resting_heart_rate_bpm")),
+      max_heart_rate_bpm: maxHr,
+      max_hr_source: maxHr ? stringOrNull(data.get("max_hr_source")) : null,
+      lactate_threshold_hr_bpm: numberOrNull(data.get("lactate_threshold_hr_bpm")),
+      lactate_threshold_pace_seconds_per_km: numberOrNull(data.get("lactate_threshold_pace_seconds_per_km")),
+      conservative_mode: data.get("conservative_mode") === "on",
+      injury_notes: stringOrNull(data.get("injury_notes")),
+    })
+    await onChanged()
+  }
+
+  async function submitMeasurement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const thresholdPace = numberOrNull(data.get("threshold_pace_seconds_per_km"))
+    await api.createMeasurement({
+      measurement_type: String(data.get("measurement_type") || "weight"),
+      measured_at: stringOrNull(data.get("measured_at")),
+      value_numeric: numberOrNull(data.get("value_numeric")),
+      value_json: thresholdPace ? { threshold_pace_seconds_per_km: thresholdPace } : null,
+      source: String(data.get("source") || "manual"),
+      confidence: 1,
+      notes: stringOrNull(data.get("notes")),
+    })
+    form.reset()
+    await onChanged()
+  }
+
+  async function recalculateZones() {
+    await api.recalculateZones()
+    await onChanged()
+  }
+
+  const completenessScore = Math.round((completeness?.score || 0) * 100)
+
+  return <div className="grid gap-4">
+    <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
+      <Card>
+        <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge>{completeness?.confidence || "low"} confidence</Badge></CardHeader>
+        <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-3 p-4 text-xs md:grid-cols-2 xl:grid-cols-3">
+          <Field label="Дата рождения"><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
+          <Field label="Пол"><Select name="sex" defaultValue={profile.sex}><option value="unspecified">Не указан</option><option value="male">Мужской</option><option value="female">Женский</option><option value="other">Другой</option></Select></Field>
+          <Field label="Вес, кг"><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder="например 72.5" /></Field>
+          <Field label="Рост, см"><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
+          <Field label="Пульс покоя"><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field>
+          <Field label="HRmax"><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field>
+          <Field label="Источник HRmax"><Select name="max_hr_source" defaultValue={profile.max_hr_source || "manual"}><option value="manual">Manual</option><option value="measured">Measured</option><option value="tanaka_estimated">Tanaka estimated</option></Select></Field>
+          <Field label="Пороговый пульс"><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field>
+          <Field label="Пороговый темп, сек/км"><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field>
+          <Field label="Timezone"><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
+          <Field label="Locale"><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
+          <Field label="Ограничения"><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder="травмы, ограничения" /></Field>
+          <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> conservative mode</label>
+          <div className="md:col-span-2 xl:col-span-3"><Button type="submit">Save profile</Button></div>
+        </form>
+      </Card>
+
+      <div className="grid gap-4">
+        <Card className="p-4">
+          <div className="flex items-center justify-between"><p className="text-sm font-semibold text-white">Completeness</p><Badge>{completenessScore}%</Badge></div>
+          <div className="mt-3 h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${completenessScore}%` }} /></div>
+          <div className="mt-3 grid gap-1 text-xs text-zinc-400">
+            <span>HR zones: {completeness?.can_calculate_hr_zones ? "ready" : "missing data"}</span>
+            <span>HRR zones: {completeness?.can_calculate_hrr_zones ? "ready" : "needs resting HR"}</span>
+            <span>Pace zones: {completeness?.can_calculate_pace_zones ? "ready" : "needs threshold pace"}</span>
+          </div>
+          {completeness?.missing.length ? <div className="mt-3 flex flex-wrap gap-1">{completeness.missing.map((field) => <Badge key={field} className="border-zinc-700 bg-zinc-900 text-zinc-300">{missingLabel(field)}</Badge>)}</div> : null}
+        </Card>
+        <Card className="p-4">
+          <p className="text-sm font-semibold text-white">Safety</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">{safety?.message}</p>
+          {safety?.warnings.length ? <div className="mt-3 grid gap-2">{safety.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : <p className="mt-3 text-xs text-zinc-500">Нет активных предупреждений.</p>}
+        </Card>
+      </div>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <Card>
+        <CardHeader><div><CardTitle>Training zones</CardTitle><p className="text-xs text-zinc-500">Метод, источник и confidence показываются для каждой зоны.</p></div><Button size="sm" onClick={recalculateZones}>Recalculate</Button></CardHeader>
+        <div className="grid gap-4 p-4">
+          <ZoneTable title="Heart rate" zones={zones?.hr || []} />
+          <ZoneTable title="Pace" zones={zones?.pace || []} />
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader><div><CardTitle>Measurements</CardTitle><p className="text-xs text-zinc-500">История ручных и device-derived измерений.</p></div><Badge>{measurements.length} rows</Badge></CardHeader>
+        <form onSubmit={submitMeasurement} className="grid gap-3 border-b border-zinc-800 p-4 text-xs md:grid-cols-2">
+          <Field label="Тип"><Select name="measurement_type"><option value="weight">Вес</option><option value="resting_hr">Пульс покоя</option><option value="max_hr">HRmax</option><option value="lactate_threshold">Lactate threshold</option><option value="note">Note</option></Select></Field>
+          <Field label="Значение"><Input name="value_numeric" type="number" step="0.1" placeholder="число" /></Field>
+          <Field label="Пороговый темп, сек/км"><Input name="threshold_pace_seconds_per_km" type="number" min="120" max="1200" placeholder="для LT" /></Field>
+          <Field label="Дата"><Input name="measured_at" type="datetime-local" /></Field>
+          <Field label="Источник"><Select name="source"><option value="manual">Manual</option><option value="device">Device</option><option value="screenshot">Screenshot</option></Select></Field>
+          <Field label="Заметка"><Input name="notes" placeholder="опционально" /></Field>
+          <div className="md:col-span-2"><Button type="submit" size="sm">Add measurement</Button></div>
+        </form>
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full min-w-[540px] text-left text-xs">
+            <thead className="sticky top-0 border-b border-zinc-800 bg-zinc-950 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Type</th><th>Value</th><th>Source</th><th>Date</th></tr></thead>
+            <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurement.value_numeric ?? "--"}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? new Date(measurement.measured_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+          </table>
+          {!measurements.length && <p className="p-4 text-xs text-zinc-500">Измерений пока нет.</p>}
+        </div>
+      </Card>
+    </div>
+  </div>
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="grid gap-1"><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{label}</span>{children}</label>
+}
+
+function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
+  return <div className="rounded-md border border-zinc-800">
+    <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">{title}</p><Badge>{zones.length} zones</Badge></div>
+    {zones.length ? <table className="w-full text-left text-xs">
+      <thead className="text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Zone</th><th>Range</th><th>Method</th><th>Confidence</th></tr></thead>
+      <tbody>{zones.map((zone) => <tr key={`${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="border-t border-zinc-900 align-top"><td className="px-3 py-2 font-medium text-white">{zone.label || zone.zone_key}<div className="font-mono text-[10px] text-zinc-600">{zone.zone_key}</div></td><td>{formatZoneRange(zone)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.method}</Badge><div className="mt-1 max-w-[16rem] text-[10px] text-zinc-600">{zone.source_reference}</div></td><td>{zone.confidence}</td></tr>)}</tbody>
+    </table> : <p className="p-3 text-xs text-zinc-500">Нет данных для расчета.</p>}
+  </div>
 }
 
 function Planning() {

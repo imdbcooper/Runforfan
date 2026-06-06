@@ -28,6 +28,9 @@ class User(Base, TimestampMixin):
     activities: Mapped[list["Activity"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     goals: Mapped[list["RunningGoal"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     llm_providers: Mapped[list["LlmProviderSetting"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    athlete_profile: Mapped["AthleteProfile | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
+    measurements: Mapped[list["AthleteMeasurement"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    training_zones: Mapped[list["TrainingZone"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -40,6 +43,65 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship()
+
+
+class AthleteProfile(Base, TimestampMixin):
+    __tablename__ = "athlete_profiles"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_athlete_profile_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
+    sex: Mapped[str] = mapped_column(String(32), default="unspecified")
+    height_cm: Mapped[float | None] = mapped_column(Float)
+    weight_kg: Mapped[float | None] = mapped_column(Float)
+    timezone: Mapped[str | None] = mapped_column(String(100), default="Europe/Moscow")
+    locale: Mapped[str | None] = mapped_column(String(32), default="ru-RU")
+    resting_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer)
+    max_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer)
+    max_hr_source: Mapped[str | None] = mapped_column(String(64))
+    lactate_threshold_hr_bpm: Mapped[int | None] = mapped_column(Integer)
+    lactate_threshold_pace_seconds_per_km: Mapped[int | None] = mapped_column(Integer)
+    conservative_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    injury_notes: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="athlete_profile")
+
+
+class AthleteMeasurement(Base, TimestampMixin):
+    __tablename__ = "athlete_measurements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    measurement_type: Mapped[str] = mapped_column(String(64))
+    measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    value_numeric: Mapped[float | None] = mapped_column(Float)
+    value_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    source: Mapped[str] = mapped_column(String(64), default="manual")
+    confidence: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="measurements")
+
+
+class TrainingZone(Base, TimestampMixin):
+    __tablename__ = "training_zones"
+    __table_args__ = (UniqueConstraint("user_id", "zone_type", "method", "zone_key", name="uq_user_zone_method_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    zone_type: Mapped[str] = mapped_column(String(32))
+    method: Mapped[str] = mapped_column(String(64))
+    zone_key: Mapped[str] = mapped_column(String(64))
+    label: Mapped[str | None] = mapped_column(String(255))
+    lower_value: Mapped[float | None] = mapped_column(Float)
+    upper_value: Mapped[float | None] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(64))
+    confidence: Mapped[str] = mapped_column(String(32), default="low")
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped[User] = relationship(back_populates="training_zones")
 
 
 class ScreenshotSource(Base, TimestampMixin):

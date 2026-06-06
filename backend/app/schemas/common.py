@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UserOut(BaseModel):
@@ -101,6 +101,123 @@ class GoalOut(GoalCreate):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AthleteProfileUpdate(BaseModel):
+    date_of_birth: date | None = None
+    sex: str | None = Field(default=None, pattern="^(male|female|other|unspecified)$")
+    height_cm: float | None = Field(default=None, ge=80, le=260)
+    weight_kg: float | None = Field(default=None, ge=25, le=250)
+    timezone: str | None = None
+    locale: str | None = None
+    resting_heart_rate_bpm: int | None = Field(default=None, ge=25, le=120)
+    max_heart_rate_bpm: int | None = Field(default=None, ge=80, le=240)
+    max_hr_source: str | None = Field(default=None, pattern="^(measured|manual|tanaka_estimated)$")
+    lactate_threshold_hr_bpm: int | None = Field(default=None, ge=60, le=230)
+    lactate_threshold_pace_seconds_per_km: int | None = Field(default=None, ge=120, le=1200)
+    conservative_mode: bool | None = None
+    injury_notes: str | None = None
+
+
+class CalculationOut(BaseModel):
+    value: float | int | None = None
+    unit: str
+    method: str
+    confidence: str
+    source_reference: str
+
+
+class AthleteProfileOut(AthleteProfileUpdate):
+    id: int
+    user_id: int
+    sex: str
+    timezone: str | None = None
+    locale: str | None = None
+    conservative_mode: bool
+    estimated_max_heart_rate: CalculationOut | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProfileCompletenessOut(BaseModel):
+    score: float
+    missing: list[str]
+    can_calculate_hr_zones: bool
+    can_calculate_hrr_zones: bool
+    can_calculate_pace_zones: bool
+    confidence: str
+
+
+class SafetyCheckOut(BaseModel):
+    conservative_mode: bool
+    warnings: list[str]
+    message: str
+
+
+class AthleteMeasurementCreate(BaseModel):
+    measurement_type: str = Field(pattern="^(weight|resting_hr|max_hr|lactate_threshold|vo2max|note)$")
+    measured_at: datetime | None = None
+    value_numeric: float | None = None
+    value_json: dict | None = None
+    source: str = Field(default="manual", pattern="^(manual|screenshot|device|calculated)$")
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    notes: str | None = None
+
+
+class AthleteMeasurementTimelineOut(BaseModel):
+    id: int
+    user_id: int
+    source_model: str
+    measurement_type: str
+    measured_at: datetime | None = None
+    value_numeric: float | None = None
+    value_json: dict | None = None
+    source: str
+    confidence: float | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ZoneOut(BaseModel):
+    id: int | None = None
+    zone_type: str
+    method: str
+    zone_key: str
+    label: str | None = None
+    lower_value: float | None = None
+    upper_value: float | None = None
+    unit: str
+    confidence: str
+    source_reference: str | None = None
+    is_active: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class ZoneWrite(BaseModel):
+    zone_key: str = Field(min_length=1, max_length=64)
+    lower_value: float | None = None
+    upper_value: float | None = None
+    unit: str = Field(min_length=1, max_length=64)
+    label: str | None = None
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.lower_value is None and self.upper_value is None:
+            raise ValueError("zone must define lower_value or upper_value")
+        if self.lower_value is not None and self.upper_value is not None and self.lower_value > self.upper_value:
+            raise ValueError("lower_value must be less than or equal to upper_value")
+        return self
+
+
+class ZonesOut(BaseModel):
+    hr: list[ZoneOut]
+    pace: list[ZoneOut]
+    rpe: list[ZoneOut]
+    metadata: dict
 
 
 class LlmProviderCreate(BaseModel):

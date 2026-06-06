@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import activities, analytics, auth, goals, imports, planning, settings as settings_routes
+from app.api.routes import activities, analytics, auth, goals, imports, planning, profile, settings as settings_routes, zones
 from app.core.settings import get_settings
 from app.db.base import Base
+from app.db.migrations.runner import run_migrations
 from app.db.session import SessionLocal, engine
 from app.models import *  # noqa: F401,F403
 from app.seed.demo import seed_demo_data
@@ -24,7 +25,9 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    Base.metadata.create_all(bind=engine)
+    if settings.auto_create_schema:
+        Base.metadata.create_all(bind=engine)
+    run_migrations(engine)
     if settings.demo_seed:
         with SessionLocal() as db:
             seed_demo_data(db)
@@ -42,3 +45,5 @@ app.include_router(goals.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(planning.router, prefix="/api")
 app.include_router(settings_routes.router, prefix="/api")
+app.include_router(profile.router, prefix="/api")
+app.include_router(zones.router, prefix="/api")

@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, LactateThresholdMeasurement, ScreenshotSource, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, LactateThresholdMeasurement, ScreenshotSource, User
 from app.services.auth import get_or_create_demo_user
 
 
@@ -78,8 +78,24 @@ def seed_interval_training(db: Session, user: User) -> None:
         db.add(ActivityWorkoutBlock(activity_id=activity.id, block_index=idx, block_type=block_type, title=title, duration_seconds=duration, distance_km=distance, pace_seconds_per_km=pace, average_heart_rate_bpm=hr))
 
 
+def seed_athlete_profile(db: Session, user: User) -> None:
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    if profile:
+        return
+    db.add(AthleteProfile(
+        user_id=user.id,
+        sex="unspecified",
+        timezone="Europe/Moscow",
+        locale="ru-RU",
+        lactate_threshold_hr_bpm=163,
+        lactate_threshold_pace_seconds_per_km=324,
+        conservative_mode=False,
+    ))
+
+
 def seed_demo_data(db: Session) -> None:
     user = get_or_create_demo_user(db)
+    seed_athlete_profile(db, user)
     exists = db.scalar(select(Activity).where(Activity.user_id == user.id))
     if exists:
         seed_interval_training(db, user)
