@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "analytics" | "profile" | "planning" | "settings"
@@ -381,9 +381,54 @@ function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
 }
 
 function Planning() {
-  const [result, setResult] = useState<Record<string, any> | null>(null)
-  async function generate() { setResult(await api.generatePlan({ title: "Марафонская программа", goal_type: "marathon", race_distance_km: 42.2, available_days_per_week: 4, current_weekly_distance_km: 15.5 })) }
-  return <Card><CardHeader><CardTitle>Program planner</CardTitle><Button onClick={generate}>Generate</Button></CardHeader><div className="p-4 text-sm text-zinc-400">{result ? <><p>{result.explanation}</p><p className="mt-3 font-mono text-orange-300">{result.workouts?.length} planned workouts</p></> : "Hybrid planner: rules first, LLM explanations later."}</div></Card>
+  const [result, setResult] = useState<Plan | null>(null)
+  async function generate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    setResult(await api.generatePlan({
+      title: stringOrNull(data.get("title")) || "Марафонская программа",
+      goal_type: stringOrNull(data.get("goal_type")) || "marathon",
+      race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
+      target_date: stringOrNull(data.get("target_date")),
+      available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
+      current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
+    }))
+  }
+  const firstWeek = result?.workouts.filter((workout) => workout.week_index === 1) || []
+  const conservative = result?.explanation?.includes("Safety gates: no active safety gates") === false
+  return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
+    <Card>
+      <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
+      <form onSubmit={generate} className="grid gap-3 p-4 text-xs">
+        <Field label="Название"><Input name="title" defaultValue="Марафонская программа" /></Field>
+        <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option></Select></Field>
+        <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
+        <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
+        <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
+        <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
+        <Button type="submit">Generate profile-aware plan</Button>
+      </form>
+    </Card>
+    <Card>
+      <CardHeader><div><CardTitle>Plan output</CardTitle><p className="text-xs text-zinc-500">Safety, zones and first-week prescription.</p></div>{result && <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{conservative ? "safety gated" : "standard"}</Badge>}</CardHeader>
+      <div className="grid gap-4 p-4 text-sm text-zinc-400">
+        {result ? <>
+          <p className="leading-6">{result.explanation}</p>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <Stat label="weeks" value={Math.max(...result.workouts.map((workout) => workout.week_index))} />
+            <Stat label="workouts" value={result.workouts.length} />
+            <Stat label="days/week" value={result.available_days_per_week} />
+          </div>
+          <div className="overflow-x-auto rounded-md border border-zinc-800">
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Day</th><th>Workout</th><th>Distance</th><th>Intensity</th><th>Target</th></tr></thead>
+              <tbody>{firstWeek.map((workout) => <tr key={`${workout.week_index}-${workout.day_index}`} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-3 py-2 font-mono text-zinc-500">D{workout.day_index}</td><td className="font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">{workout.workout_type}</div></td><td>{workout.distance_km?.toFixed(1) || "--"} км</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.intensity || "--"}</Badge></td><td className="max-w-md leading-5">{workout.description}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
+      </div>
+    </Card>
+  </div>
 }
 
 function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onChanged: () => Promise<void> }) {

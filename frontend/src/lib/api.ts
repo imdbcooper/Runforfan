@@ -118,6 +118,29 @@ export type Zones = {
   metadata: Record<string, unknown>
 }
 
+export type PlanWorkout = {
+  week_index: number
+  day_index: number
+  workout_type: string
+  title: string
+  distance_km: number | null
+  duration_seconds: number | null
+  intensity: string | null
+  description: string | null
+}
+
+export type Plan = {
+  id: number
+  title: string
+  goal_type: string
+  race_distance_km: number | null
+  target_date: string | null
+  available_days_per_week: number
+  status: string
+  explanation: string | null
+  workouts: PlanWorkout[]
+}
+
 let token = localStorage.getItem("runforfan_token")
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -156,5 +179,5 @@ export const api = {
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
-  generatePlan: (payload: Record<string, unknown>) => request<Record<string, any>>("/planning/generate", { method: "POST", body: JSON.stringify(payload) }),
+  generatePlan: (payload: Record<string, unknown>) => request<Plan>("/planning/generate", { method: "POST", body: JSON.stringify(payload) }),
 }
