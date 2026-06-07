@@ -428,6 +428,70 @@ class PlanOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CurrentWeekOut(BaseModel):
+    plan_id: int | None = None
+    plan_title: str | None = None
+    plan_status: str | None = None
+    week_index: int | None = None
+    week_start: date
+    week_end: date
+    today: date
+    status: str
+    message: str
+    workouts: list[PlanWorkoutOut] = Field(default_factory=list)
+    adherence: PlanAdherenceOut | None = None
+    today_workout: PlanWorkoutOut | None = None
+    next_workout: PlanWorkoutOut | None = None
+
+
+class DashboardPlanSummaryOut(BaseModel):
+    id: int
+    title: str
+    status: str
+    goal_type: str
+    race_distance_km: float | None = None
+    target_date: date | None = None
+    adherence: PlanAdherenceOut | None = None
+
+
+class DashboardReadinessOut(BaseModel):
+    status: str
+    message: str
+    factors: list[str] = Field(default_factory=list)
+
+
+class DashboardAlertOut(BaseModel):
+    severity: str
+    title: str
+    message: str
+    action: str | None = None
+
+
+class DashboardRecommendationSummaryOut(BaseModel):
+    status: str
+    summary: str
+    recommendations: list[PlanRecommendationOut] = Field(default_factory=list)
+
+
+class DashboardSummaryOut(BaseModel):
+    generated_at: datetime
+    today: date
+    analytics: dict
+    active_plan: DashboardPlanSummaryOut | None = None
+    current_week: CurrentWeekOut
+    weekly_snapshot: PlanAdherenceOut | None = None
+    today_workout: PlanWorkoutOut | None = None
+    next_workout: PlanWorkoutOut | None = None
+    profile_completeness: ProfileCompletenessOut
+    safety: SafetyCheckOut
+    readiness: DashboardReadinessOut
+    alerts: list[DashboardAlertOut] = Field(default_factory=list)
+    recommendations: DashboardRecommendationSummaryOut | None = None
+    pending_imports_count: int = 0
+    provider_count: int = 0
+    recent_activities: list[ActivityOut] = Field(default_factory=list)
+
+
 class PlanRecommendationApplyOut(BaseModel):
     plan_id: int
     audit_id: int

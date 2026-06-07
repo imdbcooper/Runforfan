@@ -295,6 +295,70 @@ export type PlanRecommendationApplyResult = {
   plan: Plan
 }
 
+export type CurrentWeek = {
+  plan_id: number | null
+  plan_title: string | null
+  plan_status: string | null
+  week_index: number | null
+  week_start: string
+  week_end: string
+  today: string
+  status: string
+  message: string
+  workouts: PlanWorkout[]
+  adherence: PlanAdherence | null
+  today_workout: PlanWorkout | null
+  next_workout: PlanWorkout | null
+}
+
+export type DashboardPlanSummary = {
+  id: number
+  title: string
+  status: string
+  goal_type: string
+  race_distance_km: number | null
+  target_date: string | null
+  adherence: PlanAdherence | null
+}
+
+export type DashboardReadiness = {
+  status: "ok" | "watch" | "risk" | string
+  message: string
+  factors: string[]
+}
+
+export type DashboardAlert = {
+  severity: "info" | "warning" | "critical" | string
+  title: string
+  message: string
+  action: string | null
+}
+
+export type DashboardRecommendationSummary = {
+  status: "ok" | "watch" | "adjust" | string
+  summary: string
+  recommendations: PlanRecommendation[]
+}
+
+export type DashboardSummary = {
+  generated_at: string
+  today: string
+  analytics: Record<string, any>
+  active_plan: DashboardPlanSummary | null
+  current_week: CurrentWeek
+  weekly_snapshot: PlanAdherence | null
+  today_workout: PlanWorkout | null
+  next_workout: PlanWorkout | null
+  profile_completeness: ProfileCompleteness
+  safety: SafetyCheck
+  readiness: DashboardReadiness
+  alerts: DashboardAlert[]
+  recommendations: DashboardRecommendationSummary | null
+  pending_imports_count: number
+  provider_count: number
+  recent_activities: Activity[]
+}
+
 let token = localStorage.getItem("runforfan_token")
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -326,6 +390,7 @@ export const api = {
     return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
   },
   analytics: () => request<Record<string, any>>("/analytics/summary"),
+  dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),
   profileCompleteness: () => request<ProfileCompleteness>("/profile/completeness"),
@@ -337,6 +402,7 @@ export const api = {
   replaceHrZones: (payload: ZoneWrite[]) => request<Zones>("/zones/hr", { method: "PUT", body: JSON.stringify(payload) }),
   replacePaceZones: (payload: ZoneWrite[]) => request<Zones>("/zones/pace", { method: "PUT", body: JSON.stringify(payload) }),
   plans: () => request<Plan[]>("/planning/plans"),
+  currentWeek: () => request<CurrentWeek>("/planning/current-week"),
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
   planAdherence: (id: number) => request<{ adherence: PlanAdherence; weekly_adherence: PlanWeeklyAdherence[] }>(`/planning/plans/${id}/adherence`),
   planRecommendations: (id: number) => request<PlanRecommendations>(`/planning/plans/${id}/recommendations`),

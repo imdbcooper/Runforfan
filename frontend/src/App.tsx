@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "analytics" | "profile" | "planning" | "settings"
@@ -129,6 +129,7 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [activities, setActivities] = useState<ActivityType[]>([])
   const [analytics, setAnalytics] = useState<Record<string, any>>({})
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [profile, setProfile] = useState<AthleteProfile | null>(null)
   const [completeness, setCompleteness] = useState<ProfileCompleteness | null>(null)
@@ -140,13 +141,15 @@ function App() {
   async function refreshGlobal() {
     try {
       await devLogin()
-      const [nextActivities, nextAnalytics, nextProviders] = await Promise.all([
+      const [nextActivities, nextAnalytics, nextDashboard, nextProviders] = await Promise.all([
         api.activities(),
         api.analytics(),
+        api.dashboardSummary(),
         api.providers(),
       ])
       setActivities(nextActivities)
       setAnalytics(nextAnalytics)
+      setDashboard(nextDashboard)
       setProviders(nextProviders)
       setStatus("DEMO USER")
     } catch (error) {
@@ -197,7 +200,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar status={status} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} analytics={analytics} providers={providers} onImport={() => setPage("imports")} />}
+            {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
@@ -244,19 +247,113 @@ function Topbar({ status, onMenu }: { status: string; onMenu: () => void }) {
   </header>
 }
 
-function Overview({ activities, analytics, providers, onImport }: { activities: ActivityType[]; analytics: Record<string, any>; providers: LlmProvider[]; onImport: () => void }) {
+function Overview({ activities, analytics, dashboard, providers, onImport, onPlans }: { activities: ActivityType[]; analytics: Record<string, any>; dashboard: DashboardSummary | null; providers: LlmProvider[]; onImport: () => void; onPlans: () => void }) {
+  const metrics = dashboard?.analytics || analytics
+  const currentWeek = dashboard?.current_week
+  const weekly = dashboard?.weekly_snapshot
+  const plan = dashboard?.active_plan
+  const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
+  const readiness = dashboard?.readiness
+  const providerCount = dashboard?.provider_count ?? providers.length
   return <div className="grid gap-4">
     <div className="grid min-w-0 gap-4 xl:grid-cols-[1fr_1.35fr]">
-      <Card className="p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p><h2 className="mt-2 text-lg font-semibold text-white">Runforfan overview</h2><Button className="mt-3" onClick={onImport}>+ Add screenshots</Button></Card>
+      <Card className="min-w-0 overflow-hidden p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p>
+            <h2 className="mt-2 text-lg font-semibold text-white">Today, plan and readiness</h2>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">{currentWeek?.message || "Loading the active plan, weekly adherence and import alerts."}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge className={cn("border-zinc-700 bg-zinc-900 text-zinc-300", signalClass(readiness?.status))}>{readiness?.status || "loading"}</Badge>
+            {plan ? <Badge>{plan.title}</Badge> : <Badge className="border-orange-400/30 bg-orange-400/10 text-orange-200">no active plan</Badge>}
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={onImport}>+ Add screenshots</Button><Button size="sm" variant="secondary" onClick={onPlans}>Open plans</Button></div>
+      </Card>
       <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
-        <Stat label="activities" value={activities.length} />
-        <Stat label="distance" value={analytics.total_distance_km || 0} suffix="km" />
-        <Stat label="providers" value={providers.length} />
-        <Stat label="pace" value={formatPace(analytics.weighted_average_pace_seconds_per_km)} />
+        <Stat label="activities" value={metrics.activity_count ?? activities.length} />
+        <Stat label="distance" value={Number(metrics.total_distance_km || 0).toFixed(1)} suffix="km" />
+        <Stat label="week done" value={`${Math.round((weekly?.completion_rate || 0) * 100)}%`} />
+        <Stat label="providers" value={providerCount} />
       </Card>
     </div>
-    <Activities activities={activities} compact onImport={onImport} />
+
+    <div className="grid min-w-0 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+      <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} onPlans={onPlans} />
+      <DashboardSignals dashboard={dashboard} />
+    </div>
+
+    {currentWeek ? <CurrentWeekCard currentWeek={currentWeek} onPlans={onPlans} /> : null}
+    <Activities activities={recentActivities} compact onImport={onImport} />
   </div>
+}
+
+function signalClass(status?: string) {
+  if (status === "risk" || status === "adjust" || status === "critical") return "border-rose-400/30 bg-rose-500/10 text-rose-200"
+  if (status === "watch" || status === "warning") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
+  if (status === "ok" || status === "active" || status === "done") return "border-zinc-700 bg-zinc-900 text-zinc-200"
+  return "border-zinc-700 bg-zinc-900 text-zinc-400"
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "--"
+  return new Date(`${value}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })
+}
+
+function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, onPlans }: { todayWorkout: PlanWorkout | null; nextWorkout: PlanWorkout | null; currentWeek: DashboardSummary["current_week"] | null; onPlans: () => void }) {
+  const focus = todayWorkout || nextWorkout
+  return <Card>
+    <CardHeader><div><CardTitle>{todayWorkout ? "Today workout" : "Next workout"}</CardTitle><p className="text-xs text-zinc-500">{currentWeek ? `${formatDate(currentWeek.week_start)} - ${formatDate(currentWeek.week_end)}` : "Active plan focus"}</p></div>{focus ? <Badge className={signalClass(focus.status)}>{focus.status}</Badge> : null}</CardHeader>
+    {focus ? <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_auto] md:items-end">
+      <div className="min-w-0">
+        <p className="text-base font-semibold text-white">{focus.title}</p>
+        <p className="mt-1 text-zinc-500">{formatDate(focus.scheduled_date)} · week {focus.week_index} · {focus.workout_type} · {formatDistance(focus.distance_km)}</p>
+        <p className="mt-2 max-w-3xl leading-5 text-zinc-400">{focus.description || "No target description"}</p>
+        {focus.execution_score?.flags?.length ? <p className="mt-2 text-orange-200">{focus.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
+      </div>
+      <div className="grid grid-cols-3 gap-2 md:w-64">
+        <Stat label="score" value={focus.execution_score?.score === null || focus.execution_score?.score === undefined ? "--" : `${Math.round(focus.execution_score.score * 100)}%`} />
+        <Stat label="risk" value={focus.execution_score?.subjective_risk || "--"} />
+        <Stat label="actual" value={formatDistance(focus.actual_distance_km)} />
+      </div>
+    </div> : <div className="p-4 text-xs text-zinc-500"><p>No active workout is scheduled yet.</p><Button className="mt-3" size="sm" variant="secondary" onClick={onPlans}>Create or activate plan</Button></div>}
+  </Card>
+}
+
+function DashboardSignals({ dashboard }: { dashboard: DashboardSummary | null }) {
+  const alerts = dashboard?.alerts || []
+  const factors = dashboard?.readiness.factors || []
+  return <Card>
+    <CardHeader><div><CardTitle>Readiness signals</CardTitle><p className="text-xs text-zinc-500">Profile, imports, feedback and coach alerts.</p></div><Badge className={signalClass(dashboard?.readiness.status)}>{dashboard?.readiness.status || "loading"}</Badge></CardHeader>
+    <div className="grid gap-3 p-4 text-xs">
+      <p className="leading-5 text-zinc-400">{dashboard?.readiness.message || "Summary is loading."}</p>
+      {factors.length ? <div className="grid gap-1">{factors.map((factor) => <p key={factor} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{factor}</p>)}</div> : null}
+      <div className="grid gap-2">
+        {alerts.length ? alerts.map((alert) => <div key={`${alert.title}-${alert.message}`} className={cn("rounded-md border px-3 py-2", signalClass(alert.severity))}><p className="font-medium">{alert.title}</p><p className="mt-1 leading-5 text-zinc-300/90">{alert.message}</p></div>) : <p className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">No dashboard alerts.</p>}
+      </div>
+    </div>
+  </Card>
+}
+
+function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSummary["current_week"]; onPlans: () => void }) {
+  const adherence = currentWeek.adherence
+  return <Card>
+    <CardHeader><div><CardTitle>Current week</CardTitle><p className="text-xs text-zinc-500">{currentWeek.plan_title || "No active plan"} · {formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div><div className="flex items-center gap-2"><Badge className={signalClass(currentWeek.status)}>{currentWeek.status}</Badge><Button size="sm" variant="secondary" onClick={onPlans}>Plans</Button></div></CardHeader>
+    <div className="grid gap-3 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
+      <Stat label="workouts" value={adherence?.total_workouts ?? 0} />
+      <Stat label="done" value={adherence?.done_workouts ?? 0} />
+      <Stat label="planned" value={formatDistance(adherence?.planned_distance_km)} />
+      <Stat label="actual" value={formatDistance(adherence?.completed_distance_km)} />
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Workout</th><th>Date</th><th>Type</th><th>Plan</th><th>Actual</th><th>Score</th><th>Status</th></tr></thead>
+        <tbody>{currentWeek.workouts.map((workout) => <tr key={workout.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">#{workout.id} · week {workout.week_index}</div></td><td>{formatDate(workout.scheduled_date)}</td><td>{workout.workout_type}<div className="text-[11px] text-zinc-500">{workout.intensity || "--"}</div></td><td>{formatDistance(workout.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(workout.duration_seconds)}</div></td><td>{formatDistance(workout.actual_distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(workout.actual_duration_seconds)}</div></td><td>{workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`}<div className="text-[11px] text-zinc-500">{workout.execution_score?.subjective_risk || "--"}</div></td><td><Badge className={signalClass(workout.status)}>{workout.status}</Badge></td></tr>)}</tbody>
+      </table>
+      {!currentWeek.workouts.length && <p className="p-4 text-xs text-zinc-500">No workouts in the current calendar week.</p>}
+    </div>
+  </Card>
 }
 
 function Stat({ label, value, suffix }: { label: string; value: string | number; suffix?: string }) {

@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
+from app.services.dashboard import current_week_for_user
 from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_recommendation_preview_changes, plan_to_dict, save_workout_feedback, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
@@ -69,6 +70,11 @@ def list_training_plans(user: User = Depends(get_current_user), db: Session = De
         .order_by(TrainingPlan.created_at.desc())
     ))
     return [plan_to_dict(plan) for plan in plans]
+
+
+@router.get("/current-week", response_model=CurrentWeekOut)
+def get_current_week(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return current_week_for_user(db, user)
 
 
 @router.get("/plans/{plan_id}", response_model=PlanOut)

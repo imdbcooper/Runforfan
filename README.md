@@ -52,6 +52,7 @@ GET /health
 - `GET /api/activities` — тренировки текущего пользователя.
 - `GET /api/activities/{id}` — одна тренировка.
 - `DELETE /api/activities/{id}` — удаление тренировки.
+- `GET /api/dashboard/summary` — агрегированный Dashboard: активный план, текущая неделя, readiness, alerts, recent activities.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
 - `GET /api/goals` — цели пользователя.
@@ -69,6 +70,7 @@ GET /health
 - `PUT /api/zones/hr` — заменить ручные HR-зоны.
 - `PUT /api/zones/pace` — заменить ручные pace-зоны.
 - `POST /api/planning/generate` — генерация тренировочной программы.
+- `GET /api/planning/current-week` — текущая календарная неделя активного плана с today/next workout и adherence.
 - `GET /api/planning/plans` — список программ.
 - `GET /api/planning/plans/{id}` — детальная программа с workouts, adherence и weekly adherence.
 - `GET /api/planning/plans/{id}/adherence` — агрегированное и недельное соблюдение плана.
@@ -146,6 +148,7 @@ API настроек AI:
 - Coach recommendations дают подсказки и безопасный preview/apply: удержать объем, снизить следующую неделю, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate. Применение меняет будущие незавершенные workouts; исключение — missed/skipped key workout может быть переведен в `rescheduled` на новую дату. Каждое применение сохраняет audit history.
 - Workout feedback сохраняет RPE, fatigue, pain, sleep quality и notes для выполненных/пропущенных workouts; plan output показывает execution score и subjective risk рядом с workout card.
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
+- Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
@@ -190,7 +193,7 @@ npm run build
 
 Страницы нового frontend:
 
-- Панель.
+- Панель: today/next workout, current week, readiness alerts и recent activities.
 - Тренировки.
 - Imports.
 - Аналитика.
