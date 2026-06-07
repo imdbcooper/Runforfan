@@ -1,4 +1,4 @@
-import { Activity, Bot, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Upload, X, Zap } from "lucide-react"
+import { Activity, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -6,16 +6,17 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "analytics" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; notes: string }
 
 const nav = [
   ["overview", "Dashboard", Zap],
   ["activities", "Activities", Activity],
   ["imports", "Imports", Upload],
+  ["calendar", "Calendar", CalendarDays],
   ["analytics", "Analytics", ChartSpline],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
@@ -203,6 +204,7 @@ function App() {
             {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
+            {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
@@ -299,6 +301,57 @@ function signalClass(status?: string) {
 function formatDate(value?: string | null) {
   if (!value) return "--"
   return new Date(`${value}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })
+}
+
+function dateFromISO(value: string) {
+  return new Date(`${value}T00:00:00`)
+}
+
+function toISODate(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`
+}
+
+function addDays(value: string, days: number) {
+  const date = dateFromISO(value)
+  date.setDate(date.getDate() + days)
+  return toISODate(date)
+}
+
+function startOfWeekISO(value = toISODate(new Date())) {
+  const date = dateFromISO(value)
+  const weekday = (date.getDay() + 6) % 7
+  date.setDate(date.getDate() - weekday)
+  return toISODate(date)
+}
+
+function monthRangeISO(value = toISODate(new Date())) {
+  const date = dateFromISO(value)
+  const start = new Date(date.getFullYear(), date.getMonth(), 1)
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+  return [toISODate(start), toISODate(end)] as const
+}
+
+const MAX_CALENDAR_DAYS = 42
+
+function calendarRangeDayCount(fromDate: string, toDate: string) {
+  if (!fromDate || !toDate || fromDate > toDate) return 0
+  let count = 0
+  let cursor = fromDate
+  while (cursor <= toDate && count <= MAX_CALENDAR_DAYS) {
+    count += 1
+    cursor = addDays(cursor, 1)
+  }
+  return cursor <= toDate ? MAX_CALENDAR_DAYS + 1 : count
+}
+
+function dateRange(fromDate: string, toDate: string) {
+  const days: string[] = []
+  let cursor = fromDate
+  for (let index = 0; index < MAX_CALENDAR_DAYS && cursor <= toDate; index += 1) {
+    days.push(cursor)
+    cursor = addDays(cursor, 1)
+  }
+  return days
 }
 
 function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, onPlans }: { todayWorkout: PlanWorkout | null; nextWorkout: PlanWorkout | null; currentWeek: DashboardSummary["current_week"] | null; onPlans: () => void }) {
@@ -525,6 +578,150 @@ function MatchReview({ candidates, busy, candidateError, linkError, onLink }: { 
       <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">Week {candidate.workout.week_index} · {candidate.workout.scheduled_date ? new Date(candidate.workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {candidate.workout.distance_km?.toFixed(1) || "--"} км</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
       <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} aria-label={`Link uploaded activity to planned workout ${candidate.workout.title} #${candidate.workout.id}`} onClick={() => onLink(candidate)}>Link</Button></div>
     </div>)}
+  </div>
+}
+
+function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: () => void }) {
+  const initialStart = startOfWeekISO()
+  const [fromDate, setFromDate] = useState(initialStart)
+  const [toDate, setToDate] = useState(addDays(initialStart, 6))
+  const [calendar, setCalendar] = useState<CalendarResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [busyEvent, setBusyEvent] = useState("")
+
+  async function loadRange(fromValue = fromDate, toValue = toDate) {
+    setError("")
+    if (fromValue > toValue) {
+      setError("Дата начала должна быть раньше или равна дате окончания")
+      return
+    }
+    if (calendarRangeDayCount(fromValue, toValue) > MAX_CALENDAR_DAYS) {
+      setError(`Диапазон календаря не может превышать ${MAX_CALENDAR_DAYS} дней`)
+      return
+    }
+    setLoading(true)
+    try {
+      await devLogin()
+      setCalendar(await api.calendar(fromValue, toValue))
+    } catch (loadError) {
+      console.error(loadError)
+      setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить календарь")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitRange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await loadRange()
+  }
+
+  async function applyQuickRange(range: "week" | "next" | "month") {
+    let nextFrom = startOfWeekISO()
+    let nextTo = addDays(nextFrom, 6)
+    if (range === "next") {
+      nextFrom = addDays(nextFrom, 7)
+      nextTo = addDays(nextFrom, 6)
+    } else if (range === "month") {
+      const [monthStart, monthEnd] = monthRangeISO()
+      nextFrom = monthStart
+      nextTo = monthEnd
+    }
+    setFromDate(nextFrom)
+    setToDate(nextTo)
+    await loadRange(nextFrom, nextTo)
+  }
+
+  async function updateCalendarWorkout(event: CalendarEvent, status: string) {
+    if (!event.planned_workout_id) return
+    setBusyEvent(event.id)
+    setError("")
+    try {
+      await api.updatePlanWorkout(event.planned_workout_id, { status })
+      await loadRange()
+    } catch (updateError) {
+      console.error(updateError)
+      setError("Не удалось обновить workout из календаря")
+    } finally {
+      setBusyEvent("")
+    }
+  }
+
+  useEffect(() => { void loadRange(initialStart, addDays(initialStart, 6)) }, [])
+
+  const shownFrom = calendar?.from_date || fromDate
+  const shownTo = calendar?.to_date || toDate
+  const days = dateRange(shownFrom, shownTo)
+  const eventsByDate = new Map<string, CalendarEvent[]>()
+  for (const event of calendar?.events || []) {
+    eventsByDate.set(event.date, [...(eventsByDate.get(event.date) || []), event])
+  }
+  const dailyLoads = days.map((day) => (eventsByDate.get(day) || []).reduce((sum, event) => sum + (event.distance_km || 0), 0))
+  const maxDailyLoad = Math.max(1, ...dailyLoads)
+
+  return <div className="grid gap-4">
+    <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+      <Card className="min-w-0 overflow-hidden p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Calendar</p>
+            <h2 className="mt-2 text-lg font-semibold text-white">Plan and actual by day</h2>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Planned workouts from the active plan, completed activities, linked/unlinked state and conflict warnings.</p>
+          </div>
+          <div className="flex flex-wrap gap-2"><Badge>{formatDate(shownFrom)} - {formatDate(shownTo)}</Badge><Badge className={signalClass(calendar?.warnings.length ? "warning" : "ok")}>{calendar?.warnings.length || 0} warnings</Badge></div>
+        </div>
+        <form onSubmit={submitRange} className="mt-4 grid gap-2 text-xs md:grid-cols-[1fr_1fr_auto]">
+          <Input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+          <Input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+          <Button type="submit" disabled={loading}>{loading ? "Loading..." : "Load range"}</Button>
+        </form>
+        <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => applyQuickRange("week")}>This week</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("next")}>Next week</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("month")}>This month</Button><Button size="sm" variant="ghost" onClick={onImport}>+ Import</Button><Button size="sm" variant="ghost" onClick={onPlans}>Open plans</Button></div>
+        {error ? <p className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{error}</p> : null}
+      </Card>
+      <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
+        <Stat label="planned" value={calendar?.summary.planned_workouts || 0} />
+        <Stat label="done" value={calendar?.summary.done_workouts || 0} />
+        <Stat label="activities" value={calendar?.summary.activities || 0} />
+        <Stat label="unlinked" value={calendar?.summary.unlinked_activities || 0} />
+      </Card>
+    </div>
+
+    {calendar?.warnings.length ? <Card>
+      <CardHeader><div><CardTitle>Schedule warnings</CardTitle><p className="text-xs text-zinc-500">Conflict detection for hard sessions and long runs.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{calendar.warnings.length}</Badge></CardHeader>
+      <div className="grid gap-2 p-4 text-xs md:grid-cols-2">{calendar.warnings.map((warning) => <div key={`${warning.title}-${warning.date}-${warning.planned_workout_ids.join("-")}`} className="rounded-md border border-orange-400/20 bg-orange-400/10 p-3 text-orange-100"><p className="font-medium">{warning.title}</p><p className="mt-1 leading-5 text-orange-100/80">{warning.message}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-orange-200/70">{formatDate(warning.date)} · workouts {warning.planned_workout_ids.map((id) => `#${id}`).join(", ")}</p></div>)}</div>
+    </Card> : null}
+
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+      {days.map((day, index) => {
+        const events = eventsByDate.get(day) || []
+        const load = dailyLoads[index] || 0
+        return <CalendarDay key={day} day={day} events={events} load={load} maxLoad={maxDailyLoad} busyEvent={busyEvent} onPlans={onPlans} onUpdate={updateCalendarWorkout} />
+      })}
+    </div>
+  </div>
+}
+
+function CalendarDay({ day, events, load, maxLoad, busyEvent, onPlans, onUpdate }: { day: string; events: CalendarEvent[]; load: number; maxLoad: number; busyEvent: string; onPlans: () => void; onUpdate: (event: CalendarEvent, status: string) => Promise<void> }) {
+  const today = toISODate(new Date())
+  const width = Math.max(6, Math.round(load / maxLoad * 100))
+  return <div className={cn("min-h-48 rounded-lg border bg-zinc-950/60 p-3 text-xs", day === today ? "border-orange-400/40" : "border-zinc-800")}>
+    <div className="flex items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day)}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{dateFromISO(day).toLocaleDateString("ru-RU", { weekday: "short" })}</p></div>{events.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{events.length}</Badge> : null}</div>
+    <div className="mt-3 h-1.5 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${width}%` }} /></div>
+    <div className="mt-3 grid gap-2">{events.length ? events.map((event) => <CalendarEventCard key={event.id} event={event} busy={busyEvent === event.id} onPlans={onPlans} onUpdate={onUpdate} />) : <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-2 text-zinc-600">No plan or activity.</p>}</div>
+  </div>
+}
+
+function CalendarEventCard({ event, busy, onPlans, onUpdate }: { event: CalendarEvent; busy: boolean; onPlans: () => void; onUpdate: (event: CalendarEvent, status: string) => Promise<void> }) {
+  const isWorkout = event.kind === "planned_workout"
+  const isLinked = Boolean(event.planned_workout_id && event.linked_activity_id)
+  const score = event.execution_score?.score
+  return <div className={cn("rounded-md border p-2", isWorkout ? "border-zinc-800 bg-zinc-950" : isLinked ? "border-orange-400/20 bg-orange-400/10" : "border-zinc-800 bg-zinc-900/70")}>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : "activity"} · {formatDistance(event.distance_km)} · {formatDuration(event.duration_seconds)}</p></div><Badge className={signalClass(event.status || undefined)}>{event.status || event.kind}</Badge></div>
+    {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
+    {event.linked_activity_id && isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Linked activity #{event.linked_activity_id}</p> : null}
+    {event.planned_workout_id && !isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Matched to workout #{event.planned_workout_id}</p> : null}
+    {isWorkout ? <div className="mt-2 flex flex-wrap gap-1.5"><Button size="sm" variant="ghost" disabled={busy || event.status === "missed" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "missed")}>Missed</Button><Button size="sm" variant="ghost" disabled={busy || event.status === "skipped" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "skipped")}>Skipped</Button>{event.status !== "planned" && !event.linked_activity_id ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUpdate(event, "planned")}>Restore</Button> : null}<Button size="sm" variant="ghost" onClick={onPlans}>Attach</Button></div> : null}
   </div>
 }
 

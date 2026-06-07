@@ -359,6 +359,52 @@ export type DashboardSummary = {
   recent_activities: Activity[]
 }
 
+export type CalendarEvent = {
+  id: string
+  kind: "planned_workout" | "activity" | string
+  date: string
+  title: string
+  status: string | null
+  planned_workout_id: number | null
+  linked_activity_id: number | null
+  plan_id: number | null
+  plan_title: string | null
+  workout_type: string | null
+  distance_km: number | null
+  duration_seconds: number | null
+  execution_score: PlanWorkoutExecutionScore | null
+  workout: PlanWorkout | null
+  activity: Activity | null
+}
+
+export type CalendarWarning = {
+  severity: "info" | "warning" | "critical" | string
+  title: string
+  message: string
+  date: string | null
+  planned_workout_ids: number[]
+}
+
+export type CalendarSummary = {
+  planned_workouts: number
+  done_workouts: number
+  missed_workouts: number
+  skipped_workouts: number
+  activities: number
+  linked_activities: number
+  unlinked_activities: number
+  planned_distance_km: number
+  activity_distance_km: number
+}
+
+export type CalendarResponse = {
+  from_date: string
+  to_date: string
+  events: CalendarEvent[]
+  warnings: CalendarWarning[]
+  summary: CalendarSummary
+}
+
 let token = localStorage.getItem("runforfan_token")
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -391,6 +437,7 @@ export const api = {
   },
   analytics: () => request<Record<string, any>>("/analytics/summary"),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
+  calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),
   profileCompleteness: () => request<ProfileCompleteness>("/profile/completeness"),

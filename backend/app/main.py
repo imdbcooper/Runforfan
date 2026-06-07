@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import activities, analytics, auth, dashboard, goals, imports, planning, profile, settings as settings_routes, zones
+from app.api.routes import activities, analytics, auth, calendar, dashboard, goals, imports, planning, profile, settings as settings_routes, zones
 from app.core.settings import get_settings
 from app.db.base import Base
 from app.db.migrations.runner import run_migrations
@@ -44,6 +44,7 @@ app.include_router(imports.router, prefix="/api")
 app.include_router(goals.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(calendar.router, prefix="/api")
 app.include_router(planning.router, prefix="/api")
 app.include_router(settings_routes.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")

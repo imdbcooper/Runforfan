@@ -53,6 +53,7 @@ GET /health
 - `GET /api/activities/{id}` — одна тренировка.
 - `DELETE /api/activities/{id}` — удаление тренировки.
 - `GET /api/dashboard/summary` — агрегированный Dashboard: активный план, текущая неделя, readiness, alerts, recent activities.
+- `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
 - `GET /api/goals` — цели пользователя.
@@ -149,6 +150,7 @@ API настроек AI:
 - Workout feedback сохраняет RPE, fatigue, pain, sleep quality и notes для выполненных/пропущенных workouts; plan output показывает execution score и subjective risk рядом с workout card.
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
+- Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
@@ -196,6 +198,7 @@ npm run build
 - Панель: today/next workout, current week, readiness alerts и recent activities.
 - Тренировки.
 - Imports.
+- Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
 - Profile & zones.
 - Планы.

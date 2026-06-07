@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field, StrictInt, model_validator
+
+
+Date = date
 
 
 class UserOut(BaseModel):
@@ -490,6 +495,52 @@ class DashboardSummaryOut(BaseModel):
     pending_imports_count: int = 0
     provider_count: int = 0
     recent_activities: list[ActivityOut] = Field(default_factory=list)
+
+
+class CalendarEventOut(BaseModel):
+    id: str
+    kind: str
+    date: Date
+    title: str
+    status: str | None = None
+    planned_workout_id: int | None = None
+    linked_activity_id: int | None = None
+    plan_id: int | None = None
+    plan_title: str | None = None
+    workout_type: str | None = None
+    distance_km: float | None = None
+    duration_seconds: int | None = None
+    execution_score: PlanWorkoutExecutionScoreOut | None = None
+    workout: PlanWorkoutOut | None = None
+    activity: ActivityOut | None = None
+
+
+class CalendarWarningOut(BaseModel):
+    severity: str
+    title: str
+    message: str
+    date: Date | None = None
+    planned_workout_ids: list[int] = Field(default_factory=list)
+
+
+class CalendarSummaryOut(BaseModel):
+    planned_workouts: int
+    done_workouts: int
+    missed_workouts: int
+    skipped_workouts: int
+    activities: int
+    linked_activities: int
+    unlinked_activities: int
+    planned_distance_km: float
+    activity_distance_km: float
+
+
+class CalendarOut(BaseModel):
+    from_date: date
+    to_date: date
+    events: list[CalendarEventOut] = Field(default_factory=list)
+    warnings: list[CalendarWarningOut] = Field(default_factory=list)
+    summary: CalendarSummaryOut
 
 
 class PlanRecommendationApplyOut(BaseModel):
