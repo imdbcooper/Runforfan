@@ -192,6 +192,37 @@ export type PlanWorkoutMatchCandidate = {
   distance_delta_km: number | null
 }
 
+export type PlanRecommendation = {
+  type: string
+  severity: "info" | "warning" | "critical" | string
+  title: string
+  message: string
+  workout_id: number | null
+  week_index: number | null
+  reasons: string[]
+  suggested_payload: Record<string, unknown> | null
+}
+
+export type PlanRecommendationsMetrics = {
+  completion_rate: number
+  distance_completion_rate: number
+  missed_recent_workouts: number
+  unlinked_done_workouts: number
+  planned_distance_km: number
+  completed_distance_km: number
+  recent_completed_distance_km: number
+  upcoming_planned_distance_km: number
+}
+
+export type PlanRecommendations = {
+  plan_id: number
+  status: "ok" | "watch" | "adjust" | string
+  generated_at: string
+  summary: string
+  metrics: PlanRecommendationsMetrics
+  recommendations: PlanRecommendation[]
+}
+
 export type Plan = {
   id: number
   title: string
@@ -250,6 +281,7 @@ export const api = {
   plans: () => request<Plan[]>("/planning/plans"),
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
   planAdherence: (id: number) => request<{ adherence: PlanAdherence; weekly_adherence: PlanWeeklyAdherence[] }>(`/planning/plans/${id}/adherence`),
+  planRecommendations: (id: number) => request<PlanRecommendations>(`/planning/plans/${id}/recommendations`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),

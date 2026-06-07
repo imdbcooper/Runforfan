@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
-from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationsOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, generate_plan, link_activity_to_workout, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -77,6 +77,11 @@ def get_training_plan(plan_id: int, user: User = Depends(get_current_user), db: 
 def get_training_plan_adherence(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = plan_to_dict(get_user_plan(db, user, plan_id))
     return {"adherence": plan["adherence"], "weekly_adherence": plan["weekly_adherence"]}
+
+
+@router.get("/plans/{plan_id}/recommendations", response_model=PlanRecommendationsOut)
+def get_training_plan_recommendations(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return plan_adjustment_recommendations(db, user, get_user_plan(db, user, plan_id))
 
 
 @router.post("/plans/{plan_id}/activate", response_model=PlanOut)

@@ -1,12 +1,12 @@
 import { Activity, Bot, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Upload, X, Zap } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "analytics" | "profile" | "planning" | "settings"
@@ -534,7 +534,11 @@ function Planning() {
   const [result, setResult] = useState<Plan | null>(null)
   const [candidatesByWorkout, setCandidatesByWorkout] = useState<Record<number, PlanActivityMatchCandidate[]>>({})
   const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({})
+  const [recommendations, setRecommendations] = useState<PlanRecommendations | null>(null)
+  const [recommendationError, setRecommendationError] = useState("")
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
   const [loadingCandidates, setLoadingCandidates] = useState<number | null>(null)
+  const recommendationsRequest = useRef(0)
 
   async function loadPlans() {
     await devLogin()
@@ -559,15 +563,21 @@ function Planning() {
   }
 
   async function activate(id: number) {
-    setResult(await api.activatePlan(id))
+    const plan = await api.activatePlan(id)
+    setResult(plan)
     await loadPlans()
+    await loadRecommendations(plan.id)
   }
 
   async function updateWorkout(workout: PlanWorkout, status: string) {
     setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
     try {
       await api.updatePlanWorkout(workout.id, { status })
-      if (result) setResult(await api.plan(result.id))
+      if (result) {
+        const plan = await api.plan(result.id)
+        setResult(plan)
+        await loadRecommendations(plan.id)
+      }
       await loadPlans()
     } catch (error) {
       console.error(error)
@@ -595,7 +605,11 @@ function Planning() {
     try {
       await api.linkPlanWorkoutActivity(workout.id, activityId)
       setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
-      if (result) setResult(await api.plan(result.id))
+      if (result) {
+        const plan = await api.plan(result.id)
+        setResult(plan)
+        await loadRecommendations(plan.id)
+      }
       await loadPlans()
     } catch (error) {
       console.error(error)
@@ -603,9 +617,35 @@ function Planning() {
     }
   }
 
+  async function loadRecommendations(planId: number) {
+    const requestId = recommendationsRequest.current + 1
+    recommendationsRequest.current = requestId
+    setLoadingRecommendations(true)
+    setRecommendationError("")
+    setRecommendations(null)
+    try {
+      const nextRecommendations = await api.planRecommendations(planId)
+      if (recommendationsRequest.current === requestId) setRecommendations(nextRecommendations)
+    } catch (error) {
+      console.error(error)
+      if (recommendationsRequest.current === requestId) setRecommendationError("Не удалось загрузить coach recommendations")
+    } finally {
+      if (recommendationsRequest.current === requestId) setLoadingRecommendations(false)
+    }
+  }
+
   useEffect(() => { void loadPlans() }, [])
+  useEffect(() => {
+    if (result?.id) void loadRecommendations(result.id)
+    else {
+      setRecommendations(null)
+      setRecommendationError("")
+    }
+  }, [result?.id])
 
   const weeks = Array.from(new Set(result?.workouts.map((workout) => workout.week_index) || [])).slice(0, 4)
+  const weekCount = result?.workouts.length ? Math.max(...result.workouts.map((workout) => workout.week_index)) : 0
+  const visibleRecommendations = recommendations?.plan_id === result?.id ? recommendations : null
   const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
   const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
   const planMode = !result ? null : !hasSafetyInfo ? "legacy" : conservative ? "safety gated" : "standard"
@@ -639,8 +679,9 @@ function Planning() {
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
           {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
+          <CoachRecommendations recommendations={visibleRecommendations} error={recommendationError} loading={loadingRecommendations} onRefresh={() => loadRecommendations(result.id)} />
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
-            <Stat label="weeks" value={Math.max(...result.workouts.map((workout) => workout.week_index))} />
+            <Stat label="weeks" value={weekCount} />
             <Stat label="workouts" value={result.workouts.length} />
             <Stat label="days/week" value={result.available_days_per_week} />
           </div>
@@ -649,6 +690,28 @@ function Planning() {
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
       </div>
     </Card>
+  </div>
+}
+
+function CoachRecommendations({ recommendations, error, loading, onRefresh }: { recommendations: PlanRecommendations | null; error: string; loading: boolean; onRefresh: () => void }) {
+  const statusClass = recommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : recommendations?.status === "adjust" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"
+  const statusLabel = recommendations?.status || (loading ? "loading" : error ? "error" : "idle")
+  return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div><p className="font-semibold text-white">Coach recommendations</p><p className="mt-1 text-zinc-500">Read-only adaptive guidance from adherence and linked activities.</p></div>
+      <div className="flex items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading} onClick={onRefresh}>{loading ? "Refreshing..." : "Refresh"}</Button></div>
+    </div>
+    {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100">{error}</div> : null}
+    {recommendations ? <>
+      <p className="mt-3 leading-5 text-zinc-300">{recommendations.summary}</p>
+      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
+        <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
+        <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
+        <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
+      </div>
+      <div className="mt-3 grid gap-2">{recommendations.recommendations.slice(0, 3).map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
+    </> : <p className="mt-3 text-zinc-500">{loading ? "Recommendations are loading..." : error ? "Recommendations are unavailable." : "No recommendations loaded."}</p>}
   </div>
 }
 

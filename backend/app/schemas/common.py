@@ -316,6 +316,37 @@ class PlanWorkoutMatchCandidateOut(BaseModel):
     distance_delta_km: float | None = None
 
 
+class PlanRecommendationOut(BaseModel):
+    type: str
+    severity: str
+    title: str
+    message: str
+    workout_id: int | None = None
+    week_index: int | None = None
+    reasons: list[str]
+    suggested_payload: dict | None = None
+
+
+class PlanRecommendationsMetricsOut(BaseModel):
+    completion_rate: float
+    distance_completion_rate: float
+    missed_recent_workouts: int
+    unlinked_done_workouts: int
+    planned_distance_km: float
+    completed_distance_km: float
+    recent_completed_distance_km: float
+    upcoming_planned_distance_km: float
+
+
+class PlanRecommendationsOut(BaseModel):
+    plan_id: int
+    status: str
+    generated_at: datetime
+    summary: str
+    metrics: PlanRecommendationsMetricsOut
+    recommendations: list[PlanRecommendationOut]
+
+
 class PlanWorkoutLinkActivityRequest(BaseModel):
     activity_id: int
 

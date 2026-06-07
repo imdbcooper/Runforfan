@@ -1,11 +1,12 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from math import ceil
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanWorkout, User
 from app.schemas.common import PlanGenerateRequest, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import zones_response
@@ -250,6 +251,193 @@ def weekly_adherence_summary(workouts: list[TrainingPlanWorkout]) -> list[dict[s
         summary["planned_workouts"] = summary.pop("total_workouts")
         summaries.append(summary)
     return summaries
+
+
+def recommendation_item(
+    item_type: str,
+    severity: str,
+    title: str,
+    message: str,
+    reasons: list[str],
+    workout_id: int | None = None,
+    week_index: int | None = None,
+    suggested_payload: dict | None = None,
+) -> dict[str, object]:
+    return {
+        "type": item_type,
+        "severity": severity,
+        "title": title,
+        "message": message,
+        "workout_id": workout_id,
+        "week_index": week_index,
+        "reasons": reasons,
+        "suggested_payload": suggested_payload,
+    }
+
+
+def today_for_user(db: Session, user: User) -> date:
+    timezone_name = db.scalar(select(AthleteProfile.timezone).where(AthleteProfile.user_id == user.id)) or "Europe/Moscow"
+    try:
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now(UTC).date()
+
+
+def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan) -> dict[str, object]:
+    workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
+    today = today_for_user(db, user)
+    recent_start = today - timedelta(days=14)
+    next_week_end = today + timedelta(days=7)
+    unscheduled = [workout for workout in workouts if workout.scheduled_date is None]
+    elapsed = [workout for workout in workouts if workout.scheduled_date and workout.scheduled_date <= today]
+    recent = [workout for workout in workouts if workout.scheduled_date and recent_start <= workout.scheduled_date <= today]
+    upcoming = [workout for workout in workouts if workout.scheduled_date and today < workout.scheduled_date <= next_week_end]
+    summary = adherence_summary(elapsed)
+    recommendations: list[dict[str, object]] = []
+
+    missed_recent = [workout for workout in recent if workout.status in {"missed", "skipped"}]
+    missed_key = [workout for workout in missed_recent if workout.workout_type in {"long", "interval", "tempo"}]
+    recent_linked = [workout for workout in recent if workout.status == "done" and workout.completed_activity]
+    recent_completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in recent_linked)
+    upcoming_planned_distance = sum(workout.distance_km or 0 for workout in upcoming)
+    safety_gated = bool(plan.explanation and "Safety gates:" in plan.explanation and "Safety gates: no active safety gates" not in plan.explanation)
+
+    if plan.status != "active":
+        recommendations.append(recommendation_item(
+            "resume_plan",
+            "warning",
+            "Activate before adapting",
+            "Adaptive coaching is most useful on the active training plan.",
+            [f"plan status is {plan.status}"],
+        ))
+
+    if unscheduled:
+        recommendations.append(recommendation_item(
+            "schedule_workouts",
+            "info",
+            "Schedule unscheduled workouts",
+            "Workouts without dates are excluded from due-load calculations until they are scheduled.",
+            [f"{len(unscheduled)} workouts have no scheduled date"],
+            suggested_payload={"action": "schedule_unscheduled_workouts"},
+        ))
+
+    if not elapsed and any(workout.scheduled_date for workout in workouts):
+        recommendations.append(recommendation_item(
+            "resume_plan",
+            "info",
+            "Plan has not started yet",
+            "Keep the first week easy and start with the next scheduled workout.",
+            ["no scheduled workouts are due yet"],
+        ))
+
+    if summary["unlinked_done_workouts"]:
+        recommendations.append(recommendation_item(
+            "link_activity",
+            "warning",
+            "Link actual activities",
+            "Some done workouts have no linked activity, so distance-based adjustments are unreliable.",
+            [f"{summary['unlinked_done_workouts']} done workouts are unlinked"],
+        ))
+
+    if len(missed_recent) >= 2:
+        recommendations.append(recommendation_item(
+            "hold_volume",
+            "warning",
+            "Hold next-week volume",
+            "Several recent workouts were missed or skipped. Do not try to catch up; keep the next week controlled.",
+            [f"{len(missed_recent)} missed/skipped workouts in the last 14 days"],
+            week_index=missed_recent[-1].week_index if missed_recent else None,
+            suggested_payload={"action": "hold_next_week_volume"},
+        ))
+
+    if missed_key:
+        workout = missed_key[-1]
+        recommendations.append(recommendation_item(
+            "move_workout",
+            "warning",
+            "Key workout was missed",
+            "Treat the next hard session cautiously. Prefer moving the key session only if recovery is good.",
+            [f"missed {workout.workout_type} workout"],
+            workout_id=workout.id,
+            week_index=workout.week_index,
+            suggested_payload={"action": "review_or_move_key_workout", "workout_id": workout.id},
+        ))
+
+    if summary["distance_completion_rate"] >= 1.2:
+        recommendations.append(recommendation_item(
+            "recovery",
+            "warning",
+            "Actual volume is above plan",
+            "Add recovery emphasis before increasing distance or intensity.",
+            [f"distance completion rate {summary['distance_completion_rate']:.0%}"],
+            suggested_payload={"action": "reduce_intensity", "days": 2},
+        ))
+    elif summary["distance_completion_rate"] <= 0.75 and summary["linked_workouts"] > 0:
+        recommendations.append(recommendation_item(
+            "reduce_volume",
+            "warning",
+            "Actual volume is below plan",
+            "Reduce the next-week target rather than stacking missed kilometers.",
+            [f"distance completion rate {summary['distance_completion_rate']:.0%}"],
+            suggested_payload={"action": "reduce_next_week_volume", "percent": 15},
+        ))
+
+    if upcoming_planned_distance and recent_completed_distance and upcoming_planned_distance > recent_completed_distance * 1.25:
+        recommendations.append(recommendation_item(
+            "hold_volume",
+            "warning",
+            "Upcoming week may jump too much",
+            "The next 7 days are more than 25% above recent linked volume. Keep easy days easy or reduce one workout.",
+            [f"next 7 days {upcoming_planned_distance:.1f} km vs recent linked {recent_completed_distance:.1f} km"],
+            week_index=upcoming[0].week_index if upcoming else None,
+            suggested_payload={"action": "cap_next_week_growth", "max_growth_percent": 25},
+        ))
+
+    if safety_gated:
+        recommendations.append(recommendation_item(
+            "review_zones",
+            "info",
+            "Safety gate is active",
+            "Avoid adding intensity until profile data and recent adherence support it.",
+            ["plan explanation contains active safety gates"],
+        ))
+
+    if not recommendations:
+        recommendations.append(recommendation_item(
+            "resume_plan",
+            "info",
+            "Continue current plan",
+            "No major adherence or load risks detected. Follow the next scheduled workout.",
+            ["completion and distance rates are within expected range"],
+        ))
+
+    highest = "ok"
+    if any(item["severity"] == "critical" for item in recommendations):
+        highest = "adjust"
+    elif any(item["severity"] == "warning" for item in recommendations):
+        highest = "watch"
+    plan_summary = {
+        "ok": "Plan looks stable based on current linked activities.",
+        "watch": "Coach recommends watching the next week before increasing load.",
+        "adjust": "Coach recommends adjusting the plan before the next hard workout.",
+    }[highest]
+    return {
+        "plan_id": plan.id,
+        "status": highest,
+        "generated_at": datetime.now(UTC),
+        "summary": plan_summary,
+        "metrics": {
+            "completion_rate": summary["completion_rate"],
+            "distance_completion_rate": summary["distance_completion_rate"],
+            "missed_recent_workouts": len(missed_recent),
+            "unlinked_done_workouts": summary["unlinked_done_workouts"],
+            "planned_distance_km": summary["planned_distance_km"],
+            "completed_distance_km": summary["completed_distance_km"],
+            "recent_completed_distance_km": round(recent_completed_distance, 1),
+            "upcoming_planned_distance_km": round(upcoming_planned_distance, 1),
+        },
+        "recommendations": recommendations[:6],
+    }
 
 
 def activity_has_interval_structure(activity: Activity) -> bool:
