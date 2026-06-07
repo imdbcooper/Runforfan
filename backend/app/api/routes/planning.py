@@ -3,10 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
-from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationsOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
+from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_recommendation_preview_changes, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -82,6 +82,32 @@ def get_training_plan_adherence(plan_id: int, user: User = Depends(get_current_u
 @router.get("/plans/{plan_id}/recommendations", response_model=PlanRecommendationsOut)
 def get_training_plan_recommendations(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return plan_adjustment_recommendations(db, user, get_user_plan(db, user, plan_id))
+
+
+@router.post("/plans/{plan_id}/recommendations/preview", response_model=PlanRecommendationPreviewOut)
+def preview_training_plan_recommendations(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return plan_recommendation_preview_changes(db, user, get_user_plan(db, user, plan_id))
+
+
+@router.post("/plans/{plan_id}/recommendations/apply", response_model=PlanRecommendationApplyOut)
+def apply_training_plan_recommendations(plan_id: int, payload: PlanRecommendationApplyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        result = apply_plan_recommendations(db, user, get_user_plan(db, user, plan_id), payload.changes)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    result["plan"] = plan_to_dict(get_user_plan(db, user, plan_id))
+    return result
+
+
+@router.get("/plans/{plan_id}/recommendations/audit", response_model=list[PlanRecommendationAuditOut])
+def list_training_plan_recommendation_audits(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    get_user_plan(db, user, plan_id)
+    return list(db.scalars(
+        select(TrainingPlanRecommendationAudit)
+        .where(TrainingPlanRecommendationAudit.plan_id == plan_id, TrainingPlanRecommendationAudit.user_id == user.id)
+        .order_by(TrainingPlanRecommendationAudit.created_at.desc(), TrainingPlanRecommendationAudit.id.desc())
+        .limit(20)
+    ))
 
 
 @router.post("/plans/{plan_id}/activate", response_model=PlanOut)

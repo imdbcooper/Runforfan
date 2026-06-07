@@ -390,6 +390,10 @@ API:
 - `GET /api/planning/plans/{id}`
 - `GET /api/planning/plans/{id}/weeks`
 - `POST /api/planning/plans/{id}/adapt`
+- `GET /api/planning/plans/{id}/recommendations`
+- `POST /api/planning/plans/{id}/recommendations/preview`
+- `POST /api/planning/plans/{id}/recommendations/apply`
+- `GET /api/planning/plans/{id}/recommendations/audit`
 - `PATCH /api/planning/workouts/{id}`
 
 ### 6.10. Workout Detail and Completion
@@ -1477,6 +1481,6 @@ Professional MVP считается готовым, когда:
 - Plan Builder создает safe plan with risk flags and preview.
 - Plan Detail показывает structured weeks and workout blocks.
 - Workout completion собирает RPE and notes.
-- Adaptation engine корректирует план после missed/overdone/high fatigue cases.
+- Adaptation engine корректирует план после missed/overdone/high fatigue cases через preview/apply flow с audit history; missed/skipped key workouts допускают отдельный reschedule path с явным diff.
 - Все формулы покрыты тестами и имеют source references.
 - UI стабилен на desktop and mobile.

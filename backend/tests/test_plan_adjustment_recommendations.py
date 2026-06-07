@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 try:
     from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
-    from app.services.planning import plan_adjustment_recommendations
+    from app.services.planning import apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("SQLAlchemy is required for planning recommendation tests") from exc
@@ -69,6 +69,27 @@ def make_activity(activity_id: int, distance_km: float) -> Activity:
     )
 
 
+class FakeDb:
+    def __init__(self):
+        self.added = []
+        self.committed = False
+        self.rolled_back = False
+
+    def add(self, item):
+        self.added.append(item)
+
+    def flush(self):
+        for item in self.added:
+            if getattr(item, "id", None) is None:
+                item.id = 77
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+
 class PlanAdjustmentRecommendationTests(unittest.TestCase):
     def recommendations(self, plan: TrainingPlan) -> dict[str, object]:
         with patch("app.services.planning.today_for_user", return_value=TODAY):
@@ -76,6 +97,16 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
     def recommendation_types(self, result: dict[str, object]) -> list[str]:
         return [item["type"] for item in result["recommendations"]]
+
+    def preview(self, plan: TrainingPlan) -> dict[str, object]:
+        with patch("app.services.planning.today_for_user", return_value=TODAY):
+            return plan_recommendation_preview_changes(object(), make_user(), plan)
+
+    def apply(self, plan: TrainingPlan, db: FakeDb | None = None, expected_changes: list[dict[str, object]] | None = None) -> tuple[dict[str, object], FakeDb]:
+        fake_db = db or FakeDb()
+        with patch("app.services.planning.today_for_user", return_value=TODAY):
+            result = apply_plan_recommendations(fake_db, make_user(), plan, expected_changes)
+        return result, fake_db
 
     def test_inactive_plan_recommends_activation(self):
         plan = make_plan(
@@ -161,6 +192,149 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         result = self.recommendations(plan)
 
         self.assertIn("review_zones", self.recommendation_types(result))
+
+    def test_preview_reduces_upcoming_volume_without_mutating_plan(self):
+        upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 5.0),
+            ),
+            upcoming,
+        )
+
+        preview = self.preview(plan)
+
+        self.assertEqual(upcoming.distance_km, 5.5)
+        distance_changes = [change for change in preview["changes"] if change["field"] == "distance_km"]
+        self.assertEqual(len(distance_changes), 1)
+        self.assertEqual(distance_changes[0]["workout_id"], 2)
+        self.assertEqual(distance_changes[0]["before"], 5.5)
+        self.assertEqual(distance_changes[0]["after"], 4.7)
+
+    def test_apply_reduces_upcoming_volume_and_records_audit(self):
+        upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 5.0),
+            ),
+            upcoming,
+        )
+
+        result, db = self.apply(plan)
+
+        self.assertEqual(result["audit_id"], 77)
+        self.assertEqual(upcoming.distance_km, 4.7)
+        self.assertTrue(db.committed)
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.added[0].user_id, 1)
+        self.assertEqual(db.added[0].plan_id, 10)
+        self.assertEqual(db.added[0].action, "apply_recommendations")
+
+    def test_repeat_apply_does_not_stack_volume_reduction(self):
+        upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 5.0),
+            ),
+            upcoming,
+        )
+
+        self.apply(plan)
+        first_distance = upcoming.distance_km
+        second_result, _db = self.apply(plan)
+
+        self.assertEqual(first_distance, 4.7)
+        self.assertEqual(upcoming.distance_km, first_distance)
+        self.assertFalse([change for change in second_result["changes"] if change["field"] == "distance_km"])
+
+    def test_cap_growth_can_tighten_volume_after_reduction(self):
+        upcoming = make_workout(2, date(2026, 6, 9), distance_km=10.0, day_index=2)
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 4.0),
+            ),
+            upcoming,
+        )
+
+        preview = self.preview(plan)
+        distance_changes = [change for change in preview["changes"] if change["field"] == "distance_km"]
+
+        self.assertEqual([change["after"] for change in distance_changes], [8.5, 5.0])
+
+    def test_apply_rejects_stale_preview_changes(self):
+        upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 5.0),
+            ),
+            upcoming,
+        )
+        preview = self.preview(plan)
+        upcoming.distance_km = 6.0
+
+        with self.assertRaises(ValueError):
+            self.apply(plan, FakeDb(), preview["changes"])
+
+    def test_apply_does_not_mutate_completed_upcoming_workouts(self):
+        completed_upcoming = make_workout(
+            2,
+            date(2026, 6, 9),
+            status="done",
+            distance_km=5.5,
+            completed_activity=make_activity(102, 5.5),
+            day_index=2,
+        )
+        plan = make_plan(
+            make_workout(
+                1,
+                TODAY,
+                status="done",
+                distance_km=10.0,
+                completed_activity=make_activity(101, 5.0),
+            ),
+            completed_upcoming,
+        )
+
+        result, _db = self.apply(plan)
+
+        self.assertEqual(completed_upcoming.distance_km, 5.5)
+        self.assertEqual(result["changes"], [])
+        self.assertTrue(any(item["action"] == "reduce_next_week_volume" for item in result["skipped"]))
+
+    def test_apply_reschedules_missed_key_workout(self):
+        missed_long = make_workout(2, date(2026, 6, 5), status="missed", workout_type="long", day_index=2)
+        plan = make_plan(
+            make_workout(1, date(2026, 6, 2), status="missed"),
+            missed_long,
+        )
+
+        result, _db = self.apply(plan)
+
+        self.assertEqual(missed_long.status, "rescheduled")
+        self.assertEqual(missed_long.scheduled_date, date(2026, 6, 8))
+        changed_fields = {(change["workout_id"], change["field"]) for change in result["changes"]}
+        self.assertIn((2, "scheduled_date"), changed_fields)
+        self.assertIn((2, "status"), changed_fields)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "analytics" | "profile" | "planning" | "settings"
@@ -28,6 +28,13 @@ function formatPace(seconds?: number | null) {
 
 function formatDistance(km?: number | null) {
   return km ? `${km.toFixed(2)} км` : "--"
+}
+
+function formatChangeValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "--"
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(1)
+  if (typeof value === "string") return value
+  return JSON.stringify(value)
 }
 
 function formatDuration(seconds?: number | null) {
@@ -535,8 +542,13 @@ function Planning() {
   const [candidatesByWorkout, setCandidatesByWorkout] = useState<Record<number, PlanActivityMatchCandidate[]>>({})
   const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({})
   const [recommendations, setRecommendations] = useState<PlanRecommendations | null>(null)
+  const [recommendationPreview, setRecommendationPreview] = useState<PlanRecommendationPreview | null>(null)
+  const [recommendationAudits, setRecommendationAudits] = useState<PlanRecommendationAudit[]>([])
   const [recommendationError, setRecommendationError] = useState("")
+  const [recommendationActionError, setRecommendationActionError] = useState("")
   const [loadingRecommendations, setLoadingRecommendations] = useState(false)
+  const [previewingRecommendations, setPreviewingRecommendations] = useState(false)
+  const [applyingRecommendations, setApplyingRecommendations] = useState(false)
   const [loadingCandidates, setLoadingCandidates] = useState<number | null>(null)
   const recommendationsRequest = useRef(0)
 
@@ -622,6 +634,8 @@ function Planning() {
     recommendationsRequest.current = requestId
     setLoadingRecommendations(true)
     setRecommendationError("")
+    setRecommendationActionError("")
+    setRecommendationPreview(null)
     setRecommendations(null)
     try {
       const nextRecommendations = await api.planRecommendations(planId)
@@ -634,12 +648,60 @@ function Planning() {
     }
   }
 
+  async function loadRecommendationAudits(planId: number) {
+    try {
+      setRecommendationAudits(await api.planRecommendationAudit(planId))
+    } catch (error) {
+      console.error(error)
+      setRecommendationAudits([])
+    }
+  }
+
+  async function previewRecommendations(planId: number) {
+    setPreviewingRecommendations(true)
+    setRecommendationActionError("")
+    try {
+      setRecommendationPreview(await api.previewPlanRecommendations(planId))
+      await loadRecommendationAudits(planId)
+    } catch (error) {
+      console.error(error)
+      setRecommendationActionError("Не удалось подготовить preview корректировок")
+    } finally {
+      setPreviewingRecommendations(false)
+    }
+  }
+
+  async function applyRecommendations(planId: number) {
+    if (!recommendationPreview?.changes.length) return
+    setApplyingRecommendations(true)
+    setRecommendationActionError("")
+    try {
+      const applied = await api.applyPlanRecommendations(planId, recommendationPreview.changes)
+      setResult(applied.plan)
+      setRecommendationPreview(null)
+      await loadPlans()
+      await loadRecommendations(applied.plan.id)
+      await loadRecommendationAudits(applied.plan.id)
+    } catch (error) {
+      console.error(error)
+      setRecommendationActionError("Не удалось применить корректировки")
+    } finally {
+      setApplyingRecommendations(false)
+    }
+  }
+
   useEffect(() => { void loadPlans() }, [])
   useEffect(() => {
-    if (result?.id) void loadRecommendations(result.id)
+    if (result?.id) {
+      void loadRecommendations(result.id)
+      void loadRecommendationAudits(result.id)
+    }
     else {
       setRecommendations(null)
+      setRecommendationPreview(null)
+      setRecommendationAudits([])
       setRecommendationError("")
+      setRecommendationActionError("")
     }
   }, [result?.id])
 
@@ -679,7 +741,7 @@ function Planning() {
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
           {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
-          <CoachRecommendations recommendations={visibleRecommendations} error={recommendationError} loading={loadingRecommendations} onRefresh={() => loadRecommendations(result.id)} />
+          <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="weeks" value={weekCount} />
             <Stat label="workouts" value={result.workouts.length} />
@@ -693,15 +755,17 @@ function Planning() {
   </div>
 }
 
-function CoachRecommendations({ recommendations, error, loading, onRefresh }: { recommendations: PlanRecommendations | null; error: string; loading: boolean; onRefresh: () => void }) {
+function CoachRecommendations({ recommendations, preview, audits, error, actionError, loading, previewing, applying, onRefresh, onPreview, onApply }: { recommendations: PlanRecommendations | null; preview: PlanRecommendationPreview | null; audits: PlanRecommendationAudit[]; error: string; actionError: string; loading: boolean; previewing: boolean; applying: boolean; onRefresh: () => void; onPreview: () => void; onApply: () => void }) {
   const statusClass = recommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : recommendations?.status === "adjust" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"
   const statusLabel = recommendations?.status || (loading ? "loading" : error ? "error" : "idle")
+  const canApply = Boolean(preview?.changes.length) && !applying && !previewing
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><p className="font-semibold text-white">Coach recommendations</p><p className="mt-1 text-zinc-500">Read-only adaptive guidance from adherence and linked activities.</p></div>
-      <div className="flex items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading} onClick={onRefresh}>{loading ? "Refreshing..." : "Refresh"}</Button></div>
+      <div><p className="font-semibold text-white">Coach recommendations</p><p className="mt-1 text-zinc-500">Adaptive guidance with preview/apply safeguards and audit history.</p></div>
+      <div className="flex flex-wrap items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading || previewing || applying} onClick={onRefresh}>{loading ? "Refreshing..." : "Refresh"}</Button><Button size="sm" variant="ghost" disabled={!recommendations || loading || previewing || applying} onClick={onPreview}>{previewing ? "Previewing..." : "Preview"}</Button><Button size="sm" disabled={!canApply} onClick={onApply}>{applying ? "Applying..." : "Apply"}</Button></div>
     </div>
     {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100">{error}</div> : null}
+    {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100">{actionError}</div> : null}
     {recommendations ? <>
       <p className="mt-3 leading-5 text-zinc-300">{recommendations.summary}</p>
       <div className="mt-3 grid gap-2 md:grid-cols-4">
@@ -710,7 +774,13 @@ function CoachRecommendations({ recommendations, error, loading, onRefresh }: { 
         <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
         <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
       </div>
-      <div className="mt-3 grid gap-2">{recommendations.recommendations.slice(0, 3).map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
+      <div className="mt-3 grid gap-2">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
+      {preview ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 p-2">
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Preview diff</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge></div>
+        {preview.changes.length ? <div className="mt-2 grid gap-1.5">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
+        {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
+      </div> : null}
+      {audits.length ? <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">Adjustment history</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge></div><div className="mt-2 grid gap-1 text-[11px] text-zinc-500">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {new Date(audit.created_at).toLocaleString("ru-RU")}</p>)}</div></div> : null}
     </> : <p className="mt-3 text-zinc-500">{loading ? "Recommendations are loading..." : error ? "Recommendations are unavailable." : "No recommendations loaded."}</p>}
   </div>
 }

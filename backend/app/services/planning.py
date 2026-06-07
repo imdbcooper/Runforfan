@@ -1,12 +1,13 @@
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
 from app.schemas.common import PlanGenerateRequest, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import zones_response
@@ -17,6 +18,13 @@ CANDIDATE_MIN_SCORE = 0.25
 CANDIDATE_DATE_WINDOW_DAYS = 7
 AUTO_MATCH_MIN_SCORE = 0.78
 AUTO_MATCH_DATE_WINDOW_DAYS = 3
+APPLICABLE_RECOMMENDATION_ACTIONS = {
+    "hold_next_week_volume",
+    "reduce_next_week_volume",
+    "reduce_intensity",
+    "cap_next_week_growth",
+    "review_or_move_key_workout",
+}
 
 
 def weeks_until(target_date: date | None) -> int:
@@ -437,6 +445,234 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             "upcoming_planned_distance_km": round(upcoming_planned_distance, 1),
         },
         "recommendations": recommendations[:6],
+    }
+
+
+def json_safe(value: Any) -> Any:
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def mutable_upcoming_workouts(workouts: list[TrainingPlanWorkout], today: date) -> list[TrainingPlanWorkout]:
+    next_week_end = today + timedelta(days=7)
+    return [
+        workout
+        for workout in workouts
+        if workout.scheduled_date
+        and today < workout.scheduled_date <= next_week_end
+        and workout.status in MATCHABLE_WORKOUT_STATUSES
+        and workout.completed_activity_id is None
+    ]
+
+
+def append_coach_note(description: str | None, note: str) -> str:
+    current = description or ""
+    if note in current:
+        return current
+    separator = " " if current else ""
+    return f"{current}{separator}{note}"[:2000]
+
+
+def next_available_workout_date(today: date, workouts: list[TrainingPlanWorkout]) -> date:
+    occupied = {
+        workout.scheduled_date
+        for workout in workouts
+        if workout.scheduled_date and workout.status in {"planned", "rescheduled", "done"}
+    }
+    for offset in range(1, 8):
+        candidate = today + timedelta(days=offset)
+        if candidate not in occupied:
+            return candidate
+    return today + timedelta(days=1)
+
+
+def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingPlan) -> dict[str, object]:
+    recommendation_result = plan_adjustment_recommendations(db, user, plan)
+    recommendations = list(recommendation_result["recommendations"])
+    workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
+    today = today_for_user(db, user)
+    upcoming = mutable_upcoming_workouts(workouts, today)
+    workouts_by_id = {workout.id: workout for workout in workouts}
+    preview_values: dict[tuple[int, str], Any] = {}
+    changes: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
+    reduce_volume_note = "Coach adjustment: reduce volume until adherence stabilizes."
+    cap_growth_note = "Coach adjustment: cap next-week growth until recent volume catches up."
+
+    def current_value(workout: TrainingPlanWorkout, field: str) -> Any:
+        return preview_values.get((workout.id, field), getattr(workout, field))
+
+    def add_change(workout: TrainingPlanWorkout, field: str, after: Any, reason: str) -> bool:
+        before = current_value(workout, field)
+        if before == after:
+            return False
+        preview_values[(workout.id, field)] = after
+        changes.append({
+            "workout_id": workout.id,
+            "field": field,
+            "before": json_safe(before),
+            "after": json_safe(after),
+            "reason": reason,
+        })
+        return True
+
+    def skip(action: str, recommendation: dict[str, object], reason: str) -> None:
+        skipped.append({
+            "action": action,
+            "recommendation_type": recommendation.get("type"),
+            "reason": reason,
+        })
+
+    def scale_upcoming_distances(percent: float, reason: str, note: str) -> bool:
+        changed = False
+        factor = max(0.0, 1 - percent / 100)
+        for workout in upcoming:
+            if note in (current_value(workout, "description") or ""):
+                continue
+            current_distance = current_value(workout, "distance_km")
+            if not current_distance:
+                continue
+            after = round(max(1.0, float(current_distance) * factor), 1)
+            changed = add_change(workout, "distance_km", after, reason) or changed
+            changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
+        return changed
+
+    def ease_upcoming_hard_workouts(reason: str) -> bool:
+        changed = False
+        note = "Coach adjustment: keep this session easy until adherence stabilizes."
+        hard_workouts = [
+            workout
+            for workout in upcoming
+            if workout.workout_type in {"interval", "tempo"} or (workout.intensity or "") in {"threshold", "interval", "tempo"}
+        ]
+        for workout in hard_workouts:
+            changed = add_change(workout, "intensity", "easy", reason) or changed
+            changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
+        return changed
+
+    for recommendation in recommendations:
+        payload = recommendation.get("suggested_payload") or {}
+        action = payload.get("action") if isinstance(payload, dict) else None
+        if not action:
+            skip("none", recommendation, "recommendation has no applicable action")
+            continue
+        if action not in APPLICABLE_RECOMMENDATION_ACTIONS:
+            skip(str(action), recommendation, "manual flow required")
+            continue
+        if action == "hold_next_week_volume":
+            if not ease_upcoming_hard_workouts("hold volume after recent missed or skipped workouts"):
+                skip(action, recommendation, "no upcoming hard workouts to ease")
+        elif action == "reduce_next_week_volume":
+            percent = float(payload.get("percent") or 15)
+            if not scale_upcoming_distances(percent, f"reduce next 7 days by {percent:g}%", reduce_volume_note):
+                skip(action, recommendation, "no mutable upcoming distance to reduce")
+        elif action == "reduce_intensity":
+            if not ease_upcoming_hard_workouts("reduce intensity while safety or recovery risk is active"):
+                skip(action, recommendation, "no upcoming hard workouts to ease")
+        elif action == "cap_next_week_growth":
+            max_growth_percent = float(payload.get("max_growth_percent") or 25)
+            recent_completed = float(recommendation_result["metrics"]["recent_completed_distance_km"] or 0)
+            if recent_completed <= 0:
+                skip(action, recommendation, "no recent linked distance baseline")
+                continue
+            upcoming_distance = sum(float(current_value(workout, "distance_km") or 0) for workout in upcoming)
+            cap = recent_completed * (1 + max_growth_percent / 100)
+            if upcoming_distance <= cap:
+                skip(action, recommendation, "upcoming mutable volume is already within cap")
+                continue
+            factor = cap / upcoming_distance if upcoming_distance else 1
+            changed = False
+            for workout in upcoming:
+                if cap_growth_note in (current_value(workout, "description") or ""):
+                    continue
+                current_distance = current_value(workout, "distance_km")
+                if not current_distance:
+                    continue
+                after = round(max(1.0, float(current_distance) * factor), 1)
+                changed = add_change(workout, "distance_km", after, f"cap next 7 days growth at {max_growth_percent:g}%") or changed
+                changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), cap_growth_note), f"cap next 7 days growth at {max_growth_percent:g}%") or changed
+            if not changed:
+                skip(action, recommendation, "no mutable upcoming distance to cap")
+        elif action == "review_or_move_key_workout":
+            workout_id = payload.get("workout_id")
+            workout = workouts_by_id.get(workout_id) if isinstance(workout_id, int) else None
+            if not workout or workout.status not in {"missed", "skipped"} or workout.completed_activity_id is not None:
+                skip(action, recommendation, "key workout cannot be safely rescheduled")
+                continue
+            target_date = next_available_workout_date(today, workouts)
+            add_change(workout, "scheduled_date", target_date, "reschedule missed key workout cautiously")
+            add_change(workout, "status", "rescheduled", "reschedule missed key workout cautiously")
+
+    return {
+        "plan_id": plan.id,
+        "generated_at": datetime.now(UTC),
+        "changes": changes,
+        "skipped": skipped,
+        "recommendations": recommendations,
+    }
+
+
+def normalize_preview_changes(changes: list[Any] | None) -> list[dict[str, object]] | None:
+    if changes is None:
+        return None
+    normalized = []
+    for change in changes:
+        if hasattr(change, "model_dump"):
+            normalized.append(change.model_dump())
+        else:
+            normalized.append(dict(change))
+    return json_safe(normalized)
+
+
+def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expected_changes: list[Any] | None = None) -> dict[str, object]:
+    preview = plan_recommendation_preview_changes(db, user, plan)
+    changes = list(preview["changes"])
+    skipped = list(preview["skipped"])
+    expected = normalize_preview_changes(expected_changes)
+    if expected is not None and expected != json_safe(changes):
+        raise ValueError("Recommendation preview is stale; refresh preview before applying")
+    workouts_by_id = {workout.id: workout for workout in plan.workouts}
+    allowed_fields = {"distance_km", "intensity", "description", "scheduled_date", "status"}
+    try:
+        for change in changes:
+            workout_id = change.get("workout_id")
+            field = str(change.get("field"))
+            workout = workouts_by_id.get(workout_id) if isinstance(workout_id, int) else None
+            if not workout or field not in allowed_fields:
+                skipped.append({"action": "apply_change", "recommendation_type": None, "reason": "change target is no longer mutable"})
+                continue
+            after = change.get("after")
+            if field == "scheduled_date" and isinstance(after, str):
+                after = date.fromisoformat(after)
+            setattr(workout, field, after)
+        audit = TrainingPlanRecommendationAudit(
+            user_id=user.id,
+            plan_id=plan.id,
+            action="apply_recommendations",
+            status="applied",
+            recommendations_snapshot=json_safe({
+                "recommendations": preview["recommendations"],
+            }),
+            preview_changes={"changes": json_safe(changes), "skipped": json_safe(preview["skipped"])},
+            applied_changes={"changes": json_safe(changes), "skipped": json_safe(skipped)},
+        )
+        db.add(audit)
+        db.flush()
+        audit_id = audit.id
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "plan_id": plan.id,
+        "audit_id": audit_id,
+        "changes": changes,
+        "skipped": skipped,
     }
 
 

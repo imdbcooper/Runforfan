@@ -347,6 +347,39 @@ class PlanRecommendationsOut(BaseModel):
     recommendations: list[PlanRecommendationOut]
 
 
+class PlanRecommendationChangeOut(BaseModel):
+    workout_id: int | None = None
+    field: str
+    before: object | None = None
+    after: object | None = None
+    reason: str | None = None
+
+
+class PlanRecommendationPreviewOut(BaseModel):
+    plan_id: int
+    generated_at: datetime
+    changes: list[PlanRecommendationChangeOut]
+    skipped: list[dict] = Field(default_factory=list)
+    recommendations: list[PlanRecommendationOut]
+
+
+class PlanRecommendationApplyRequest(BaseModel):
+    changes: list[PlanRecommendationChangeOut] | None = None
+
+
+class PlanRecommendationAuditOut(BaseModel):
+    id: int
+    plan_id: int
+    action: str
+    status: str
+    recommendations_snapshot: dict | None = None
+    preview_changes: dict | None = None
+    applied_changes: dict | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class PlanWorkoutLinkActivityRequest(BaseModel):
     activity_id: int
 
@@ -365,3 +398,11 @@ class PlanOut(BaseModel):
     weekly_adherence: list[PlanWeeklyAdherenceOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+
+class PlanRecommendationApplyOut(BaseModel):
+    plan_id: int
+    audit_id: int
+    changes: list[PlanRecommendationChangeOut]
+    skipped: list[dict] = Field(default_factory=list)
+    plan: PlanOut

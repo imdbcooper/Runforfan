@@ -73,6 +73,9 @@ GET /health
 - `GET /api/planning/plans/{id}` — детальная программа с workouts, adherence и weekly adherence.
 - `GET /api/planning/plans/{id}/adherence` — агрегированное и недельное соблюдение плана.
 - `GET /api/planning/plans/{id}/recommendations` — read-only coach recommendations по adherence, missed workouts и planned-vs-actual load.
+- `POST /api/planning/plans/{id}/recommendations/preview` — preview безопасных автоматических корректировок без изменения плана.
+- `POST /api/planning/plans/{id}/recommendations/apply` — применить preview/apply корректировки к будущим незавершенным workouts и записать audit.
+- `GET /api/planning/plans/{id}/recommendations/audit` — история примененных coach adjustments для плана.
 - `POST /api/planning/plans/{id}/activate` — сделать программу активной.
 - `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку.
 - `GET /api/planning/workouts/{id}/match-candidates` — кандидаты фактических тренировок для planned workout.
@@ -138,7 +141,7 @@ API настроек AI:
 - Matching учитывает близость даты, сходство дистанции и тип тренировки: interval-структуру, long/easy/tempo/steady эвристики.
 - После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
 - Adherence analytics показывает completion rate, distance completion rate, linked/unlinked выполненные тренировки, предупреждения и недельный breakdown.
-- Coach recommendations дают read-only подсказки: удержать объем, снизить следующую неделю, связать фактические тренировки, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate.
+- Coach recommendations дают подсказки и безопасный preview/apply: удержать объем, снизить следующую неделю, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate. Применение меняет будущие незавершенные workouts; исключение — missed/skipped key workout может быть переведен в `rescheduled` на новую дату. Каждое применение сохраняет audit history.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 

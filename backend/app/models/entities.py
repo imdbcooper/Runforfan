@@ -338,3 +338,17 @@ class TrainingPlanWorkout(Base):
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="workouts")
     completed_activity: Mapped[Activity | None] = relationship()
+
+
+class TrainingPlanRecommendationAudit(Base):
+    __tablename__ = "training_plan_recommendation_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(64), default="applied")
+    recommendations_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    preview_changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    applied_changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

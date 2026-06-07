@@ -95,6 +95,27 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_training_plan_workouts_completed_activity_id ON training_plan_workouts (completed_activity_id) WHERE completed_activity_id IS NOT NULL",
         ),
     ),
+    (
+        "20260607_0004_plan_recommendation_audits",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS training_plan_recommendation_audits (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                action VARCHAR(64) NOT NULL,
+                status VARCHAR(64) NOT NULL DEFAULT 'applied',
+                recommendations_snapshot JSONB,
+                preview_changes JSONB,
+                applied_changes JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_recommendation_audits_user_id ON training_plan_recommendation_audits (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_recommendation_audits_plan_id ON training_plan_recommendation_audits (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_recommendation_audits_created_at ON training_plan_recommendation_audits (created_at)",
+        ),
+    ),
 )
 
 

@@ -223,6 +223,33 @@ export type PlanRecommendations = {
   recommendations: PlanRecommendation[]
 }
 
+export type PlanRecommendationChange = {
+  workout_id: number | null
+  field: string
+  before: unknown
+  after: unknown
+  reason: string | null
+}
+
+export type PlanRecommendationPreview = {
+  plan_id: number
+  generated_at: string
+  changes: PlanRecommendationChange[]
+  skipped: Record<string, unknown>[]
+  recommendations: PlanRecommendation[]
+}
+
+export type PlanRecommendationAudit = {
+  id: number
+  plan_id: number
+  action: string
+  status: string
+  recommendations_snapshot: Record<string, unknown> | null
+  preview_changes: Record<string, unknown> | null
+  applied_changes: Record<string, unknown> | null
+  created_at: string
+}
+
 export type Plan = {
   id: number
   title: string
@@ -235,6 +262,14 @@ export type Plan = {
   workouts: PlanWorkout[]
   adherence: PlanAdherence | null
   weekly_adherence: PlanWeeklyAdherence[]
+}
+
+export type PlanRecommendationApplyResult = {
+  plan_id: number
+  audit_id: number
+  changes: PlanRecommendationChange[]
+  skipped: Record<string, unknown>[]
+  plan: Plan
 }
 
 let token = localStorage.getItem("runforfan_token")
@@ -282,6 +317,9 @@ export const api = {
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
   planAdherence: (id: number) => request<{ adherence: PlanAdherence; weekly_adherence: PlanWeeklyAdherence[] }>(`/planning/plans/${id}/adherence`),
   planRecommendations: (id: number) => request<PlanRecommendations>(`/planning/plans/${id}/recommendations`),
+  previewPlanRecommendations: (id: number) => request<PlanRecommendationPreview>(`/planning/plans/${id}/recommendations/preview`, { method: "POST", body: "{}" }),
+  applyPlanRecommendations: (id: number, changes: PlanRecommendationChange[]) => request<PlanRecommendationApplyResult>(`/planning/plans/${id}/recommendations/apply`, { method: "POST", body: JSON.stringify({ changes }) }),
+  planRecommendationAudit: (id: number) => request<PlanRecommendationAudit[]>(`/planning/plans/${id}/recommendations/audit`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),
