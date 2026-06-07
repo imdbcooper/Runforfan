@@ -2,12 +2,19 @@ from datetime import date, timedelta
 from math import ceil
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
 from app.schemas.common import PlanGenerateRequest, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import zones_response
+
+
+MATCHABLE_WORKOUT_STATUSES = ("planned", "rescheduled")
+CANDIDATE_MIN_SCORE = 0.25
+CANDIDATE_DATE_WINDOW_DAYS = 7
+AUTO_MATCH_MIN_SCORE = 0.78
+AUTO_MATCH_DATE_WINDOW_DAYS = 3
 
 
 def weeks_until(target_date: date | None) -> int:
@@ -206,18 +213,261 @@ def adherence_summary(workouts: list[TrainingPlanWorkout]) -> dict[str, object]:
     done = [workout for workout in workouts if workout.status == "done"]
     missed = [workout for workout in workouts if workout.status == "missed"]
     skipped = [workout for workout in workouts if workout.status == "skipped"]
+    linked = [workout for workout in done if workout.completed_activity]
     planned_distance = sum(workout.distance_km or 0 for workout in workouts)
-    completed_distance = sum((workout.completed_activity.distance_km or 0) for workout in done if workout.completed_activity)
+    completed_distance = sum((workout.completed_activity.distance_km or 0) for workout in linked)
+    warnings = []
+    if done and len(linked) < len(done):
+        warnings.append("Есть выполненные тренировки без привязанной фактической активности")
+    distance_rate = completed_distance / planned_distance if planned_distance else 0
+    if distance_rate >= 1.2:
+        warnings.append("Фактический объем заметно выше плана")
+    elif planned_distance and distance_rate <= 0.75 and done:
+        warnings.append("Фактический объем заметно ниже плана")
     return {
         "total_workouts": total,
         "done_workouts": len(done),
         "missed_workouts": len(missed),
         "skipped_workouts": len(skipped),
+        "linked_workouts": len(linked),
+        "unlinked_done_workouts": len(done) - len(linked),
         "planned_distance_km": round(planned_distance, 1),
         "completed_distance_km": round(completed_distance, 1),
         "completion_rate": round(len(done) / total, 2) if total else 0,
-        "distance_completion_rate": round(completed_distance / planned_distance, 2) if planned_distance else 0,
+        "distance_completion_rate": round(distance_rate, 2) if planned_distance else 0,
+        "warnings": warnings,
     }
+
+
+def weekly_adherence_summary(workouts: list[TrainingPlanWorkout]) -> list[dict[str, object]]:
+    summaries = []
+    week_indexes = sorted({workout.week_index for workout in workouts})
+    for week_index in week_indexes:
+        week_workouts = [workout for workout in workouts if workout.week_index == week_index]
+        summary = adherence_summary(week_workouts)
+        summary["week_index"] = week_index
+        summary["planned_workouts"] = summary.pop("total_workouts")
+        summaries.append(summary)
+    return summaries
+
+
+def activity_has_interval_structure(activity: Activity) -> bool:
+    blocks = getattr(activity, "workout_blocks", []) or []
+    return any(block.block_type in {"work", "recovery"} for block in blocks)
+
+
+def date_score(delta_days: int | None) -> float:
+    if delta_days is None:
+        return 0.35
+    delta = abs(delta_days)
+    if delta == 0:
+        return 1.0
+    if delta == 1:
+        return 0.86
+    if delta == 2:
+        return 0.68
+    if delta == 3:
+        return 0.5
+    if delta <= CANDIDATE_DATE_WINDOW_DAYS:
+        return 0.25
+    return 0.0
+
+
+def distance_score(actual_km: float | None, planned_km: float | None) -> float:
+    if not actual_km or not planned_km:
+        return 0.45
+    relative_delta = abs(actual_km - planned_km) / max(planned_km, 1)
+    return max(0.0, min(1.0, 1 - relative_delta / 0.6))
+
+
+def workout_type_score(activity: Activity, workout: TrainingPlanWorkout) -> tuple[float, list[str]]:
+    reasons = []
+    workout_type = workout.workout_type or ""
+    title = (activity.title or "").lower()
+    has_intervals = activity_has_interval_structure(activity)
+    if workout_type == "interval":
+        if has_intervals:
+            return 1.0, ["интервальная структура активности совпадает с планом"]
+        if "interval" in title or "интервал" in title:
+            return 0.75, ["название активности похоже на интервальную работу"]
+        return 0.25, ["план интервальный, но структура активности не найдена"]
+    if workout_type == "long":
+        if activity.distance_km and workout.distance_km and activity.distance_km >= workout.distance_km * 0.85:
+            return 0.9, ["дистанция похожа на длинную тренировку"]
+        return 0.55, ["тип long в основном проверяется по дате и дистанции"]
+    if workout_type in {"tempo", "steady"}:
+        score = 0.45 if has_intervals else 0.7
+        reasons.append("аэробная/темповая работа без интервальной структуры" if not has_intervals else "активность интервальная, совпадение типа слабее")
+        return score, reasons
+    if workout_type == "easy":
+        score = 0.35 if has_intervals else 0.72
+        reasons.append("легкая тренировка без интервальной структуры" if not has_intervals else "интервальная активность хуже совпадает с easy")
+        return score, reasons
+    return 0.55, ["универсальная проверка типа тренировки"]
+
+
+def score_activity_workout_match(activity: Activity, workout: TrainingPlanWorkout) -> dict[str, object]:
+    activity_date = activity.started_at.date() if activity.started_at else None
+    delta_days = (activity_date - workout.scheduled_date).days if activity_date and workout.scheduled_date else None
+    distance_delta = None
+    if activity.distance_km is not None and workout.distance_km is not None:
+        distance_delta = round(activity.distance_km - workout.distance_km, 2)
+
+    reasons = []
+    if delta_days is None:
+        reasons.append("дата активности или плановой тренировки не указана")
+    elif abs(delta_days) <= 1:
+        reasons.append("дата активности близка к плановой")
+    elif abs(delta_days) <= 3:
+        reasons.append("активность в допустимом окне +/-3 дня")
+    else:
+        reasons.append("активность далеко от плановой даты")
+
+    if distance_delta is None:
+        reasons.append("дистанция не задана для одной из сторон")
+    elif abs(distance_delta) <= max(0.75, (workout.distance_km or 0) * 0.12):
+        reasons.append("дистанция близка к плану")
+    elif distance_delta > 0:
+        reasons.append("фактическая дистанция выше плановой")
+    else:
+        reasons.append("фактическая дистанция ниже плановой")
+
+    type_score, type_reasons = workout_type_score(activity, workout)
+    reasons.extend(type_reasons)
+    score = round(
+        date_score(delta_days) * 0.48
+        + distance_score(activity.distance_km, workout.distance_km) * 0.34
+        + type_score * 0.18,
+        2,
+    )
+    confidence = "high" if score >= AUTO_MATCH_MIN_SCORE else "medium" if score >= 0.55 else "low"
+    return {
+        "score": score,
+        "confidence": confidence,
+        "reasons": reasons,
+        "date_delta_days": delta_days,
+        "distance_delta_km": distance_delta,
+    }
+
+
+def linked_activity_ids(db: Session, user: User, exclude_workout_id: int | None = None) -> set[int]:
+    query = (
+        select(TrainingPlanWorkout.completed_activity_id)
+        .join(TrainingPlan)
+        .where(TrainingPlan.user_id == user.id, TrainingPlanWorkout.completed_activity_id.is_not(None))
+    )
+    if exclude_workout_id is not None:
+        query = query.where(TrainingPlanWorkout.id != exclude_workout_id)
+    return {activity_id for activity_id in db.scalars(query) if activity_id is not None}
+
+
+def activity_match_candidates_for_workout(db: Session, user: User, workout: TrainingPlanWorkout, limit: int = 6) -> list[dict[str, object]]:
+    already_linked = linked_activity_ids(db, user, exclude_workout_id=workout.id)
+    activities = list(db.scalars(
+        select(Activity)
+        .where(Activity.user_id == user.id)
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
+        .limit(200)
+    ))
+    candidates = []
+    for activity in activities:
+        if activity.id in already_linked:
+            continue
+        match = score_activity_workout_match(activity, workout)
+        delta_days = match["date_delta_days"]
+        if delta_days is not None and abs(int(delta_days)) > CANDIDATE_DATE_WINDOW_DAYS:
+            continue
+        if float(match["score"]) < CANDIDATE_MIN_SCORE and activity.id != workout.completed_activity_id:
+            continue
+        candidates.append({"activity": activity, **match})
+    candidates.sort(key=lambda candidate: (-float(candidate["score"]), abs(candidate["date_delta_days"] or 0), candidate["activity"].id))
+    return candidates[:limit]
+
+
+def workout_match_candidates_for_activity(
+    db: Session,
+    user: User,
+    activity: Activity,
+    limit: int = 6,
+    active_only: bool = False,
+    min_score: float = CANDIDATE_MIN_SCORE,
+    date_window_days: int = CANDIDATE_DATE_WINDOW_DAYS,
+) -> list[dict[str, object]]:
+    if activity_is_linked(db, user, activity.id):
+        return []
+    query = (
+        select(TrainingPlanWorkout)
+        .join(TrainingPlan)
+        .where(
+            TrainingPlan.user_id == user.id,
+            TrainingPlanWorkout.status.in_(MATCHABLE_WORKOUT_STATUSES),
+            TrainingPlanWorkout.completed_activity_id.is_(None),
+        )
+        .options(selectinload(TrainingPlanWorkout.completed_activity))
+        .order_by(TrainingPlanWorkout.scheduled_date.asc().nullslast(), TrainingPlanWorkout.id.asc())
+    )
+    if active_only:
+        query = query.where(TrainingPlan.status == "active")
+    workouts = list(db.scalars(query))
+    candidates = []
+    for workout in workouts:
+        match = score_activity_workout_match(activity, workout)
+        delta_days = match["date_delta_days"]
+        if delta_days is not None and abs(int(delta_days)) > date_window_days:
+            continue
+        if float(match["score"]) < min_score:
+            continue
+        candidates.append({"workout": workout, **match})
+    candidates.sort(key=lambda candidate: (-float(candidate["score"]), abs(candidate["date_delta_days"] or 0), candidate["workout"].id))
+    return candidates[:limit]
+
+
+def activity_is_linked(db: Session, user: User, activity_id: int, exclude_workout_id: int | None = None) -> bool:
+    query = (
+        select(TrainingPlanWorkout.id)
+        .join(TrainingPlan)
+        .where(TrainingPlan.user_id == user.id, TrainingPlanWorkout.completed_activity_id == activity_id)
+    )
+    if exclude_workout_id is not None:
+        query = query.where(TrainingPlanWorkout.id != exclude_workout_id)
+    return db.scalar(query.limit(1)) is not None
+
+
+def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorkout, activity_id: int) -> TrainingPlanWorkout:
+    activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
+    if activity is None:
+        raise ValueError("Activity not found")
+    if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
+        raise ValueError("Activity already linked to another workout")
+    workout.completed_activity_id = activity.id
+    workout.status = "done"
+    db.commit()
+    db.refresh(workout)
+    return workout
+
+
+def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> TrainingPlanWorkout | None:
+    if activity_is_linked(db, user, activity.id):
+        return None
+    candidates = workout_match_candidates_for_activity(
+        db,
+        user,
+        activity,
+        limit=2,
+        active_only=True,
+        min_score=AUTO_MATCH_MIN_SCORE,
+        date_window_days=AUTO_MATCH_DATE_WINDOW_DAYS,
+    )
+    if not candidates:
+        return None
+    if len(candidates) > 1 and float(candidates[1]["score"]) >= float(candidates[0]["score"]) - 0.08:
+        return None
+    workout = candidates[0]["workout"]
+    workout.completed_activity_id = activity.id
+    workout.status = "done"
+    db.flush()
+    return workout
 
 
 def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
@@ -233,6 +483,7 @@ def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
         "explanation": plan.explanation,
         "workouts": [workout_to_dict(workout) for workout in workouts],
         "adherence": adherence_summary(workouts),
+        "weekly_adherence": weekly_adherence_summary(workouts),
     }
 
 
@@ -323,14 +574,21 @@ def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
 
 def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:
     updates = payload.model_dump(exclude_unset=True)
-    activity_id = updates.get("completed_activity_id")
-    if activity_id is not None:
-        activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
-        if activity is None:
-            raise ValueError("Activity not found")
-        workout.completed_activity_id = activity.id
-        if "status" not in updates:
-            workout.status = "done"
+    if "completed_activity_id" in updates:
+        activity_id = updates["completed_activity_id"]
+        if activity_id is None:
+            workout.completed_activity_id = None
+            if "status" not in updates and workout.status == "done":
+                workout.status = "planned"
+        else:
+            activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
+            if activity is None:
+                raise ValueError("Activity not found")
+            if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
+                raise ValueError("Activity already linked to another workout")
+            workout.completed_activity_id = activity.id
+            if "status" not in updates:
+                workout.status = "done"
     if "scheduled_date" in updates:
         workout.scheduled_date = updates["scheduled_date"]
         if workout.status == "planned":

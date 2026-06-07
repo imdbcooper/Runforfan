@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type PlanWorkout, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanWorkout, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "analytics" | "profile" | "planning" | "settings"
@@ -383,6 +383,9 @@ function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
 function Planning() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [result, setResult] = useState<Plan | null>(null)
+  const [candidatesByWorkout, setCandidatesByWorkout] = useState<Record<number, PlanActivityMatchCandidate[]>>({})
+  const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({})
+  const [loadingCandidates, setLoadingCandidates] = useState<number | null>(null)
 
   async function loadPlans() {
     await devLogin()
@@ -417,12 +420,34 @@ function Planning() {
     await loadPlans()
   }
 
+  async function loadCandidates(workout: PlanWorkout) {
+    setLoadingCandidates(workout.id)
+    setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
+    try {
+      const candidates = await api.workoutMatchCandidates(workout.id)
+      setCandidatesByWorkout((current) => ({ ...current, [workout.id]: candidates }))
+    } catch (error) {
+      console.error(error)
+      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось загрузить кандидатов" }))
+    } finally {
+      setLoadingCandidates(null)
+    }
+  }
+
+  async function linkCandidate(workout: PlanWorkout, activityId: number) {
+    await api.linkPlanWorkoutActivity(workout.id, activityId)
+    setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
+    if (result) setResult(await api.plan(result.id))
+    await loadPlans()
+  }
+
   useEffect(() => { void loadPlans() }, [])
 
   const weeks = Array.from(new Set(result?.workouts.map((workout) => workout.week_index) || [])).slice(0, 4)
   const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
   const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
   const planMode = !result ? null : !hasSafetyInfo ? "legacy" : conservative ? "safety gated" : "standard"
+  const weeklyAdherence = result?.weekly_adherence?.slice(0, 4) || []
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
       <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
@@ -449,28 +474,42 @@ function Planning() {
             {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Activate plan</Button> : <Badge>active plan</Badge>}
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round((result.adherence?.completion_rate || 0) * 100)}% adherence</Badge>
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} км</Badge>
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
+          {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="weeks" value={Math.max(...result.workouts.map((workout) => workout.week_index))} />
             <Stat label="workouts" value={result.workouts.length} />
             <Stat label="days/week" value={result.available_days_per_week} />
           </div>
-          <div className="grid gap-3">{weeks.map((week) => <PlanWeek key={week} week={week} workouts={result.workouts.filter((workout) => workout.week_index === week)} onUpdate={updateWorkout} />)}</div>
+          {weeklyAdherence.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">{weeklyAdherence.map((week) => <div key={week.week_index} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium text-white">Week {week.week_index}</span><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round(week.completion_rate * 100)}%</Badge></div><div className="mt-2 text-zinc-500">{week.done_workouts}/{week.planned_workouts} done</div><div className="text-zinc-500">{week.completed_distance_km}/{week.planned_distance_km} км</div></div>)}</div> : null}
+          <div className="grid gap-3">{weeks.map((week) => <PlanWeek key={week} week={week} workouts={result.workouts.filter((workout) => workout.week_index === week)} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} />)}</div>
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
       </div>
     </Card>
   </div>
 }
 
-function PlanWeek({ week, workouts, onUpdate }: { week: number; workouts: PlanWorkout[]; onUpdate: (workout: PlanWorkout, status: string) => Promise<void> }) {
+function PlanWeek({ week, workouts, candidatesByWorkout, candidateErrors, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate }: { week: number; workouts: PlanWorkout[]; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void> }) {
   const plannedDistance = workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
     <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">Week {week}</p><Badge>{plannedDistance.toFixed(1)} км</Badge></div>
-    <div className="grid gap-2 p-3">{workouts.map((workout) => <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
-      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><Badge className={workout.status === "done" ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div>
-      <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
-      <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => onUpdate(workout, "done")}>Done</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></div>
-    </div>)}</div>
+    <div className="grid gap-2 p-3">{workouts.map((workout) => {
+      const candidates = candidatesByWorkout[workout.id] || []
+      return <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div>
+        <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
+        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatDistance(workout.actual_distance_km)} · {formatDuration(workout.actual_duration_seconds)}</div> : null}
+        <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => onUpdate(workout, "done")}>Done</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button><Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
+        {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200">{candidateErrors[workout.id]}</p> : null}
+        {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+          {candidates.map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
+            <div><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? new Date(candidate.activity.started_at).toLocaleDateString("ru-RU") : "без даты"} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
+          </div>)}
+        </div> : null}
+      </div>
+    })}</div>
   </div>
 }
 

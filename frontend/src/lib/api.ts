@@ -141,10 +141,37 @@ export type PlanAdherence = {
   done_workouts: number
   missed_workouts: number
   skipped_workouts: number
+  linked_workouts: number
+  unlinked_done_workouts: number
   planned_distance_km: number
   completed_distance_km: number
   completion_rate: number
   distance_completion_rate: number
+  warnings: string[]
+}
+
+export type PlanWeeklyAdherence = PlanAdherence & {
+  week_index: number
+  planned_workouts: number
+  total_workouts: number | null
+}
+
+export type PlanActivityMatchCandidate = {
+  activity: Activity
+  score: number
+  confidence: "high" | "medium" | "low" | string
+  reasons: string[]
+  date_delta_days: number | null
+  distance_delta_km: number | null
+}
+
+export type PlanWorkoutMatchCandidate = {
+  workout: PlanWorkout
+  score: number
+  confidence: "high" | "medium" | "low" | string
+  reasons: string[]
+  date_delta_days: number | null
+  distance_delta_km: number | null
 }
 
 export type Plan = {
@@ -158,6 +185,7 @@ export type Plan = {
   explanation: string | null
   workouts: PlanWorkout[]
   adherence: PlanAdherence | null
+  weekly_adherence: PlanWeeklyAdherence[]
 }
 
 let token = localStorage.getItem("runforfan_token")
@@ -197,8 +225,12 @@ export const api = {
   replacePaceZones: (payload: ZoneWrite[]) => request<Zones>("/zones/pace", { method: "PUT", body: JSON.stringify(payload) }),
   plans: () => request<Plan[]>("/planning/plans"),
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
+  planAdherence: (id: number) => request<{ adherence: PlanAdherence; weekly_adherence: PlanWeeklyAdherence[] }>(`/planning/plans/${id}/adherence`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),
+  activityMatchCandidates: (id: number) => request<PlanWorkoutMatchCandidate[]>(`/planning/activities/${id}/match-candidates`),
+  linkPlanWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/link-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),

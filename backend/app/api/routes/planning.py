@@ -3,10 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import TrainingPlan, TrainingPlanWorkout, User
-from app.schemas.common import PlanGenerateRequest, PlanOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
+from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
-from app.services.planning import activate_plan, generate_plan, plan_to_dict, update_workout, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, generate_plan, link_activity_to_workout, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -25,6 +25,29 @@ def get_user_plan(db: Session, user: User, plan_id: int) -> TrainingPlan:
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
     return plan
+
+
+def get_user_workout(db: Session, user: User, workout_id: int) -> TrainingPlanWorkout:
+    workout = db.scalar(
+        select(TrainingPlanWorkout)
+        .join(TrainingPlan)
+        .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
+        .options(selectinload(TrainingPlanWorkout.completed_activity))
+    )
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    return workout
+
+
+def get_user_activity(db: Session, user: User, activity_id: int) -> Activity:
+    activity = db.scalar(
+        select(Activity)
+        .where(Activity.id == activity_id, Activity.user_id == user.id)
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+    )
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return activity
 
 
 @router.post("/generate", response_model=PlanOut)
@@ -50,6 +73,12 @@ def get_training_plan(plan_id: int, user: User = Depends(get_current_user), db: 
     return plan_to_dict(get_user_plan(db, user, plan_id))
 
 
+@router.get("/plans/{plan_id}/adherence")
+def get_training_plan_adherence(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    plan = plan_to_dict(get_user_plan(db, user, plan_id))
+    return {"adherence": plan["adherence"], "weekly_adherence": plan["weekly_adherence"]}
+
+
 @router.post("/plans/{plan_id}/activate", response_model=PlanOut)
 def activate_training_plan(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = activate_plan(db, user, get_user_plan(db, user, plan_id))
@@ -58,16 +87,31 @@ def activate_training_plan(plan_id: int, user: User = Depends(get_current_user),
 
 @router.patch("/workouts/{workout_id}", response_model=PlanWorkoutOut)
 def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workout = db.scalar(
-        select(TrainingPlanWorkout)
-        .join(TrainingPlan)
-        .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
-        .options(selectinload(TrainingPlanWorkout.completed_activity))
-    )
-    if not workout:
-        raise HTTPException(status_code=404, detail="Workout not found")
+    workout = get_user_workout(db, user, workout_id)
     try:
         updated = update_workout(db, user, workout, payload)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return workout_to_dict(updated)
+
+
+@router.get("/workouts/{workout_id}/match-candidates", response_model=list[PlanActivityMatchCandidateOut])
+def get_workout_match_candidates(workout_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    workout = get_user_workout(db, user, workout_id)
+    return activity_match_candidates_for_workout(db, user, workout)
+
+
+@router.post("/workouts/{workout_id}/link-activity", response_model=PlanWorkoutOut)
+def link_training_plan_workout_activity(workout_id: int, payload: PlanWorkoutLinkActivityRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    workout = get_user_workout(db, user, workout_id)
+    try:
+        linked = link_activity_to_workout(db, user, workout, payload.activity_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return workout_to_dict(linked)
+
+
+@router.get("/activities/{activity_id}/match-candidates", response_model=list[PlanWorkoutMatchCandidateOut])
+def get_activity_match_candidates(activity_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    activity = get_user_activity(db, user, activity_id)
+    return workout_match_candidates_for_activity(db, user, activity)

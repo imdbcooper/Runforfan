@@ -70,6 +70,13 @@ GET /health
 - `PUT /api/zones/pace` — заменить ручные pace-зоны.
 - `POST /api/planning/generate` — генерация тренировочной программы.
 - `GET /api/planning/plans` — список программ.
+- `GET /api/planning/plans/{id}` — детальная программа с workouts, adherence и weekly adherence.
+- `GET /api/planning/plans/{id}/adherence` — агрегированное и недельное соблюдение плана.
+- `POST /api/planning/plans/{id}/activate` — сделать программу активной.
+- `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку.
+- `GET /api/planning/workouts/{id}/match-candidates` — кандидаты фактических тренировок для planned workout.
+- `POST /api/planning/workouts/{id}/link-activity` — привязать фактическую тренировку к planned workout и отметить `done`.
+- `GET /api/planning/activities/{id}/match-candidates` — planned workout candidates для активности.
 
 Авторизация:
 
@@ -125,7 +132,10 @@ API настроек AI:
 - Если включен conservative mode, указаны injury notes, история короче 14 дней или зоны недостаточно точные, hard workouts заменяются аэробной/RPE работой.
 - Описание каждой тренировки содержит target по pace/HR zone, а если точных зон нет — fallback по RPE.
 - У planned workouts есть календарная дата, статус `planned/done/missed/skipped/rescheduled`, связь с фактической тренировкой и adherence summary.
-- API поддерживает активацию плана и обновление статусов planned workouts.
+- API поддерживает активацию плана, обновление статусов planned workouts, ручную привязку фактических тренировок и динамический поиск match candidates.
+- Matching учитывает близость даты, сходство дистанции и тип тренировки: interval-структуру, long/easy/tempo/steady эвристики.
+- После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
+- Adherence analytics показывает completion rate, distance completion rate, linked/unlinked выполненные тренировки, предупреждения и недельный breakdown.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 

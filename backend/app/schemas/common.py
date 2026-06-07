@@ -263,10 +263,19 @@ class PlanAdherenceOut(BaseModel):
     done_workouts: int
     missed_workouts: int
     skipped_workouts: int
+    linked_workouts: int = 0
+    unlinked_done_workouts: int = 0
     planned_distance_km: float
     completed_distance_km: float
     completion_rate: float
     distance_completion_rate: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PlanWeeklyAdherenceOut(PlanAdherenceOut):
+    week_index: int
+    planned_workouts: int
+    total_workouts: int | None = None
 
 
 class PlanWorkoutOut(BaseModel):
@@ -289,6 +298,28 @@ class PlanWorkoutOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlanActivityMatchCandidateOut(BaseModel):
+    activity: ActivityOut
+    score: float
+    confidence: str
+    reasons: list[str]
+    date_delta_days: int | None = None
+    distance_delta_km: float | None = None
+
+
+class PlanWorkoutMatchCandidateOut(BaseModel):
+    workout: PlanWorkoutOut
+    score: float
+    confidence: str
+    reasons: list[str]
+    date_delta_days: int | None = None
+    distance_delta_km: float | None = None
+
+
+class PlanWorkoutLinkActivityRequest(BaseModel):
+    activity_id: int
+
+
 class PlanOut(BaseModel):
     id: int
     title: str
@@ -300,5 +331,6 @@ class PlanOut(BaseModel):
     explanation: str | None = None
     workouts: list[PlanWorkoutOut]
     adherence: PlanAdherenceOut | None = None
+    weekly_adherence: list[PlanWeeklyAdherenceOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

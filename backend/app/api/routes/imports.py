@@ -11,6 +11,7 @@ from app.core.settings import get_settings
 from app.db.session import get_db
 from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, User
 from app.services.auth import get_current_user
+from app.services.planning import auto_match_activity_to_plan
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
 
 
@@ -140,6 +141,8 @@ def upload_screenshots(
     try:
         recognition = llm_or_template_recognize(db, batch.id, files, settings, user)
         activity = create_activity_from_payload(db, user, recognition["payload"], source_ids) if recognition.get("payload") else None
+        if activity:
+            auto_match_activity_to_plan(db, user, activity)
         batch.status = "recognized" if activity else recognition["status"]
         batch.recognition_engine = recognition["engine"]
         batch.recognition_message = recognition["message"]
