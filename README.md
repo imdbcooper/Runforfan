@@ -78,6 +78,8 @@ GET /health
 - `GET /api/planning/plans/{id}/recommendations/audit` — история примененных coach adjustments для плана.
 - `POST /api/planning/plans/{id}/activate` — сделать программу активной.
 - `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку.
+- `GET /api/planning/workouts/{id}/feedback` — получить субъективный feedback по planned workout.
+- `PUT /api/planning/workouts/{id}/feedback` — сохранить RPE/fatigue/pain/sleep/notes и обновить execution score в выдаче плана.
 - `GET /api/planning/workouts/{id}/match-candidates` — кандидаты фактических тренировок для planned workout.
 - `POST /api/planning/workouts/{id}/link-activity` — привязать фактическую тренировку к planned workout и отметить `done`.
 - `GET /api/planning/activities/{id}/match-candidates` — planned workout candidates для активности.
@@ -142,6 +144,8 @@ API настроек AI:
 - После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
 - Adherence analytics показывает completion rate, distance completion rate, linked/unlinked выполненные тренировки, предупреждения и недельный breakdown.
 - Coach recommendations дают подсказки и безопасный preview/apply: удержать объем, снизить следующую неделю, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate. Применение меняет будущие незавершенные workouts; исключение — missed/skipped key workout может быть переведен в `rescheduled` на новую дату. Каждое применение сохраняет audit history.
+- Workout feedback сохраняет RPE, fatigue, pain, sleep quality и notes для выполненных/пропущенных workouts; plan output показывает execution score и subjective risk рядом с workout card.
+- High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 

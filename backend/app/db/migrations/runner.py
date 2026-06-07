@@ -116,6 +116,29 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_training_plan_recommendation_audits_created_at ON training_plan_recommendation_audits (created_at)",
         ),
     ),
+    (
+        "20260607_0005_workout_completion_feedback",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS training_plan_workout_feedback (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                workout_id INTEGER NOT NULL REFERENCES training_plan_workouts(id) ON DELETE CASCADE,
+                rpe INTEGER,
+                fatigue INTEGER,
+                pain BOOLEAN NOT NULL DEFAULT FALSE,
+                pain_level INTEGER,
+                sleep_quality INTEGER,
+                notes TEXT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT uq_training_plan_workout_feedback_workout UNIQUE (workout_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_workout_feedback_user_id ON training_plan_workout_feedback (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_workout_feedback_workout_id ON training_plan_workout_feedback (workout_id)",
+        ),
+    ),
 )
 
 

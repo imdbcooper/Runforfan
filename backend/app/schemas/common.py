@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 
 class UserOut(BaseModel):
@@ -258,6 +258,32 @@ class PlanWorkoutUpdate(BaseModel):
     completed_activity_id: int | None = None
 
 
+class PlanWorkoutFeedbackIn(BaseModel):
+    rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain: bool = False
+    pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PlanWorkoutFeedbackOut(PlanWorkoutFeedbackIn):
+    id: int
+    workout_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlanWorkoutExecutionScoreOut(BaseModel):
+    score: float | None = None
+    status: str
+    volume_score: float | None = None
+    subjective_risk: str = "unknown"
+    flags: list[str] = Field(default_factory=list)
+
+
 class PlanAdherenceOut(BaseModel):
     total_workouts: int
     done_workouts: int
@@ -294,6 +320,8 @@ class PlanWorkoutOut(BaseModel):
     duration_seconds: int | None = None
     intensity: str | None = None
     description: str | None = None
+    feedback: PlanWorkoutFeedbackOut | None = None
+    execution_score: PlanWorkoutExecutionScoreOut | None = None
 
     model_config = {"from_attributes": True}
 

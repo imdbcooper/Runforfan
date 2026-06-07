@@ -17,6 +17,7 @@ from app.models.entities import (  # noqa: F401
     TrainingPlan,
     TrainingPlanRecommendationAudit,
     TrainingPlanWorkout,
+    TrainingPlanWorkoutFeedback,
     TrainingZone,
     User,
 )

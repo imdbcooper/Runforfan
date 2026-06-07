@@ -4,23 +4,26 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_recommendation_preview_changes, plan_to_dict, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_recommendation_preview_changes, plan_to_dict, save_workout_feedback, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 
 
 def plan_options():
-    return selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.completed_activity)
+    return (
+        selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.completed_activity),
+        selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback),
+    )
 
 
 def get_user_plan(db: Session, user: User, plan_id: int) -> TrainingPlan:
     plan = db.scalar(
         select(TrainingPlan)
         .where(TrainingPlan.id == plan_id, TrainingPlan.user_id == user.id)
-        .options(plan_options())
+        .options(*plan_options())
     )
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -32,7 +35,7 @@ def get_user_workout(db: Session, user: User, workout_id: int) -> TrainingPlanWo
         select(TrainingPlanWorkout)
         .join(TrainingPlan)
         .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
-        .options(selectinload(TrainingPlanWorkout.completed_activity))
+        .options(selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.feedback))
     )
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
@@ -62,7 +65,7 @@ def list_training_plans(user: User = Depends(get_current_user), db: Session = De
     plans = list(db.scalars(
         select(TrainingPlan)
         .where(TrainingPlan.user_id == user.id)
-        .options(plan_options())
+        .options(*plan_options())
         .order_by(TrainingPlan.created_at.desc())
     ))
     return [plan_to_dict(plan) for plan in plans]
@@ -125,6 +128,20 @@ def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, us
         status_code = 404 if "not found" in str(error).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(error)) from error
     return workout_to_dict(updated)
+
+
+@router.get("/workouts/{workout_id}/feedback", response_model=PlanWorkoutFeedbackOut | None)
+def get_training_plan_workout_feedback(workout_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return get_user_workout(db, user, workout_id).feedback
+
+
+@router.put("/workouts/{workout_id}/feedback", response_model=PlanWorkoutFeedbackOut)
+def save_training_plan_workout_feedback(workout_id: int, payload: PlanWorkoutFeedbackIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return save_workout_feedback(db, user, get_user_workout(db, user, workout_id), payload)
+    except ValueError as error:
+        status_code = 404 if "not found" in str(error).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
 
 
 @router.get("/workouts/{workout_id}/match-candidates", response_model=list[PlanActivityMatchCandidateOut])

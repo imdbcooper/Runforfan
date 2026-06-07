@@ -3,8 +3,9 @@ from datetime import date
 from unittest.mock import patch
 
 try:
-    from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
-    from app.services.planning import apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes
+    from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
+    from app.schemas.common import PlanWorkoutFeedbackIn
+    from app.services.planning import apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, workout_execution_score
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("SQLAlchemy is required for planning recommendation tests") from exc
@@ -39,6 +40,7 @@ def make_workout(
     workout_type: str = "easy",
     distance_km: float = 5.0,
     completed_activity: Activity | None = None,
+    intensity: str = "easy",
     week_index: int = 1,
     day_index: int = 1,
 ) -> TrainingPlanWorkout:
@@ -54,7 +56,7 @@ def make_workout(
         title=f"Workout {workout_id}",
         distance_km=distance_km,
         duration_seconds=None,
-        intensity="easy",
+        intensity=intensity,
         description=None,
     )
 
@@ -88,6 +90,9 @@ class FakeDb:
 
     def rollback(self):
         self.rolled_back = True
+
+    def refresh(self, _item):
+        return None
 
 
 class PlanAdjustmentRecommendationTests(unittest.TestCase):
@@ -192,6 +197,83 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         result = self.recommendations(plan)
 
         self.assertIn("review_zones", self.recommendation_types(result))
+
+    def test_execution_score_uses_linked_distance(self):
+        workout = make_workout(1, TODAY, status="done", distance_km=5.0, completed_activity=make_activity(101, 5.0))
+
+        score = workout_execution_score(workout)
+
+        self.assertEqual(score["score"], 1.0)
+        self.assertEqual(score["status"], "completed")
+        self.assertEqual(score["volume_score"], 1.0)
+
+    def test_execution_score_flags_pain_feedback(self):
+        workout = make_workout(1, TODAY, status="done", distance_km=5.0, completed_activity=make_activity(101, 5.0))
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5)
+
+        score = workout_execution_score(workout)
+
+        self.assertEqual(score["subjective_risk"], "high")
+        self.assertIn("pain reported", score["flags"])
+        self.assertLess(score["score"], 1.0)
+
+    def test_feedback_saves_on_completed_workout(self):
+        workout = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        make_plan(workout)
+
+        feedback = save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, fatigue=7, pain=False, sleep_quality=5))
+
+        self.assertEqual(feedback.rpe, 8)
+        self.assertEqual(workout.feedback.fatigue, 7)
+
+    def test_feedback_put_replaces_old_values_and_clears_pain_level(self):
+        workout = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        make_plan(workout)
+        save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, fatigue=9, pain=True, pain_level=5, notes="old"))
+
+        feedback = save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=4, pain=False))
+
+        self.assertEqual(feedback.rpe, 4)
+        self.assertIsNone(feedback.fatigue)
+        self.assertFalse(feedback.pain)
+        self.assertIsNone(feedback.pain_level)
+        self.assertIsNone(feedback.notes)
+
+    def test_feedback_rejected_on_planned_workout(self):
+        workout = make_workout(1, TODAY, status="planned")
+        make_plan(workout)
+
+        with self.assertRaises(ValueError):
+            save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=5))
+
+    def test_feedback_schema_rejects_non_integer_scores(self):
+        with self.assertRaises(ValueError):
+            PlanWorkoutFeedbackIn(rpe=4.5)
+
+    def test_risky_feedback_triggers_reduce_intensity_recommendation(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
+        plan = make_plan(
+            completed,
+            make_workout(2, date(2026, 6, 9), workout_type="interval", day_index=2),
+        )
+
+        result = self.recommendations(plan)
+
+        self.assertIn("reduce_intensity", self.recommendation_types(result))
+
+    def test_reduce_intensity_eases_only_first_hard_workout_in_window(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
+        first_hard = make_workout(2, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=2)
+        second_hard = make_workout(3, date(2026, 6, 9), workout_type="tempo", intensity="threshold", day_index=3)
+        plan = make_plan(completed, first_hard, second_hard)
+
+        preview = self.preview(plan)
+        intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
+
+        self.assertEqual(len(intensity_changes), 1)
+        self.assertEqual(intensity_changes[0]["workout_id"], 2)
 
     def test_preview_reduces_upcoming_volume_without_mutating_plan(self):
         upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)

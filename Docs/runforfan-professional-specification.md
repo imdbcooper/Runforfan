@@ -423,6 +423,8 @@ API:
 - `POST /api/planning/workouts/{id}/complete`
 - `POST /api/planning/workouts/{id}/attach-activity`
 - `PATCH /api/planning/workouts/{id}/feedback`
+- `GET /api/planning/workouts/{id}/feedback`
+- `PUT /api/planning/workouts/{id}/feedback`
 
 ### 6.11. Analytics Overview
 

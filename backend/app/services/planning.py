@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import PlanGenerateRequest, PlanWorkoutUpdate
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
+from app.schemas.common import PlanGenerateRequest, PlanWorkoutFeedbackIn, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import zones_response
 
@@ -197,6 +197,84 @@ def workout_description(workout_type: str, intensity: str, zones: dict, conserva
     return f"Комфортный бег в разговорном темпе. Цель: {target}."
 
 
+def feedback_to_dict(feedback: TrainingPlanWorkoutFeedback | None) -> dict[str, object] | None:
+    if feedback is None:
+        return None
+    return {
+        "id": feedback.id,
+        "workout_id": feedback.workout_id,
+        "rpe": feedback.rpe,
+        "fatigue": feedback.fatigue,
+        "pain": feedback.pain,
+        "pain_level": feedback.pain_level,
+        "sleep_quality": feedback.sleep_quality,
+        "notes": feedback.notes,
+        "created_at": feedback.created_at,
+        "updated_at": feedback.updated_at,
+    }
+
+
+def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
+    activity = workout.completed_activity
+    feedback = workout.feedback
+    flags: list[str] = []
+    volume_score: float | None = None
+    subjective_risk = "unknown"
+    if feedback:
+        subjective_risk = "low"
+        if feedback.pain or (feedback.pain_level is not None and feedback.pain_level >= 4):
+            subjective_risk = "high"
+            flags.append("pain reported")
+        elif (feedback.rpe is not None and feedback.rpe >= 8) or (feedback.fatigue is not None and feedback.fatigue >= 8):
+            subjective_risk = "high"
+            flags.append("high fatigue or RPE")
+        elif (feedback.rpe is not None and feedback.rpe >= 7) or (feedback.fatigue is not None and feedback.fatigue >= 7):
+            subjective_risk = "moderate"
+            flags.append("moderate fatigue or RPE")
+        if feedback.sleep_quality is not None and feedback.sleep_quality <= 3:
+            flags.append("poor sleep")
+            if subjective_risk == "low":
+                subjective_risk = "moderate"
+    if workout.status in {"missed", "skipped"}:
+        flags.append(f"workout {workout.status}")
+        return {"score": 0.0, "status": workout.status, "volume_score": 0.0, "subjective_risk": subjective_risk, "flags": flags}
+    if activity and workout.distance_km and activity.distance_km is not None:
+        relative_delta = abs(activity.distance_km - workout.distance_km) / max(workout.distance_km, 1)
+        volume_score = max(0.0, min(1.0, 1 - relative_delta / 0.5))
+        if activity.distance_km >= workout.distance_km * 1.2:
+            flags.append("actual volume above plan")
+        elif activity.distance_km <= workout.distance_km * 0.75:
+            flags.append("actual volume below plan")
+    subjective_score: float | None = None
+    if feedback:
+        subjective_score = 1.0
+        if feedback.pain or (feedback.pain_level is not None and feedback.pain_level >= 4):
+            subjective_risk = "high"
+            subjective_score = 0.35
+        elif (feedback.rpe is not None and feedback.rpe >= 8) or (feedback.fatigue is not None and feedback.fatigue >= 8):
+            subjective_risk = "high"
+            subjective_score = 0.45
+        elif (feedback.rpe is not None and feedback.rpe >= 7) or (feedback.fatigue is not None and feedback.fatigue >= 7):
+            subjective_risk = "moderate"
+            subjective_score = 0.7
+        if feedback.sleep_quality is not None and feedback.sleep_quality <= 3:
+            if subjective_risk == "low":
+                subjective_risk = "moderate"
+            subjective_score = min(subjective_score, 0.75)
+    components = [score for score in (volume_score, subjective_score) if score is not None]
+    score = round(sum(components) / len(components), 2) if components else None
+    status = "unknown"
+    if score is not None:
+        status = "completed" if score >= 0.8 else "partial" if score >= 0.45 else "at_risk"
+    return {
+        "score": score,
+        "status": status,
+        "volume_score": round(volume_score, 2) if volume_score is not None else None,
+        "subjective_risk": subjective_risk,
+        "flags": flags,
+    }
+
+
 def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
     activity = workout.completed_activity
     return {
@@ -215,6 +293,8 @@ def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
         "duration_seconds": workout.duration_seconds,
         "intensity": workout.intensity,
         "description": workout.description,
+        "feedback": feedback_to_dict(workout.feedback),
+        "execution_score": workout_execution_score(workout),
     }
 
 
@@ -306,6 +386,16 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
     missed_recent = [workout for workout in recent if workout.status in {"missed", "skipped"}]
     missed_key = [workout for workout in missed_recent if workout.workout_type in {"long", "interval", "tempo"}]
     recent_linked = [workout for workout in recent if workout.status == "done" and workout.completed_activity]
+    risky_feedback = [
+        workout
+        for workout in recent
+        if workout.feedback and (
+            workout.feedback.pain
+            or (workout.feedback.pain_level is not None and workout.feedback.pain_level >= 4)
+            or (workout.feedback.rpe is not None and workout.feedback.rpe >= 8)
+            or (workout.feedback.fatigue is not None and workout.feedback.fatigue >= 8)
+        )
+    ]
     recent_completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in recent_linked)
     upcoming_planned_distance = sum(workout.distance_km or 0 for workout in upcoming)
     safety_gated = bool(plan.explanation and "Safety gates:" in plan.explanation and "Safety gates: no active safety gates" not in plan.explanation)
@@ -369,6 +459,18 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             workout_id=workout.id,
             week_index=workout.week_index,
             suggested_payload={"action": "review_or_move_key_workout", "workout_id": workout.id},
+        ))
+
+    if risky_feedback:
+        recommendations.append(recommendation_item(
+            "reduce_intensity",
+            "warning",
+            "Recovery feedback is high",
+            "Recent RPE, fatigue or pain feedback suggests keeping the next hard workout easier.",
+            [f"{len(risky_feedback)} recent workouts with high subjective risk"],
+            workout_id=risky_feedback[-1].id,
+            week_index=risky_feedback[-1].week_index,
+            suggested_payload={"action": "reduce_intensity", "days": 3},
         ))
 
     if summary["distance_completion_rate"] >= 1.2:
@@ -542,14 +644,19 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
             changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
         return changed
 
-    def ease_upcoming_hard_workouts(reason: str) -> bool:
+    def ease_upcoming_hard_workouts(reason: str, days: int = 7, first_only: bool = False) -> bool:
         changed = False
         note = "Coach adjustment: keep this session easy until adherence stabilizes."
+        window_end = today + timedelta(days=max(1, days))
         hard_workouts = [
             workout
             for workout in upcoming
-            if workout.workout_type in {"interval", "tempo"} or (workout.intensity or "") in {"threshold", "interval", "tempo"}
+            if workout.scheduled_date and workout.scheduled_date <= window_end
+            and (workout.workout_type in {"interval", "tempo"} or (workout.intensity or "") in {"threshold", "interval", "tempo"})
         ]
+        hard_workouts.sort(key=lambda workout: (workout.scheduled_date or today, workout.week_index, workout.day_index, workout.id))
+        if first_only:
+            hard_workouts = hard_workouts[:1]
         for workout in hard_workouts:
             changed = add_change(workout, "intensity", "easy", reason) or changed
             changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
@@ -572,8 +679,9 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
             if not scale_upcoming_distances(percent, f"reduce next 7 days by {percent:g}%", reduce_volume_note):
                 skip(action, recommendation, "no mutable upcoming distance to reduce")
         elif action == "reduce_intensity":
-            if not ease_upcoming_hard_workouts("reduce intensity while safety or recovery risk is active"):
-                skip(action, recommendation, "no upcoming hard workouts to ease")
+            days = int(payload.get("days") or 3)
+            if not ease_upcoming_hard_workouts("reduce intensity while safety or recovery risk is active", days=days, first_only=True):
+                skip(action, recommendation, f"no hard workout in the next {days} days")
         elif action == "cap_next_week_growth":
             max_growth_percent = float(payload.get("max_growth_percent") or 25)
             recent_completed = float(recommendation_result["metrics"]["recent_completed_distance_km"] or 0)
@@ -1050,3 +1158,25 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         raise ValueError("Activity already linked to another workout") from error
     db.refresh(workout)
     return workout
+
+
+def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
+    if workout.status not in {"done", "missed", "skipped"}:
+        raise ValueError("Workout feedback requires completed, missed or skipped workout")
+    if workout.plan.user_id != user.id:
+        raise ValueError("Workout not found")
+    feedback = workout.feedback
+    if feedback is None:
+        feedback = TrainingPlanWorkoutFeedback(user_id=user.id, workout_id=workout.id)
+        db.add(feedback)
+        workout.feedback = feedback
+    updates = payload.model_dump()
+    for field, value in updates.items():
+        setattr(feedback, field, value)
+    if feedback.pain_level is not None and feedback.pain_level > 0:
+        feedback.pain = True
+    elif not feedback.pain:
+        feedback.pain_level = None
+    db.commit()
+    db.refresh(feedback)
+    return feedback

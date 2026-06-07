@@ -338,6 +338,24 @@ class TrainingPlanWorkout(Base):
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="workouts")
     completed_activity: Mapped[Activity | None] = relationship()
+    feedback: Mapped["TrainingPlanWorkoutFeedback | None"] = relationship(back_populates="workout", cascade="all, delete-orphan", uselist=False)
+
+
+class TrainingPlanWorkoutFeedback(Base, TimestampMixin):
+    __tablename__ = "training_plan_workout_feedback"
+    __table_args__ = (UniqueConstraint("workout_id", name="uq_training_plan_workout_feedback_workout"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="CASCADE"), index=True)
+    rpe: Mapped[int | None] = mapped_column(Integer)
+    fatigue: Mapped[int | None] = mapped_column(Integer)
+    pain: Mapped[bool] = mapped_column(Boolean, default=False)
+    pain_level: Mapped[int | None] = mapped_column(Integer)
+    sleep_quality: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    workout: Mapped[TrainingPlanWorkout] = relationship(back_populates="feedback")
 
 
 class TrainingPlanRecommendationAudit(Base):

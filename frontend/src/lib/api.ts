@@ -152,6 +152,29 @@ export type PlanWorkout = {
   duration_seconds: number | null
   intensity: string | null
   description: string | null
+  feedback: PlanWorkoutFeedback | null
+  execution_score: PlanWorkoutExecutionScore | null
+}
+
+export type PlanWorkoutFeedback = {
+  id: number
+  workout_id: number
+  rpe: number | null
+  fatigue: number | null
+  pain: boolean
+  pain_level: number | null
+  sleep_quality: number | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type PlanWorkoutExecutionScore = {
+  score: number | null
+  status: string
+  volume_score: number | null
+  subjective_risk: string
+  flags: string[]
 }
 
 export type PlanAdherence = {
@@ -322,6 +345,8 @@ export const api = {
   planRecommendationAudit: (id: number) => request<PlanRecommendationAudit[]>(`/planning/plans/${id}/recommendations/audit`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  workoutFeedback: (id: number) => request<PlanWorkoutFeedback | null>(`/planning/workouts/${id}/feedback`),
+  saveWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PUT", body: JSON.stringify(payload) }),
   workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),
   activityMatchCandidates: (id: number, activeOnly = false) => request<PlanWorkoutMatchCandidate[]>(`/planning/activities/${id}/match-candidates?active_only=${activeOnly}`),
   linkPlanWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/link-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
