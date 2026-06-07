@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -91,7 +91,8 @@ def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, us
     try:
         updated = update_workout(db, user, workout, payload)
     except ValueError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        status_code = 404 if "not found" in str(error).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
     return workout_to_dict(updated)
 
 
@@ -107,11 +108,12 @@ def link_training_plan_workout_activity(workout_id: int, payload: PlanWorkoutLin
     try:
         linked = link_activity_to_workout(db, user, workout, payload.activity_id)
     except ValueError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        status_code = 404 if "not found" in str(error).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
     return workout_to_dict(linked)
 
 
 @router.get("/activities/{activity_id}/match-candidates", response_model=list[PlanWorkoutMatchCandidateOut])
-def get_activity_match_candidates(activity_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_activity_match_candidates(activity_id: int, active_only: bool = Query(False), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     activity = get_user_activity(db, user, activity_id)
-    return workout_match_candidates_for_activity(db, user, activity)
+    return workout_match_candidates_for_activity(db, user, activity, active_only=active_only)

@@ -89,6 +89,12 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             """,
         ),
     ),
+    (
+        "20260607_0003_unique_workout_activity_links",
+        (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_training_plan_workouts_completed_activity_id ON training_plan_workouts (completed_activity_id) WHERE completed_activity_id IS NOT NULL",
+        ),
+    ),
 )
 
 

@@ -32,6 +32,24 @@ export type LlmProvider = {
   created_at: string
 }
 
+export type ImportBatch = {
+  id: number
+  status: string
+  source_app: string | null
+  recognition_engine: string | null
+  recognition_message: string | null
+  created_activity_id: number | null
+  matched_workout_id: number | null
+  match_status: "auto_matched" | "already_matched" | "matched" | "unmatched" | string
+  auto_matched: boolean
+  created_at: string
+}
+
+export type ImportUploadResult = Omit<ImportBatch, "source_app" | "created_at"> & {
+  source_app?: string | null
+  created_at?: string
+}
+
 export type AthleteProfile = {
   id: number
   user_id: number
@@ -212,6 +230,12 @@ export async function devLogin() {
 
 export const api = {
   activities: () => request<Activity[]>("/activities"),
+  imports: () => request<ImportBatch[]>("/imports"),
+  uploadScreenshots: (files: File[]) => {
+    const data = new FormData()
+    files.forEach((file) => data.append("screenshots", file))
+    return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
+  },
   analytics: () => request<Record<string, any>>("/analytics/summary"),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),
@@ -229,7 +253,7 @@ export const api = {
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),
-  activityMatchCandidates: (id: number) => request<PlanWorkoutMatchCandidate[]>(`/planning/activities/${id}/match-candidates`),
+  activityMatchCandidates: (id: number, activeOnly = false) => request<PlanWorkoutMatchCandidate[]>(`/planning/activities/${id}/match-candidates?active_only=${activeOnly}`),
   linkPlanWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/link-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),

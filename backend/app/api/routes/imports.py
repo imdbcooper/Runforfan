@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
-from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
 from app.services.auth import get_current_user
 from app.services.planning import auto_match_activity_to_plan
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
@@ -87,9 +87,32 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     return activity
 
 
+def matched_workout_ids_for_activities(db: Session, user: User, activity_ids: list[int]) -> dict[int, int]:
+    if not activity_ids:
+        return {}
+    rows = db.execute(
+        select(TrainingPlanWorkout.completed_activity_id, TrainingPlanWorkout.id)
+        .join(TrainingPlan)
+        .where(TrainingPlan.user_id == user.id, TrainingPlanWorkout.completed_activity_id.in_(activity_ids))
+        .order_by(TrainingPlanWorkout.id.asc())
+    ).all()
+    matched: dict[int, int] = {}
+    for activity_id, workout_id in rows:
+        if activity_id is not None and activity_id not in matched:
+            matched[int(activity_id)] = int(workout_id)
+    return matched
+
+
+def matched_workout_id_for_activity(db: Session, user: User, activity_id: int | None) -> int | None:
+    if activity_id is None:
+        return None
+    return matched_workout_ids_for_activities(db, user, [activity_id]).get(activity_id)
+
+
 @router.get("")
 def list_imports(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     batches = list(db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc())))
+    matched_by_activity = matched_workout_ids_for_activities(db, user, [batch.created_activity_id for batch in batches if batch.created_activity_id is not None])
     return [{
         "id": batch.id,
         "status": batch.status,
@@ -97,6 +120,9 @@ def list_imports(user: User = Depends(get_current_user), db: Session = Depends(g
         "recognition_engine": batch.recognition_engine,
         "recognition_message": batch.recognition_message,
         "created_activity_id": batch.created_activity_id,
+        "matched_workout_id": matched_by_activity.get(batch.created_activity_id),
+        "match_status": "matched" if matched_by_activity.get(batch.created_activity_id) else "unmatched",
+        "auto_matched": False,
         "created_at": batch.created_at,
     } for batch in batches]
 
@@ -138,11 +164,12 @@ def upload_screenshots(
         files.append(target)
         source_ids.append(source.id)
 
+    matched_workout = None
     try:
         recognition = llm_or_template_recognize(db, batch.id, files, settings, user)
         activity = create_activity_from_payload(db, user, recognition["payload"], source_ids) if recognition.get("payload") else None
         if activity:
-            auto_match_activity_to_plan(db, user, activity)
+            matched_workout = auto_match_activity_to_plan(db, user, activity)
         batch.status = "recognized" if activity else recognition["status"]
         batch.recognition_engine = recognition["engine"]
         batch.recognition_message = recognition["message"]
@@ -151,12 +178,21 @@ def upload_screenshots(
         batch.status = "validation_failed"
         batch.recognition_engine = "llm"
         batch.recognition_message = "; ".join(exc.errors)
+    except Exception:
+        batch.status = "recognition_failed"
+        batch.recognition_engine = "unknown"
+        batch.recognition_message = "Recognition failed unexpectedly. Check provider settings or uploaded screenshots."
 
     db.commit()
+    matched_workout_id = matched_workout.id if matched_workout else matched_workout_id_for_activity(db, user, batch.created_activity_id)
+    match_status = "auto_matched" if matched_workout else "already_matched" if matched_workout_id else "unmatched"
     return {
         "id": batch.id,
         "status": batch.status,
         "recognition_engine": batch.recognition_engine,
         "recognition_message": batch.recognition_message,
         "created_activity_id": batch.created_activity_id,
+        "matched_workout_id": matched_workout_id,
+        "match_status": match_status,
+        "auto_matched": bool(matched_workout),
     }

@@ -1,4 +1,4 @@
-import { Activity, Bot, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, X, Zap } from "lucide-react"
+import { Activity, Bot, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -6,14 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanWorkout, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "analytics" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "analytics" | "profile" | "planning" | "settings"
 
 const nav = [
   ["overview", "Dashboard", Zap],
   ["activities", "Activities", Activity],
+  ["imports", "Imports", Upload],
   ["analytics", "Analytics", ChartSpline],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
@@ -151,8 +152,9 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar status={status} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} analytics={analytics} providers={providers} />}
-            {page === "activities" && <Activities activities={activities} />}
+            {page === "overview" && <Overview activities={activities} analytics={analytics} providers={providers} onImport={() => setPage("imports")} />}
+            {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} />}
+            {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
@@ -197,10 +199,10 @@ function Topbar({ status, onMenu }: { status: string; onMenu: () => void }) {
   </header>
 }
 
-function Overview({ activities, analytics, providers }: { activities: ActivityType[]; analytics: Record<string, any>; providers: LlmProvider[] }) {
+function Overview({ activities, analytics, providers, onImport }: { activities: ActivityType[]; analytics: Record<string, any>; providers: LlmProvider[]; onImport: () => void }) {
   return <div className="grid gap-4">
     <div className="grid min-w-0 gap-4 xl:grid-cols-[1fr_1.35fr]">
-      <Card className="p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p><h2 className="mt-2 text-lg font-semibold text-white">Runforfan overview</h2><Button className="mt-3">+ Add screenshots</Button></Card>
+      <Card className="p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p><h2 className="mt-2 text-lg font-semibold text-white">Runforfan overview</h2><Button className="mt-3" onClick={onImport}>+ Add screenshots</Button></Card>
       <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
         <Stat label="activities" value={activities.length} />
         <Stat label="distance" value={analytics.total_distance_km || 0} suffix="km" />
@@ -208,7 +210,7 @@ function Overview({ activities, analytics, providers }: { activities: ActivityTy
         <Stat label="pace" value={formatPace(analytics.weighted_average_pace_seconds_per_km)} />
       </Card>
     </div>
-    <Activities activities={activities} compact />
+    <Activities activities={activities} compact onImport={onImport} />
   </div>
 }
 
@@ -216,9 +218,9 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
   return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">{label}</span></div>
 }
 
-function Activities({ activities, compact = false }: { activities: ActivityType[]; compact?: boolean }) {
+function Activities({ activities, compact = false, onImport }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void }) {
   return <Card>
-    <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm">+ Import</Button></CardHeader>
+    <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Name</th><th>Distance</th><th>Pace</th><th>HR</th><th>Structure</th><th>ID</th></tr></thead>
@@ -235,6 +237,153 @@ function Activities({ activities, compact = false }: { activities: ActivityType[
       </div>)}
     </div>}
   </Card>
+}
+
+function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
+  const [imports, setImports] = useState<ImportBatch[]>([])
+  const [uploadResult, setUploadResult] = useState<ImportUploadResult | null>(null)
+  const [matchCandidates, setMatchCandidates] = useState<PlanWorkoutMatchCandidate[]>([])
+  const [candidateError, setCandidateError] = useState("")
+  const [linkError, setLinkError] = useState("")
+  const [importHistoryError, setImportHistoryError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState("Upload screenshots from the same workout. Up to 6 files per batch.")
+
+  async function loadImports() {
+    setImportHistoryError("")
+    try {
+      await devLogin()
+      setImports(await api.imports())
+    } catch (error) {
+      console.error(error)
+      setImportHistoryError("Не удалось загрузить историю импортов")
+    }
+  }
+
+  async function loadCandidatesForResult(result: ImportUploadResult) {
+    setMatchCandidates([])
+    setCandidateError("")
+    if (!result.created_activity_id || result.matched_workout_id) {
+      return
+    }
+    try {
+      setMatchCandidates(await api.activityMatchCandidates(result.created_activity_id, true))
+    } catch (error) {
+      console.error(error)
+      setCandidateError("Не удалось загрузить кандидатов плана. Позже можно сопоставить вручную в Plans.")
+    }
+  }
+
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const input = form.elements.namedItem("screenshots") as HTMLInputElement | null
+    const files = Array.from(input?.files || [])
+    if (!files.length) {
+      setMessage("Выберите хотя бы один скриншот.")
+      return
+    }
+    if (files.length > 6) {
+      setMessage("Загрузите не больше 6 скриншотов за один batch.")
+      return
+    }
+    setBusy(true)
+    setMessage("Recognition is running...")
+    setMatchCandidates([])
+    setCandidateError("")
+    setLinkError("")
+    try {
+      await devLogin()
+      const result = await api.uploadScreenshots(files)
+      setUploadResult(result)
+      setMessage(result.recognition_message || "Import completed")
+      await loadCandidatesForResult(result)
+      await loadImports()
+      await onChanged()
+      form.reset()
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? error.message : "Import failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function linkCandidate(candidate: PlanWorkoutMatchCandidate) {
+    if (!uploadResult?.created_activity_id) return
+    setBusy(true)
+    setLinkError("")
+    try {
+      await api.linkPlanWorkoutActivity(candidate.workout.id, uploadResult.created_activity_id)
+      setUploadResult({ ...uploadResult, matched_workout_id: candidate.workout.id, match_status: "manual", auto_matched: false })
+      setMatchCandidates([])
+      await loadImports()
+      await onChanged()
+    } catch (error) {
+      console.error(error)
+      setLinkError("Не удалось привязать workout. Обновите candidates или сопоставьте из Plans.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => { void loadImports() }, [])
+
+  return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
+    <Card>
+      <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">LLM recognition or supported template fallback.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
+      <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
+        <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
+        <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
+      </form>
+      <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
+        <p className="leading-5">{message}</p>
+        <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
+      </div>
+    </Card>
+
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge>{uploadResult.status}</Badge>}</CardHeader>
+        {uploadResult ? <div className="grid gap-3 p-4 text-xs">
+          <div className="grid gap-2 md:grid-cols-4">
+            <Stat label="batch" value={`#${uploadResult.id}`} />
+            <Stat label="activity" value={uploadResult.created_activity_id ? `#${uploadResult.created_activity_id}` : "--"} />
+            <Stat label="matched" value={uploadResult.matched_workout_id ? `#${uploadResult.matched_workout_id}` : "--"} />
+            <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
+          </div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">{uploadResult.recognition_message || "No recognition message"}</div>
+          {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
+          {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
+        </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
+      </Card>
+
+      <Card>
+        <CardHeader><div><CardTitle>Import history</CardTitle><p className="text-xs text-zinc-500">Recent recognition batches for current user.</p></div><Button size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></CardHeader>
+        {importHistoryError ? <p className="px-4 pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-xs">
+            <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Date</th></tr></thead>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td className="text-zinc-500">{batch.created_at ? new Date(batch.created_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+          </table>
+          {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
+        </div>
+      </Card>
+    </div>
+  </div>
+}
+
+function MatchReview({ candidates, busy, candidateError, linkError, onLink }: { candidates: PlanWorkoutMatchCandidate[]; busy: boolean; candidateError: string; linkError: string; onLink: (candidate: PlanWorkoutMatchCandidate) => Promise<void> }) {
+  if (candidateError) return <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{candidateError}</div>
+  if (!candidates.length) return <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">No confident active-plan candidates. Open Plans to match manually later.</div>
+  return <div className="grid gap-2">
+    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Plan match candidates</p>
+    {linkError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{linkError}</p> : null}
+    {candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs md:grid-cols-[1fr_auto] md:items-center">
+      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">Week {candidate.workout.week_index} · {candidate.workout.scheduled_date ? new Date(candidate.workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {candidate.workout.distance_km?.toFixed(1) || "--"} км</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} aria-label={`Link uploaded activity to planned workout ${candidate.workout.title} #${candidate.workout.id}`} onClick={() => onLink(candidate)}>Link</Button></div>
+    </div>)}
+  </div>
 }
 
 function Analytics({ analytics }: { analytics: Record<string, any> }) {
@@ -415,14 +564,21 @@ function Planning() {
   }
 
   async function updateWorkout(workout: PlanWorkout, status: string) {
-    await api.updatePlanWorkout(workout.id, { status })
-    if (result) setResult(await api.plan(result.id))
-    await loadPlans()
+    setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
+    try {
+      await api.updatePlanWorkout(workout.id, { status })
+      if (result) setResult(await api.plan(result.id))
+      await loadPlans()
+    } catch (error) {
+      console.error(error)
+      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось обновить статус" }))
+    }
   }
 
   async function loadCandidates(workout: PlanWorkout) {
     setLoadingCandidates(workout.id)
     setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
+    setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
     try {
       const candidates = await api.workoutMatchCandidates(workout.id)
       setCandidatesByWorkout((current) => ({ ...current, [workout.id]: candidates }))
@@ -435,10 +591,16 @@ function Planning() {
   }
 
   async function linkCandidate(workout: PlanWorkout, activityId: number) {
-    await api.linkPlanWorkoutActivity(workout.id, activityId)
-    setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
-    if (result) setResult(await api.plan(result.id))
-    await loadPlans()
+    setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
+    try {
+      await api.linkPlanWorkoutActivity(workout.id, activityId)
+      setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
+      if (result) setResult(await api.plan(result.id))
+      await loadPlans()
+    } catch (error) {
+      console.error(error)
+      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось привязать активность" }))
+    }
   }
 
   useEffect(() => { void loadPlans() }, [])
@@ -500,12 +662,12 @@ function PlanWeek({ week, workouts, candidatesByWorkout, candidateErrors, loadin
         <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div>
         <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatDistance(workout.actual_distance_km)} · {formatDuration(workout.actual_duration_seconds)}</div> : null}
-        <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => onUpdate(workout, "done")}>Done</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button><Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
+        <div className="mt-2 flex flex-wrap gap-2">{workout.completed_activity_id ? <Button size="sm" variant="secondary" onClick={() => onUpdate(workout, "done")}>Done</Button> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
         {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200">{candidateErrors[workout.id]}</p> : null}
         {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           {candidates.map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
             <div><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? new Date(candidate.activity.started_at).toLocaleDateString("ru-RU") : "без даты"} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
+            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" aria-label={`Link activity ${candidate.activity.title} #${candidate.activity.id} to planned workout ${workout.title} #${workout.id}`} onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
           </div>)}
         </div> : null}
       </div>

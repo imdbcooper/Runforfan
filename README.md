@@ -106,6 +106,7 @@ API настроек AI:
 - Если данные проходят проверку, создается тренировка.
 - Если LLM не настроен, backend принимает только поддержанные template fallback-сценарии. Сейчас поддержан Huawei interval template для `scrins/training3`; неизвестные скрины возвращают `rejected_no_llm_template`.
 - Это сделано специально, чтобы не загрязнять аналитику ошибочными тренировками.
+- Новый frontend содержит страницу `Imports`: загрузка нескольких скриншотов, результат recognition, auto-match с активным планом и ручной match review, если уверенной авто-привязки нет.
 
 Профиль, расчеты и зоны:
 
@@ -182,6 +183,7 @@ npm run build
 
 - Панель.
 - Тренировки.
+- Imports.
 - Аналитика.
 - Profile & zones.
 - Планы.
@@ -190,6 +192,8 @@ npm run build
 Страница `AI настройки` позволяет пользователю добавить OpenAI-compatible или Anthropic provider, выбрать модель, указать base URL и сохранить API key.
 
 Страница `Profile & zones` позволяет редактировать физиологические параметры, видеть полноту профиля, safety warnings, расчетные HR/pace зоны с method/source/confidence metadata и добавлять измерения.
+
+Страница `Imports` позволяет загрузить до 6 скриншотов одной тренировки, увидеть статус recognition, созданную activity, auto-linked planned workout или кандидатов для ручной привязки.
 
 UI-стиль frontend:
 

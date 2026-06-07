@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from math import ceil
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, TrainingPlan, TrainingPlanWorkout, User
@@ -438,11 +439,19 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
     activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
     if activity is None:
         raise ValueError("Activity not found")
+    if workout.completed_activity_id is not None and workout.completed_activity_id != activity.id:
+        raise ValueError("Workout already linked to another activity")
+    if workout.completed_activity_id is None and workout.status not in MATCHABLE_WORKOUT_STATUSES:
+        raise ValueError("Workout status cannot be linked")
     if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
         raise ValueError("Activity already linked to another workout")
     workout.completed_activity_id = activity.id
     workout.status = "done"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise ValueError("Activity already linked to another workout") from error
     db.refresh(workout)
     return workout
 
@@ -464,6 +473,8 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
     if len(candidates) > 1 and float(candidates[1]["score"]) >= float(candidates[0]["score"]) - 0.08:
         return None
     workout = candidates[0]["workout"]
+    if workout.completed_activity_id is not None or workout.status not in MATCHABLE_WORKOUT_STATUSES:
+        return None
     workout.completed_activity_id = activity.id
     workout.status = "done"
     db.flush()
@@ -574,27 +585,44 @@ def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
 
 def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:
     updates = payload.model_dump(exclude_unset=True)
+    next_completed_activity_id = workout.completed_activity_id
     if "completed_activity_id" in updates:
         activity_id = updates["completed_activity_id"]
         if activity_id is None:
             workout.completed_activity_id = None
+            next_completed_activity_id = None
             if "status" not in updates and workout.status == "done":
                 workout.status = "planned"
         else:
             activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
             if activity is None:
                 raise ValueError("Activity not found")
+            if workout.completed_activity_id is not None and workout.completed_activity_id != activity.id:
+                raise ValueError("Workout already linked to another activity")
+            if workout.completed_activity_id is None and workout.status not in MATCHABLE_WORKOUT_STATUSES:
+                raise ValueError("Workout status cannot be linked")
             if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
                 raise ValueError("Activity already linked to another workout")
             workout.completed_activity_id = activity.id
+            next_completed_activity_id = activity.id
             if "status" not in updates:
                 workout.status = "done"
+            elif updates["status"] != "done":
+                raise ValueError("Linked workout status must be done")
     if "scheduled_date" in updates:
         workout.scheduled_date = updates["scheduled_date"]
         if workout.status == "planned":
             workout.status = "rescheduled"
     if "status" in updates and updates["status"] is not None:
+        if updates["status"] == "done" and next_completed_activity_id is None:
+            raise ValueError("Done workout requires linked activity")
+        if updates["status"] != "done" and next_completed_activity_id is not None:
+            raise ValueError("Linked workout status must be done")
         workout.status = updates["status"]
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise ValueError("Activity already linked to another workout") from error
     db.refresh(workout)
     return workout
