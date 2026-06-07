@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
@@ -79,6 +79,18 @@ function numberOrNull(value: FormDataEntryValue | null) {
 
 function stringOrNull(value: FormDataEntryValue | null) {
   return value === null || value === "" ? null : String(value)
+}
+
+function planBuilderPayload(form: HTMLFormElement) {
+  const data = new FormData(form)
+  return {
+    title: stringOrNull(data.get("title")) || "Марафонская программа",
+    goal_type: stringOrNull(data.get("goal_type")) || "marathon",
+    race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
+    target_date: stringOrNull(data.get("target_date")),
+    available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
+    current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
+  }
 }
 
 function feedbackDraftFromWorkout(workout: PlanWorkout): FeedbackDraft {
@@ -1003,9 +1015,36 @@ function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
   </div>
 }
 
+function planWeekCount(plan: Plan) {
+  return plan.workouts.length ? Math.max(...plan.workouts.map((workout) => workout.week_index)) : 0
+}
+
+function planPlannedDistance(plan: Plan) {
+  return plan.workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
+}
+
+function planCurrentWeekLabel(plan: Plan) {
+  const weekStart = startOfWeekISO()
+  const weekEnd = addDays(weekStart, 6)
+  const currentWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date >= weekStart && workout.scheduled_date <= weekEnd)
+  if (currentWorkout) return `week ${currentWorkout.week_index}`
+  const nextWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date > weekEnd)
+  return nextWorkout ? `next ${formatDate(nextWorkout.scheduled_date)}` : "--"
+}
+
+function planStatusClass(status: string) {
+  if (status === "active") return "border-orange-400/40 bg-orange-400/15 text-orange-100"
+  if (status === "completed") return "border-zinc-500 bg-zinc-800 text-zinc-100"
+  if (status === "archived") return "border-zinc-800 bg-zinc-950 text-zinc-500"
+  return "border-zinc-700 bg-zinc-900 text-zinc-300"
+}
+
 function Planning() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [result, setResult] = useState<Plan | null>(null)
+  const [builderPreview, setBuilderPreview] = useState<PlanBuilderPreview | null>(null)
+  const [builderPreviewError, setBuilderPreviewError] = useState("")
+  const [previewingBuilder, setPreviewingBuilder] = useState(false)
   const [candidatesByWorkout, setCandidatesByWorkout] = useState<Record<number, PlanActivityMatchCandidate[]>>({})
   const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({})
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<number, FeedbackDraft>>({})
@@ -1018,35 +1057,120 @@ function Planning() {
   const [previewingRecommendations, setPreviewingRecommendations] = useState(false)
   const [applyingRecommendations, setApplyingRecommendations] = useState(false)
   const [loadingCandidates, setLoadingCandidates] = useState<number | null>(null)
+  const [busyPlan, setBusyPlan] = useState<number | null>(null)
+  const [planActionError, setPlanActionError] = useState("")
+  const [renameDrafts, setRenameDrafts] = useState<Record<number, string>>({})
+  const planBuilderForm = useRef<HTMLFormElement>(null)
   const recommendationsRequest = useRef(0)
 
-  async function loadPlans() {
+  async function loadPlans(preferredPlanId?: number | null) {
     await devLogin()
     const nextPlans = await api.plans()
+    const previousTitles = new Map(plans.map((plan) => [plan.id, plan.title]))
     setPlans(nextPlans)
-    setResult((current) => current ? nextPlans.find((plan) => plan.id === current.id) || current : nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null)
+    setRenameDrafts((current) => {
+      const next: Record<number, string> = {}
+      for (const plan of nextPlans) {
+        const currentDraft = current[plan.id]
+        const previousTitle = previousTitles.get(plan.id)
+        next[plan.id] = currentDraft === undefined || currentDraft === previousTitle ? plan.title : currentDraft
+      }
+      return next
+    })
+    setResult((current) => {
+      if (preferredPlanId === null) return nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
+      if (preferredPlanId !== undefined) return nextPlans.find((plan) => plan.id === preferredPlanId) || nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
+      return current ? nextPlans.find((plan) => plan.id === current.id) || current : nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
+    })
   }
 
   async function generate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    const plan = await api.generatePlan({
-      title: stringOrNull(data.get("title")) || "Марафонская программа",
-      goal_type: stringOrNull(data.get("goal_type")) || "marathon",
-      race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
-      target_date: stringOrNull(data.get("target_date")),
-      available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
-      current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
-    })
+    const plan = await api.generatePlan(planBuilderPayload(event.currentTarget))
     setResult(plan)
-    await loadPlans()
+    await loadPlans(plan.id)
+  }
+
+  async function previewBuilder() {
+    if (!planBuilderForm.current) return
+    setPreviewingBuilder(true)
+    setBuilderPreviewError("")
+    try {
+      setBuilderPreview(await api.previewPlan(planBuilderPayload(planBuilderForm.current)))
+    } catch (error) {
+      console.error(error)
+      setBuilderPreviewError("Не удалось подготовить preview плана")
+    } finally {
+      setPreviewingBuilder(false)
+    }
   }
 
   async function activate(id: number) {
     const plan = await api.activatePlan(id)
     setResult(plan)
-    await loadPlans()
+    await loadPlans(plan.id)
     await loadRecommendations(plan.id)
+  }
+
+  async function updatePlanStatus(plan: Plan, status: "completed" | "archived") {
+    setBusyPlan(plan.id)
+    setPlanActionError("")
+    try {
+      const updated = await api.updatePlan(plan.id, { status })
+      await loadPlans(updated.id)
+      await loadRecommendations(updated.id)
+      await loadRecommendationAudits(updated.id)
+    } catch (error) {
+      console.error(error)
+      setPlanActionError(`Не удалось обновить план #${plan.id}`)
+    } finally {
+      setBusyPlan(null)
+    }
+  }
+
+  async function renamePlan(plan: Plan) {
+    const title = (renameDrafts[plan.id] || plan.title).trim()
+    if (!title || title === plan.title) return
+    setBusyPlan(plan.id)
+    setPlanActionError("")
+    try {
+      const updated = await api.updatePlan(plan.id, { title })
+      await loadPlans(updated.id)
+    } catch (error) {
+      console.error(error)
+      setPlanActionError(`Не удалось переименовать план #${plan.id}`)
+    } finally {
+      setBusyPlan(null)
+    }
+  }
+
+  async function duplicatePlan(plan: Plan) {
+    setBusyPlan(plan.id)
+    setPlanActionError("")
+    try {
+      const duplicated = await api.duplicatePlan(plan.id)
+      await loadPlans(duplicated.id)
+    } catch (error) {
+      console.error(error)
+      setPlanActionError(`Не удалось дублировать план #${plan.id}`)
+    } finally {
+      setBusyPlan(null)
+    }
+  }
+
+  async function deleteSelectedPlan(plan: Plan) {
+    if (!window.confirm(`Delete plan #${plan.id}? This cannot be undone.`)) return
+    setBusyPlan(plan.id)
+    setPlanActionError("")
+    try {
+      await api.deletePlan(plan.id)
+      await loadPlans(null)
+    } catch (error) {
+      console.error(error)
+      setPlanActionError(plan.status === "active" ? "Активный план нельзя удалить: сначала архивируйте его" : `Не удалось удалить план #${plan.id}`)
+    } finally {
+      setBusyPlan(null)
+    }
   }
 
   async function updateWorkout(workout: PlanWorkout, status: string) {
@@ -1058,7 +1182,7 @@ function Planning() {
         setResult(plan)
         await loadRecommendations(plan.id)
       }
-      await loadPlans()
+      await loadPlans(result?.id)
     } catch (error) {
       console.error(error)
       setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось обновить статус" }))
@@ -1090,7 +1214,7 @@ function Planning() {
         setResult(plan)
         await loadRecommendations(plan.id)
       }
-      await loadPlans()
+      await loadPlans(result?.id)
     } catch (error) {
       console.error(error)
       setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось привязать активность" }))
@@ -1124,7 +1248,7 @@ function Planning() {
         setResult(plan)
         await loadRecommendations(plan.id)
       }
-      await loadPlans()
+      await loadPlans(result?.id)
     } catch (error) {
       console.error(error)
       setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось сохранить feedback" }))
@@ -1181,7 +1305,7 @@ function Planning() {
       const applied = await api.applyPlanRecommendations(planId, recommendationPreview.changes)
       setResult(applied.plan)
       setRecommendationPreview(null)
-      await loadPlans()
+      await loadPlans(applied.plan.id)
       await loadRecommendations(applied.plan.id)
       await loadRecommendationAudits(applied.plan.id)
     } catch (error) {
@@ -1217,18 +1341,21 @@ function Planning() {
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
       <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
-      <form onSubmit={generate} className="grid gap-3 p-4 text-xs">
+      <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
         <Field label="Название"><Input name="title" defaultValue="Марафонская программа" /></Field>
         <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option></Select></Field>
         <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
         <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
         <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
         <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
-        <Button type="submit">Generate profile-aware plan</Button>
+        <div className="grid gap-2 sm:grid-cols-2"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview plan"}</Button><Button type="submit">Generate plan</Button></div>
       </form>
+      {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
+      {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
       <div className="border-t border-zinc-800 p-4">
         <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-white">Saved plans</p><Badge>{plans.length} total</Badge></div>
-        <div className="grid gap-2">{plans.slice(0, 6).map((plan) => <button key={plan.id} onClick={() => setResult(plan)} className={cn("rounded-md border px-2 py-2 text-left text-xs", result?.id === plan.id ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950 hover:bg-zinc-900")}><span className="font-medium text-white">{plan.title}</span><span className="ml-2 text-zinc-500">#{plan.id}</span><div className="mt-1 flex items-center gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{plan.status}</Badge><span className="text-zinc-500">{plan.workouts.length} workouts</span></div></button>)}</div>
+        {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
+        <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
       </div>
     </Card>
     <Card>
@@ -1254,6 +1381,61 @@ function Planning() {
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
       </div>
     </Card>
+  </div>
+}
+
+function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
+  const maxVolume = Math.max(...preview.weekly_volume_curve.map((week) => week.planned_distance_km), 1)
+  const split = ["easy", "steady", "hard"].map((key) => ({ key, value: Math.round((preview.intensity_split[key] || 0) * 100) }))
+  const firstWorkouts = preview.workouts.slice(0, 8)
+  return <div className="mx-4 mb-4 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div><p className="font-semibold text-white">Builder preview</p><p className="mt-1 text-zinc-500">Baseline, risk flags and first workouts before saving a draft.</p></div>
+      <Badge className={preview.risk_flags.some((flag) => flag.severity === "critical" || flag.severity === "warning") ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{preview.risk_flags.length} flags</Badge>
+    </div>
+    <p className="mt-3 leading-5 text-zinc-400">{preview.explanation}</p>
+    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+      <Stat label="weeks" value={preview.weeks} />
+      <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix="km" />
+      <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix="km" />
+    </div>
+    <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Baseline</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500">
+        <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
+        <p>history: <span className="text-zinc-300">{preview.baseline.history_span_days} days</span></p>
+        <p>activities: <span className="text-zinc-300">{preview.baseline.activity_count}</span></p>
+        <p>recent long: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} km</span></p>
+      </div>
+      <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
+    </div>
+    <div className="mt-3 grid gap-2">
+      {preview.weekly_volume_curve.slice(0, 6).map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} km</span></div>)}
+    </div>
+    <div className="mt-3 flex flex-wrap gap-2">{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
+    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workout.distance_km?.toFixed(1) || "--"} km · {workout.intensity || "--"}</p></div>)}</div>
+  </div>
+}
+
+function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDraft, onRename, onActivate, onArchive, onComplete, onDuplicate, onDelete }: { plan: Plan; selected: boolean; busy: boolean; renameDraft: string; onSelect: () => void; onRenameDraft: (value: string) => void; onRename: () => void; onActivate: () => void; onArchive: () => void; onComplete: () => void; onDuplicate: () => void; onDelete: () => void }) {
+  const weeks = planWeekCount(plan)
+  const plannedKm = planPlannedDistance(plan)
+  const adherence = Math.round((plan.adherence?.completion_rate || 0) * 100)
+  const renameChanged = renameDraft.trim() && renameDraft.trim() !== plan.title
+  return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
+    <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
+      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{plan.status}</Badge></div>
+      <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="workouts" value={plan.workouts.length} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="done" value={`${adherence}%`} /></div>
+    </div>
+    <div className="mt-2 grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Plan title" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Saving..." : "Rename"}</Button></div>
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Activate</Button> : null}
+      {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Complete</Button> : null}
+      {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>Archive</Button> : null}
+      <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Duplicate</Button>
+      <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Delete</Button>
+    </div>
   </div>
 }
 

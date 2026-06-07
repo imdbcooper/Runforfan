@@ -287,6 +287,60 @@ export type Plan = {
   weekly_adherence: PlanWeeklyAdherence[]
 }
 
+export type PlanBuilderBaseline = {
+  observed_weekly_volume_km: number[]
+  current_weekly_volume_km: number
+  current_weekly_volume_source: string
+  recent_long_run_km: number | null
+  history_span_days: number
+  activity_count: number
+  training_age_level: string
+  confidence: string
+}
+
+export type PlanBuilderWeeklyVolume = {
+  week_index: number
+  planned_distance_km: number
+  long_run_km: number
+  hard_sessions: number
+}
+
+export type PlanBuilderRiskFlag = {
+  code: string
+  severity: "info" | "warning" | "critical" | string
+  message: string
+  reasons: string[]
+}
+
+export type PlanBuilderPreviewWorkout = {
+  week_index: number
+  day_index: number
+  scheduled_date: string
+  workout_type: string
+  title: string
+  distance_km: number | null
+  intensity: string | null
+  description: string | null
+}
+
+export type PlanBuilderPreview = {
+  title: string
+  goal_type: string
+  race_distance_km: number | null
+  target_date: string | null
+  weeks: number
+  available_days_per_week: number
+  start_date: string
+  current_weekly_distance_km: number
+  peak_weekly_distance_km: number
+  baseline: PlanBuilderBaseline
+  weekly_volume_curve: PlanBuilderWeeklyVolume[]
+  intensity_split: Record<string, number>
+  risk_flags: PlanBuilderRiskFlag[]
+  workouts: PlanBuilderPreviewWorkout[]
+  explanation: string
+}
+
 export type PlanRecommendationApplyResult = {
   plan_id: number
   audit_id: number
@@ -457,6 +511,9 @@ export const api = {
   applyPlanRecommendations: (id: number, changes: PlanRecommendationChange[]) => request<PlanRecommendationApplyResult>(`/planning/plans/${id}/recommendations/apply`, { method: "POST", body: JSON.stringify({ changes }) }),
   planRecommendationAudit: (id: number) => request<PlanRecommendationAudit[]>(`/planning/plans/${id}/recommendations/audit`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
+  updatePlan: (id: number, payload: Record<string, unknown>) => request<Plan>(`/planning/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  duplicatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/duplicate`, { method: "POST", body: "{}" }),
+  deletePlan: (id: number) => request<{ deleted: boolean; id: number }>(`/planning/plans/${id}`, { method: "DELETE" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutFeedback: (id: number) => request<PlanWorkoutFeedback | null>(`/planning/workouts/${id}/feedback`),
   saveWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PUT", body: JSON.stringify(payload) }),
@@ -466,5 +523,6 @@ export const api = {
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
+  previewPlan: (payload: Record<string, unknown>) => request<PlanBuilderPreview>("/planning/preview", { method: "POST", body: JSON.stringify(payload) }),
   generatePlan: (payload: Record<string, unknown>) => request<Plan>("/planning/generate", { method: "POST", body: JSON.stringify(payload) }),
 }

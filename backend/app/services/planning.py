@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
+from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -7,10 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
-from app.schemas.common import PlanGenerateRequest, PlanWorkoutFeedbackIn, PlanWorkoutUpdate
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, TrainingZone, User
+from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutFeedbackIn, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
-from app.services.zones import zones_response
+from app.services.zones import calculated_zones, zone_type_for_unit
 
 
 MATCHABLE_WORKOUT_STATUSES = ("planned", "rescheduled")
@@ -18,6 +19,9 @@ CANDIDATE_MIN_SCORE = 0.25
 CANDIDATE_DATE_WINDOW_DAYS = 7
 AUTO_MATCH_MIN_SCORE = 0.78
 AUTO_MATCH_DATE_WINDOW_DAYS = 3
+DEFAULT_WEEKLY_VOLUME_KM = 15.0
+HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
+HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
 APPLICABLE_RECOMMENDATION_ACTIONS = {
     "hold_next_week_volume",
     "reduce_next_week_volume",
@@ -27,10 +31,11 @@ APPLICABLE_RECOMMENDATION_ACTIONS = {
 }
 
 
-def weeks_until(target_date: date | None) -> int:
+def weeks_until(target_date: date | None, today: date | None = None) -> int:
     if not target_date:
         return 8
-    return max(4, min(24, ceil((target_date - date.today()).days / 7)))
+    reference_date = today or date.today()
+    return max(4, min(24, ceil((target_date - reference_date).days / 7)))
 
 
 def race_name(distance_km: float | None) -> str:
@@ -138,6 +143,145 @@ def recent_training_context(db: Session, user: User) -> dict[str, object]:
         "recent_activity_count": len(recent),
         "history_span_days": history_span_days,
         "recent_weekly_distance_km": round(weekly_distance, 1) if weekly_distance else None,
+    }
+
+
+def profile_for_plan_builder(db: Session, user: User, persist: bool = False) -> AthleteProfile:
+    if persist:
+        return get_or_create_profile(db, user)
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    if profile:
+        return profile
+    return AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", conservative_mode=False)
+
+
+def zones_for_plan_builder(db: Session, user: User, profile: AthleteProfile) -> dict[str, object]:
+    stored = list(db.scalars(select(TrainingZone).where(TrainingZone.user_id == user.id, TrainingZone.is_active.is_(True))))
+    stored_dicts = [
+        {
+            "id": zone.id,
+            "zone_type": zone.zone_type,
+            "method": zone.method,
+            "zone_key": zone.zone_key,
+            "label": zone.label,
+            "lower_value": zone.lower_value,
+            "upper_value": zone.upper_value,
+            "unit": zone.unit,
+            "confidence": zone.confidence,
+            "source_reference": zone.source_reference,
+            "is_active": zone.is_active,
+        }
+        for zone in stored
+    ]
+    manual_types = {zone.zone_type for zone in stored if zone.method == "manual"}
+    stored_signatures = {(zone.zone_type, zone.method, zone.zone_key) for zone in stored}
+    calculated = [
+        zone for zone in calculated_zones(profile)
+        if zone_type_for_unit(str(zone["unit"])) not in manual_types
+        and (zone_type_for_unit(str(zone["unit"])), str(zone["method"]), str(zone["zone_key"])) not in stored_signatures
+    ]
+    combined = stored_dicts + [
+        {
+            "id": None,
+            "zone_type": zone_type_for_unit(str(zone["unit"])),
+            "method": zone["method"],
+            "zone_key": zone["zone_key"],
+            "label": zone.get("label"),
+            "lower_value": zone["lower_value"],
+            "upper_value": zone["upper_value"],
+            "unit": zone["unit"],
+            "confidence": zone["confidence"],
+            "source_reference": zone["source_reference"],
+            "is_active": True,
+        }
+        for zone in calculated
+    ]
+    return {
+        "hr": [zone for zone in combined if zone["zone_type"] == "hr"],
+        "pace": [zone for zone in combined if zone["zone_type"] == "pace"],
+        "rpe": [zone for zone in combined if zone["zone_type"] == "rpe"],
+        "metadata": {
+            "calculated_count": len(calculated),
+            "stored_count": len(stored),
+            "manual_zone_types": sorted(manual_types),
+        },
+    }
+
+
+def plan_builder_timezone(profile: AthleteProfile) -> ZoneInfo:
+    try:
+        return ZoneInfo(profile.timezone or "Europe/Moscow")
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def activity_started_date(activity: Activity, profile: AthleteProfile) -> date | None:
+    if not activity.started_at:
+        return None
+    started_at = activity.started_at
+    timezone = plan_builder_timezone(profile)
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone)
+    return started_at.astimezone(timezone).date()
+
+
+def plan_builder_training_context(db: Session, user: User, profile: AthleteProfile, today: date) -> dict[str, object]:
+    activities = list(db.scalars(
+        select(Activity)
+        .where(Activity.user_id == user.id, Activity.started_at.is_not(None))
+        .order_by(Activity.started_at.desc(), Activity.id.desc())
+        .limit(240)
+    ))
+    dated = [
+        (activity, started_date)
+        for activity in activities
+        if (started_date := activity_started_date(activity, profile)) is not None and started_date <= today
+    ]
+    history_span_days = (max(started_date for _, started_date in dated) - min(started_date for _, started_date in dated)).days + 1 if dated else 0
+    observed_weekly_volume = [0.0 for _ in range(6)]
+    observed_start = today - timedelta(days=41)
+    recent_long_run = 0.0
+    recent_long_start = today - timedelta(days=55)
+    for activity, started_date in dated:
+        distance = float(activity.distance_km or 0)
+        if observed_start <= started_date <= today:
+            bucket = min(5, max(0, (started_date - observed_start).days // 7))
+            observed_weekly_volume[bucket] += distance
+        if recent_long_start <= started_date <= today:
+            recent_long_run = max(recent_long_run, distance)
+
+    active_recent_weeks = [volume for volume in observed_weekly_volume[-4:] if volume > 0]
+    if len(active_recent_weeks) >= 2:
+        current_volume = float(median(active_recent_weeks))
+        source = "observed_median_4w"
+    else:
+        current_volume = DEFAULT_WEEKLY_VOLUME_KM
+        source = "fallback"
+
+    if history_span_days >= 180 and current_volume >= 45:
+        training_age_level = "advanced"
+    elif history_span_days >= 56 and current_volume >= 18:
+        training_age_level = "intermediate"
+    else:
+        training_age_level = "beginner"
+
+    if source == "observed_median_4w" and history_span_days >= 42:
+        confidence = "high"
+    elif source == "observed_median_4w" or history_span_days >= 14:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "activity_count": len(dated),
+        "history_span_days": history_span_days,
+        "observed_weekly_volume_km": [round(volume, 1) for volume in observed_weekly_volume],
+        "current_weekly_volume_km": round(current_volume, 1),
+        "current_weekly_volume_source": source,
+        "recent_weekly_distance_km": round(current_volume, 1),
+        "recent_long_run_km": round(recent_long_run, 1) if recent_long_run else None,
+        "training_age_level": training_age_level,
+        "confidence": confidence,
     }
 
 
@@ -1030,18 +1174,141 @@ def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
     }
 
 
-def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> TrainingPlan:
-    weeks = weeks_until(request.target_date)
+def preview_workout_is_hard(workout: dict[str, object]) -> bool:
+    return str(workout.get("workout_type") or "") in HARD_PLAN_WORKOUT_TYPES or str(workout.get("intensity") or "") in HARD_PLAN_INTENSITIES
+
+
+def preview_intensity_category(workout: dict[str, object]) -> str:
+    if preview_workout_is_hard(workout):
+        return "hard"
+    if "steady" in str(workout.get("intensity") or "") or workout.get("workout_type") == "steady":
+        return "steady"
+    return "easy"
+
+
+def builder_risk_flags(
+    request: PlanGenerateRequest,
+    baseline: dict[str, object],
+    weekly_curve: list[dict[str, object]],
+    workouts: list[dict[str, object]],
+    safety: dict[str, object],
+    completeness: dict[str, object],
+    goal_distance: float,
+    weeks: int,
+    start_date: date,
+) -> list[dict[str, object]]:
+    flags: list[dict[str, object]] = []
+    if request.target_date:
+        min_weeks = 16 if goal_distance >= 42 else 10 if goal_distance >= 21 else 6 if goal_distance >= 10 else 4
+        available_days = max(0, (request.target_date - start_date).days)
+        available_weeks = ceil(available_days / 7) if available_days else 0
+        if available_days < min_weeks * 7:
+            flags.append({
+                "code": "target_too_close",
+                "severity": "warning",
+                "message": "Цель слишком близко для полной безопасной подготовки.",
+                "reasons": [
+                    f"available days: {available_days}",
+                    f"available weeks: {available_weeks}",
+                    f"generated plan length: {weeks} weeks",
+                    f"recommended minimum for goal: {min_weeks} weeks",
+                ],
+            })
+    current_volume = float(baseline["current_weekly_volume_km"] or 0)
+    if goal_distance >= 42 and current_volume < 20:
+        flags.append({
+            "code": "marathon_low_volume",
+            "severity": "warning",
+            "message": "Marathon requested при объеме меньше 20 км/нед.",
+            "reasons": [f"current volume: {current_volume:.1f} km/week"],
+        })
+    recent_long = baseline.get("recent_long_run_km")
+    peak_long = max((float(week["long_run_km"] or 0) for week in weekly_curve), default=0.0)
+    if goal_distance >= 21 and not recent_long:
+        flags.append({
+            "code": "no_recent_long_run",
+            "severity": "warning",
+            "message": "Нет recent long run для проверки длинной прогрессии.",
+            "reasons": ["no long run detected in the last 8 weeks"],
+        })
+    elif recent_long and peak_long > float(recent_long) * 1.5 and peak_long > float(recent_long) + 5:
+        flags.append({
+            "code": "long_run_progression",
+            "severity": "warning",
+            "message": "Long run progression выглядит слишком резкой.",
+            "reasons": [f"recent long run: {float(recent_long):.1f} km", f"planned peak long run: {peak_long:.1f} km"],
+        })
+    max_hard_sessions = max((int(week["hard_sessions"] or 0) for week in weekly_curve), default=0)
+    if max_hard_sessions > 2:
+        flags.append({
+            "code": "too_many_hard_sessions",
+            "severity": "critical",
+            "message": "Больше 2 hard sessions в неделю.",
+            "reasons": [f"max hard sessions: {max_hard_sessions}"],
+        })
+    first_week_hard = sorted(
+        [workout for workout in workouts if workout["week_index"] == 1 and preview_workout_is_hard(workout) and isinstance(workout.get("scheduled_date"), date)],
+        key=lambda item: item["scheduled_date"],
+    )
+    for index, workout in enumerate(first_week_hard[:-1]):
+        next_workout = first_week_hard[index + 1]
+        delta_days = (next_workout["scheduled_date"] - workout["scheduled_date"]).days
+        if 0 <= delta_days <= 1:
+            flags.append({
+                "code": "missing_recovery_after_hard",
+                "severity": "warning",
+                "message": "Нет recovery day после hard session.",
+                "reasons": [f"{workout['scheduled_date']} followed by {next_workout['scheduled_date']}"],
+            })
+            break
+    if not completeness["can_calculate_pace_zones"]:
+        flags.append({
+            "code": "missing_pace_zones",
+            "severity": "info",
+            "message": "Нет исходных данных для темповых зон.",
+            "reasons": ["lactate threshold pace is missing"],
+        })
+    if safety["reasons"]:
+        flags.append({
+            "code": "safety_gates",
+            "severity": "info",
+            "message": "Активны safety gates для conservative planning.",
+            "reasons": list(safety["reasons"]),
+        })
+    return flags[:8]
+
+
+def build_plan_preview_blueprint(
+    request: PlanGenerateRequest,
+    profile: AthleteProfile,
+    completeness: dict[str, object],
+    profile_safety: dict[str, object],
+    zones: dict[str, object],
+    context: dict[str, object],
+    start_date: date,
+) -> dict[str, object]:
+    weeks = weeks_until(request.target_date, start_date)
     days = request.available_days_per_week
-    profile = get_or_create_profile(db, user)
-    completeness = profile_completeness(profile)
-    profile_safety = safety_check(profile)
-    zones = zones_response(db, user)
-    context = recent_training_context(db, user)
     goal_distance = request.race_distance_km or 10.0
-    start_date = date.today()
-    current_volume = request.current_weekly_distance_km or context["recent_weekly_distance_km"] or 15.0
-    safety = build_safety_context(profile, completeness, context, goal_distance)
+    if request.current_weekly_distance_km is not None and request.current_weekly_distance_km > 0:
+        current_volume = request.current_weekly_distance_km
+        volume_source = "manual_override"
+    else:
+        current_volume = float(context["current_weekly_volume_km"] or DEFAULT_WEEKLY_VOLUME_KM)
+        volume_source = str(context["current_weekly_volume_source"])
+    current_volume = round(max(3.0, current_volume), 1)
+    baseline = {
+        "observed_weekly_volume_km": context["observed_weekly_volume_km"],
+        "current_weekly_volume_km": current_volume,
+        "current_weekly_volume_source": volume_source,
+        "recent_long_run_km": context["recent_long_run_km"],
+        "history_span_days": context["history_span_days"],
+        "activity_count": context["activity_count"],
+        "training_age_level": context["training_age_level"],
+        "confidence": "medium" if volume_source == "manual_override" else context["confidence"],
+    }
+    safety_context = {**context, "recent_weekly_distance_km": current_volume, "current_weekly_volume_km": current_volume}
+    safety = build_safety_context(profile, completeness, safety_context, goal_distance)
     conservative = bool(safety["conservative"])
     has_precise_zones = bool(completeness["can_calculate_pace_zones"] or completeness["can_calculate_hrr_zones"])
     growth_factor = 1.16 if conservative else 1.35
@@ -1049,32 +1316,10 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
     peak_volume = max(current_volume * growth_factor, goal_distance * goal_factor)
     if conservative:
         peak_volume = min(peak_volume, current_volume * growth_factor)
-    safety_text = "; ".join(safety["reasons"]) if safety["reasons"] else "no active safety gates"
-    zone_text = []
-    if zones["pace"]:
-        zone_text.append(f"pace zones: {len(zones['pace'])}")
-    if zones["hr"]:
-        zone_text.append(f"HR zones: {len(zones['hr'])}")
-    zone_summary = ", ".join(zone_text) if zone_text else "no precise zones, using RPE targets"
 
-    plan = TrainingPlan(
-        user_id=user.id,
-        title=request.title or f"План на {race_name(goal_distance)}",
-        goal_type=request.goal_type,
-        race_distance_km=goal_distance,
-        target_date=request.target_date,
-        available_days_per_week=days,
-        status="draft",
-        explanation=(
-            f"Profile-aware MVP: план построен от текущего объема {current_volume:.1f} км/нед до пика {peak_volume:.1f} км/нед. "
-            f"Safety gates: {safety_text}. Zones: {zone_summary}. "
-            f"Profile completeness: {completeness['score']:.0%}, confidence={completeness['confidence']}. "
-            f"Medical safety: {profile_safety['message']}"
-        ),
-    )
-    db.add(plan)
-    db.flush()
-
+    workouts: list[dict[str, object]] = []
+    weekly_curve: list[dict[str, object]] = []
+    intensity_distance = {"easy": 0.0, "steady": 0.0, "hard": 0.0}
     for week in range(1, weeks + 1):
         progression = week / weeks
         week_volume = current_volume + (peak_volume - current_volume) * min(1, progression * 1.15)
@@ -1083,21 +1328,107 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
         long_cap = 0.62 if conservative else 0.75
         long_run = min(goal_distance * long_cap, week_volume * (0.34 if conservative else 0.38))
         easy_distance = max(3.0, (week_volume - long_run) / max(1, days - 1))
-        workouts = workout_template(days, conservative=conservative, has_precise_zones=has_precise_zones)
-        for day_index, workout_type, title, intensity in workouts:
-            distance = long_run if workout_type == "long" else easy_distance
-            db.add(TrainingPlanWorkout(
-                plan_id=plan.id,
-                week_index=week,
-                day_index=day_index,
-                scheduled_date=scheduled_workout_date(start_date, week, day_index, days),
-                status="planned",
-                workout_type=workout_type,
-                title=title,
-                distance_km=round(distance, 1),
-                intensity=intensity,
-                description=workout_description(workout_type, intensity, zones, conservative),
-            ))
+        week_workouts = workout_template(days, conservative=conservative, has_precise_zones=has_precise_zones)
+        week_distance = 0.0
+        hard_sessions = 0
+        for day_index, workout_type, title, intensity in week_workouts:
+            distance = round(long_run if workout_type == "long" else easy_distance, 1)
+            workout = {
+                "week_index": week,
+                "day_index": day_index,
+                "scheduled_date": scheduled_workout_date(start_date, week, day_index, days),
+                "workout_type": workout_type,
+                "title": title,
+                "distance_km": distance,
+                "intensity": intensity,
+                "description": workout_description(workout_type, intensity, zones, conservative),
+            }
+            workouts.append(workout)
+            week_distance += distance
+            if preview_workout_is_hard(workout):
+                hard_sessions += 1
+            intensity_distance[preview_intensity_category(workout)] += distance
+        weekly_curve.append({
+            "week_index": week,
+            "planned_distance_km": round(week_distance, 1),
+            "long_run_km": round(long_run, 1),
+            "hard_sessions": hard_sessions,
+        })
+
+    total_distance = sum(intensity_distance.values())
+    intensity_split = {key: round(value / total_distance, 3) if total_distance else 0.0 for key, value in intensity_distance.items()}
+    safety_text = "; ".join(safety["reasons"]) if safety["reasons"] else "no active safety gates"
+    zone_text = []
+    if zones["pace"]:
+        zone_text.append(f"pace zones: {len(zones['pace'])}")
+    if zones["hr"]:
+        zone_text.append(f"HR zones: {len(zones['hr'])}")
+    zone_summary = ", ".join(zone_text) if zone_text else "no precise zones, using RPE targets"
+    risk_flags = builder_risk_flags(request, baseline, weekly_curve, workouts, safety, completeness, goal_distance, weeks, start_date)
+    return {
+        "title": request.title or f"План на {race_name(goal_distance)}",
+        "goal_type": request.goal_type,
+        "race_distance_km": goal_distance,
+        "target_date": request.target_date,
+        "weeks": weeks,
+        "available_days_per_week": days,
+        "start_date": start_date,
+        "current_weekly_distance_km": current_volume,
+        "peak_weekly_distance_km": round(peak_volume, 1),
+        "baseline": baseline,
+        "weekly_volume_curve": weekly_curve,
+        "intensity_split": intensity_split,
+        "risk_flags": risk_flags,
+        "workouts": workouts,
+        "explanation": (
+            f"Plan Builder Preview: план построен от текущего объема {current_volume:.1f} км/нед до пика {peak_volume:.1f} км/нед. "
+            f"Baseline source: {volume_source}, training age={baseline['training_age_level']}, confidence={baseline['confidence']}. "
+            f"Safety gates: {safety_text}. Zones: {zone_summary}. "
+            f"Profile completeness: {float(completeness['score']):.0%}, confidence={completeness['confidence']}. "
+            f"Medical safety: {profile_safety['message']}"
+        ),
+    }
+
+
+def plan_builder_preview(db: Session, user: User, request: PlanGenerateRequest, persist_profile: bool = False) -> dict[str, object]:
+    profile = profile_for_plan_builder(db, user, persist=persist_profile)
+    completeness = profile_completeness(profile)
+    profile_safety = safety_check(profile)
+    zones = zones_for_plan_builder(db, user, profile)
+    start_date = today_for_user(db, user)
+    context = plan_builder_training_context(db, user, profile, start_date)
+    return build_plan_preview_blueprint(request, profile, completeness, profile_safety, zones, context, start_date)
+
+
+def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> TrainingPlan:
+    preview = plan_builder_preview(db, user, request, persist_profile=True)
+
+    plan = TrainingPlan(
+        user_id=user.id,
+        title=str(preview["title"]),
+        goal_type=str(preview["goal_type"]),
+        race_distance_km=float(preview["race_distance_km"] or 0),
+        target_date=preview["target_date"],
+        available_days_per_week=int(preview["available_days_per_week"]),
+        status="draft",
+        explanation=str(preview["explanation"]).replace("Plan Builder Preview", "Profile-aware MVP"),
+    )
+    db.add(plan)
+    db.flush()
+
+    for workout in preview["workouts"]:
+        db.add(TrainingPlanWorkout(
+            plan_id=plan.id,
+            week_index=int(workout["week_index"]),
+            day_index=int(workout["day_index"]),
+            scheduled_date=workout["scheduled_date"],
+            status="planned",
+            workout_type=str(workout["workout_type"]),
+            title=str(workout["title"]),
+            distance_km=float(workout["distance_km"]) if workout["distance_km"] is not None else None,
+            intensity=str(workout["intensity"]) if workout["intensity"] is not None else None,
+            description=str(workout["description"]) if workout["description"] is not None else None,
+        ))
 
     db.commit()
     db.refresh(plan)
@@ -1113,6 +1444,62 @@ def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
     db.commit()
     db.refresh(plan)
     return plan
+
+
+def update_plan(db: Session, user: User, plan: TrainingPlan, payload: PlanUpdate) -> TrainingPlan:
+    updates = payload.model_dump(exclude_unset=True)
+    if "title" in updates and updates["title"] is not None:
+        plan.title = updates["title"]
+    if updates.get("status") == "active":
+        return activate_plan(db, user, plan)
+    if "status" in updates and updates["status"] is not None:
+        plan.status = updates["status"]
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def duplicate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
+    duplicate = TrainingPlan(
+        user_id=user.id,
+        title=f"{plan.title} copy",
+        goal_type=plan.goal_type,
+        race_distance_km=plan.race_distance_km,
+        target_date=plan.target_date,
+        available_days_per_week=plan.available_days_per_week,
+        status="draft",
+        explanation=plan.explanation,
+    )
+    db.add(duplicate)
+    db.flush()
+    for workout in sorted(plan.workouts, key=lambda item: (item.week_index, item.day_index, item.id)):
+        copied_workout = TrainingPlanWorkout(
+            plan_id=duplicate.id,
+            scheduled_date=workout.scheduled_date,
+            status="planned",
+            week_index=workout.week_index,
+            day_index=workout.day_index,
+            workout_type=workout.workout_type,
+            title=workout.title,
+            distance_km=workout.distance_km,
+            duration_seconds=workout.duration_seconds,
+            intensity=workout.intensity,
+            description=workout.description,
+        )
+        duplicate.workouts.append(copied_workout)
+        db.add(copied_workout)
+    db.commit()
+    db.refresh(duplicate)
+    return duplicate
+
+
+def delete_plan(db: Session, user: User, plan: TrainingPlan) -> int:
+    if plan.status == "active":
+        raise ValueError("Active plan cannot be deleted; archive it first")
+    plan_id = plan.id
+    db.delete(plan)
+    db.commit()
+    return plan_id
 
 
 def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:

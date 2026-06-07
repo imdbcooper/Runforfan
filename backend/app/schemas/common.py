@@ -251,10 +251,69 @@ class LlmProviderOut(BaseModel):
 class PlanGenerateRequest(BaseModel):
     title: str = "Тренировочная программа"
     goal_type: str = "marathon"
-    race_distance_km: float | None = 42.2
+    race_distance_km: float | None = Field(default=42.2, ge=1, le=100)
     target_date: date | None = None
     available_days_per_week: int = Field(default=4, ge=2, le=7)
     current_weekly_distance_km: float | None = None
+
+
+class PlanBuilderBaselineOut(BaseModel):
+    observed_weekly_volume_km: list[float]
+    current_weekly_volume_km: float
+    current_weekly_volume_source: str
+    recent_long_run_km: float | None = None
+    history_span_days: int
+    activity_count: int
+    training_age_level: str
+    confidence: str
+
+
+class PlanBuilderWeeklyVolumeOut(BaseModel):
+    week_index: int
+    planned_distance_km: float
+    long_run_km: float
+    hard_sessions: int
+
+
+class PlanBuilderRiskFlagOut(BaseModel):
+    code: str
+    severity: str
+    message: str
+    reasons: list[str] = Field(default_factory=list)
+
+
+class PlanBuilderPreviewWorkoutOut(BaseModel):
+    week_index: int
+    day_index: int
+    scheduled_date: Date
+    workout_type: str
+    title: str
+    distance_km: float | None = None
+    intensity: str | None = None
+    description: str | None = None
+
+
+class PlanBuilderPreviewOut(BaseModel):
+    title: str
+    goal_type: str
+    race_distance_km: float | None = None
+    target_date: date | None = None
+    weeks: int
+    available_days_per_week: int
+    start_date: date
+    current_weekly_distance_km: float
+    peak_weekly_distance_km: float
+    baseline: PlanBuilderBaselineOut
+    weekly_volume_curve: list[PlanBuilderWeeklyVolumeOut]
+    intensity_split: dict[str, float]
+    risk_flags: list[PlanBuilderRiskFlagOut] = Field(default_factory=list)
+    workouts: list[PlanBuilderPreviewWorkoutOut]
+    explanation: str
+
+
+class PlanUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    status: str | None = Field(default=None, pattern="^(draft|active|completed|archived)$")
 
 
 class PlanWorkoutUpdate(BaseModel):

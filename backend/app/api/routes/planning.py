@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_recommendation_preview_changes, plan_to_dict, save_workout_feedback, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -59,6 +59,11 @@ def generate_training_plan(payload: PlanGenerateRequest, user: User = Depends(ge
     plan = generate_plan(db, user, payload)
     plan = get_user_plan(db, user, plan.id)
     return plan_to_dict(plan)
+
+
+@router.post("/preview", response_model=PlanBuilderPreviewOut)
+def preview_training_plan(payload: PlanGenerateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return plan_builder_preview(db, user, payload)
 
 
 @router.get("/plans", response_model=list[PlanOut])
@@ -123,6 +128,30 @@ def list_training_plan_recommendation_audits(plan_id: int, user: User = Depends(
 def activate_training_plan(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = activate_plan(db, user, get_user_plan(db, user, plan_id))
     return plan_to_dict(get_user_plan(db, user, plan.id))
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanOut)
+def update_training_plan(plan_id: int, payload: PlanUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        plan = update_plan(db, user, get_user_plan(db, user, plan_id), payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return plan_to_dict(get_user_plan(db, user, plan.id))
+
+
+@router.post("/plans/{plan_id}/duplicate", response_model=PlanOut)
+def duplicate_training_plan(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    plan = duplicate_plan(db, user, get_user_plan(db, user, plan_id))
+    return plan_to_dict(get_user_plan(db, user, plan.id))
+
+
+@router.delete("/plans/{plan_id}")
+def delete_training_plan(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        deleted_id = delete_plan(db, user, get_user_plan(db, user, plan_id))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"deleted": True, "id": deleted_id}
 
 
 @router.patch("/workouts/{workout_id}", response_model=PlanWorkoutOut)

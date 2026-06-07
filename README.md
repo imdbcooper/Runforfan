@@ -70,10 +70,14 @@ GET /health
 - `POST /api/zones/recalculate` — пересчитать и сохранить расчетные зоны.
 - `PUT /api/zones/hr` — заменить ручные HR-зоны.
 - `PUT /api/zones/pace` — заменить ручные pace-зоны.
+- `POST /api/planning/preview` — безопасный Plan Builder preview без записи в БД: baseline, volume curve, intensity split и risk flags.
 - `POST /api/planning/generate` — генерация тренировочной программы.
 - `GET /api/planning/current-week` — текущая календарная неделя активного плана с today/next workout и adherence.
 - `GET /api/planning/plans` — список программ.
 - `GET /api/planning/plans/{id}` — детальная программа с workouts, adherence и weekly adherence.
+- `PATCH /api/planning/plans/{id}` — обновить название или статус программы (`draft/active/completed/archived`).
+- `POST /api/planning/plans/{id}/duplicate` — создать draft-копию программы без linked activities/feedback.
+- `DELETE /api/planning/plans/{id}` — удалить неактивную программу.
 - `GET /api/planning/plans/{id}/adherence` — агрегированное и недельное соблюдение плана.
 - `GET /api/planning/plans/{id}/recommendations` — read-only coach recommendations по adherence, missed workouts и planned-vs-actual load.
 - `POST /api/planning/plans/{id}/recommendations/preview` — preview безопасных автоматических корректировок без изменения плана.
@@ -142,7 +146,8 @@ API настроек AI:
 - Если включен conservative mode, указаны injury notes, история короче 14 дней или зоны недостаточно точные, hard workouts заменяются аэробной/RPE работой.
 - Описание каждой тренировки содержит target по pace/HR zone, а если точных зон нет — fallback по RPE.
 - У planned workouts есть календарная дата, статус `planned/done/missed/skipped/rescheduled`, связь с фактической тренировкой и adherence summary.
-- API поддерживает активацию плана, обновление статусов planned workouts, ручную привязку фактических тренировок и динамический поиск match candidates.
+- Plan Builder preview перед созданием черновика показывает baseline за 6 недель, median текущего объема, recent long run, training age level, недельную volume curve, intensity split и safety/risk flags.
+- API поддерживает активацию, переименование, архивирование, завершение, дублирование и удаление неактивных планов, обновление статусов planned workouts, ручную привязку фактических тренировок и динамический поиск match candidates.
 - Matching учитывает близость даты, сходство дистанции и тип тренировки: interval-структуру, long/easy/tempo/steady эвристики.
 - После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
 - Adherence analytics показывает completion rate, distance completion rate, linked/unlinked выполненные тренировки, предупреждения и недельный breakdown.
@@ -201,7 +206,7 @@ npm run build
 - Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
 - Profile & zones.
-- Планы.
+- Планы: Plan Builder preview/generate, список программ, actions и workout execution/matching.
 - AI настройки.
 
 Страница `AI настройки` позволяет пользователю добавить OpenAI-compatible или Anthropic provider, выбрать модель, указать base URL и сохранить API key.
