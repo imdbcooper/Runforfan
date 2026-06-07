@@ -328,11 +328,16 @@ export type PlanBuilderPreview = {
   goal_type: string
   race_distance_km: number | null
   target_date: string | null
+  target_time_seconds: number | null
+  priority: string
   weeks: number
   available_days_per_week: number
+  preferred_weekdays: number[]
+  intensity_mode: string
   start_date: string
   current_weekly_distance_km: number
   peak_weekly_distance_km: number
+  constraints: Record<string, unknown>
   baseline: PlanBuilderBaseline
   weekly_volume_curve: PlanBuilderWeeklyVolume[]
   intensity_split: Record<string, number>

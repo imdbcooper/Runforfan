@@ -109,8 +109,23 @@ def schedule_offsets(days: int) -> list[int]:
     return schedules.get(days, schedules[4])
 
 
-def scheduled_workout_date(start_date: date, week_index: int, day_index: int, days: int) -> date:
-    offsets = schedule_offsets(days)
+def schedule_offsets_for_plan(start_date: date, days: int, preferred_weekdays: list[int] | None = None) -> list[int]:
+    default_offsets = schedule_offsets(days)
+    if not preferred_weekdays:
+        return default_offsets
+    start_weekday = start_date.isoweekday()
+    preferred_offsets = sorted({(weekday - start_weekday) % 7 for weekday in preferred_weekdays})
+    offsets = preferred_offsets[:days]
+    for offset in default_offsets:
+        if len(offsets) >= days:
+            break
+        if offset not in offsets:
+            offsets.append(offset)
+    return sorted(offsets[:days])
+
+
+def scheduled_workout_date(start_date: date, week_index: int, day_index: int, days: int, preferred_weekdays: list[int] | None = None) -> date:
+    offsets = schedule_offsets_for_plan(start_date, days, preferred_weekdays)
     offset = offsets[min(day_index - 1, len(offsets) - 1)]
     return start_date + timedelta(days=(week_index - 1) * 7 + offset)
 
@@ -285,16 +300,23 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
     }
 
 
-def build_safety_context(profile, completeness: dict, context: dict[str, object], goal_distance: float) -> dict[str, object]:
+def build_safety_context(profile, completeness: dict, context: dict[str, object], goal_distance: float, request: PlanGenerateRequest | None = None) -> dict[str, object]:
     reasons = []
     if profile.conservative_mode:
         reasons.append("profile conservative mode")
     if profile.injury_notes:
         reasons.append("injury notes present")
+    if request and request.injury:
+        reasons.append("wizard injury constraint")
+    if request and request.no_hard_workouts:
+        reasons.append("wizard no hard workouts constraint")
     if int(context["history_span_days"] or 0) < 14:
         reasons.append("training history shorter than 14 days")
-    if not completeness["can_calculate_pace_zones"]:
+    intensity_mode = request.intensity_mode if request else "mixed"
+    if intensity_mode in {"pace", "mixed"} and not completeness["can_calculate_pace_zones"]:
         reasons.append("no threshold pace zones")
+    if intensity_mode == "hr" and not (completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"]):
+        reasons.append("no HR zones")
     if goal_distance >= 21 and (context["recent_weekly_distance_km"] or 0) < 25:
         reasons.append("low current volume for long-distance goal")
     return {
@@ -1186,6 +1208,40 @@ def preview_intensity_category(workout: dict[str, object]) -> str:
     return "easy"
 
 
+def wizard_workout_description(description: str, request: PlanGenerateRequest, goal_distance: float) -> str:
+    notes = []
+    if request.intensity_mode == "rpe":
+        notes.append("Use RPE as the primary intensity target.")
+    elif request.intensity_mode == "hr":
+        notes.append("Use HR zones as the primary intensity target.")
+    elif request.intensity_mode == "pace":
+        notes.append("Use pace targets as the primary intensity target.")
+    if request.target_time_seconds:
+        target_pace = request.target_time_seconds / max(goal_distance, 1)
+        notes.append(f"Target race pace: {format_pace(target_pace)}.")
+    if request.terrain:
+        notes.append(f"Terrain constraint: {request.terrain}.")
+    return f"{description} {' '.join(notes)}"[:2000]
+
+
+def goal_distance_for_request(request: PlanGenerateRequest) -> float:
+    if request.goal_type == "base_building":
+        return 10.0
+    return request.race_distance_km or 10.0
+
+
+def estimated_easy_pace_seconds_per_km(request: PlanGenerateRequest, zones: dict[str, object], goal_distance: float) -> float:
+    pace_zones = zones.get("pace") or []
+    for zone in pace_zones:
+        if str(zone.get("zone_key")) == "easy" and zone.get("lower_value") and zone.get("upper_value"):
+            return (float(zone["lower_value"]) + float(zone["upper_value"])) / 2
+    if request.target_time_seconds and goal_distance > 0:
+        return max(300.0, request.target_time_seconds / goal_distance * 1.25)
+    if request.recent_race_time_seconds and request.recent_race_distance_km:
+        return max(300.0, request.recent_race_time_seconds / request.recent_race_distance_km * 1.25)
+    return 420.0
+
+
 def builder_risk_flags(
     request: PlanGenerateRequest,
     baseline: dict[str, object],
@@ -1200,6 +1256,8 @@ def builder_risk_flags(
     flags: list[dict[str, object]] = []
     if request.target_date:
         min_weeks = 16 if goal_distance >= 42 else 10 if goal_distance >= 21 else 6 if goal_distance >= 10 else 4
+        if request.priority in {"a", "high"}:
+            min_weeks += 2
         available_days = max(0, (request.target_date - start_date).days)
         available_weeks = ceil(available_days / 7) if available_days else 0
         if available_days < min_weeks * 7:
@@ -1222,6 +1280,16 @@ def builder_risk_flags(
             "message": "Marathon requested при объеме меньше 20 км/нед.",
             "reasons": [f"current volume: {current_volume:.1f} km/week"],
         })
+    if request.target_time_seconds and request.recent_race_distance_km and request.recent_race_time_seconds:
+        target_pace = request.target_time_seconds / max(goal_distance, 1)
+        recent_pace = request.recent_race_time_seconds / max(request.recent_race_distance_km, 1)
+        if target_pace < recent_pace * 0.92:
+            flags.append({
+                "code": "ambitious_target_time",
+                "severity": "warning",
+                "message": "Target time is substantially faster than recent race pace.",
+                "reasons": [f"target pace: {format_pace(target_pace)}", f"recent race pace: {format_pace(recent_pace)}"],
+            })
     recent_long = baseline.get("recent_long_run_km")
     peak_long = max((float(week["long_run_km"] or 0) for week in weekly_curve), default=0.0)
     if goal_distance >= 21 and not recent_long:
@@ -1261,7 +1329,7 @@ def builder_risk_flags(
                 "reasons": [f"{workout['scheduled_date']} followed by {next_workout['scheduled_date']}"],
             })
             break
-    if not completeness["can_calculate_pace_zones"]:
+    if request.intensity_mode in {"pace", "mixed"} and not completeness["can_calculate_pace_zones"]:
         flags.append({
             "code": "missing_pace_zones",
             "severity": "info",
@@ -1289,8 +1357,8 @@ def build_plan_preview_blueprint(
 ) -> dict[str, object]:
     weeks = weeks_until(request.target_date, start_date)
     days = request.available_days_per_week
-    goal_distance = request.race_distance_km or 10.0
-    if request.current_weekly_distance_km is not None and request.current_weekly_distance_km > 0:
+    goal_distance = goal_distance_for_request(request)
+    if request.current_weekly_distance_km is not None:
         current_volume = request.current_weekly_distance_km
         volume_source = "manual_override"
     else:
@@ -1301,18 +1369,21 @@ def build_plan_preview_blueprint(
         "observed_weekly_volume_km": context["observed_weekly_volume_km"],
         "current_weekly_volume_km": current_volume,
         "current_weekly_volume_source": volume_source,
-        "recent_long_run_km": context["recent_long_run_km"],
+        "recent_long_run_km": request.longest_recent_run_km if request.longest_recent_run_km is not None else context["recent_long_run_km"],
         "history_span_days": context["history_span_days"],
         "activity_count": context["activity_count"],
         "training_age_level": context["training_age_level"],
         "confidence": "medium" if volume_source == "manual_override" else context["confidence"],
     }
     safety_context = {**context, "recent_weekly_distance_km": current_volume, "current_weekly_volume_km": current_volume}
-    safety = build_safety_context(profile, completeness, safety_context, goal_distance)
+    safety = build_safety_context(profile, completeness, safety_context, goal_distance, request)
     conservative = bool(safety["conservative"])
-    has_precise_zones = bool(completeness["can_calculate_pace_zones"] or completeness["can_calculate_hrr_zones"])
-    growth_factor = 1.16 if conservative else 1.35
-    goal_factor = 0.75 if conservative else (1.15 if goal_distance >= 21 else 0.9)
+    has_precise_zones = bool(completeness["can_calculate_pace_zones"] or completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"] or request.intensity_mode == "rpe")
+    preferred_weekdays = request.preferred_weekdays or []
+    priority_multiplier = 1.05 if request.priority in {"a", "high"} else 0.95 if request.priority in {"c", "low"} else 1.0
+    target_time_multiplier = 1.03 if request.target_time_seconds else 1.0
+    growth_factor = (1.16 if conservative else 1.35) * priority_multiplier
+    goal_factor = (0.75 if conservative else (1.15 if goal_distance >= 21 else 0.9)) * priority_multiplier * target_time_multiplier
     peak_volume = max(current_volume * growth_factor, goal_distance * goal_factor)
     if conservative:
         peak_volume = min(peak_volume, current_volume * growth_factor)
@@ -1320,14 +1391,23 @@ def build_plan_preview_blueprint(
     workouts: list[dict[str, object]] = []
     weekly_curve: list[dict[str, object]] = []
     intensity_distance = {"easy": 0.0, "steady": 0.0, "hard": 0.0}
+    easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
     for week in range(1, weeks + 1):
         progression = week / weeks
         week_volume = current_volume + (peak_volume - current_volume) * min(1, progression * 1.15)
         if week % 4 == 0:
             week_volume *= 0.78
+        if request.time_budget_minutes_per_week:
+            budget_distance = request.time_budget_minutes_per_week * 60 / easy_pace_seconds_per_km
+            week_volume = min(week_volume, max(1.0, budget_distance))
         long_cap = 0.62 if conservative else 0.75
         long_run = min(goal_distance * long_cap, week_volume * (0.34 if conservative else 0.38))
-        easy_distance = max(3.0, (week_volume - long_run) / max(1, days - 1))
+        if request.max_long_run_km:
+            long_run = min(long_run, request.max_long_run_km)
+        if request.max_long_run_duration_minutes:
+            long_run = min(long_run, request.max_long_run_duration_minutes * 60 / easy_pace_seconds_per_km)
+        long_run = min(long_run, week_volume)
+        easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
         week_workouts = workout_template(days, conservative=conservative, has_precise_zones=has_precise_zones)
         week_distance = 0.0
         hard_sessions = 0
@@ -1336,12 +1416,12 @@ def build_plan_preview_blueprint(
             workout = {
                 "week_index": week,
                 "day_index": day_index,
-                "scheduled_date": scheduled_workout_date(start_date, week, day_index, days),
+                "scheduled_date": scheduled_workout_date(start_date, week, day_index, days, preferred_weekdays),
                 "workout_type": workout_type,
                 "title": title,
                 "distance_km": distance,
                 "intensity": intensity,
-                "description": workout_description(workout_type, intensity, zones, conservative),
+                "description": wizard_workout_description(workout_description(workout_type, intensity, zones, conservative), request, goal_distance),
             }
             workouts.append(workout)
             week_distance += distance
@@ -1357,6 +1437,7 @@ def build_plan_preview_blueprint(
 
     total_distance = sum(intensity_distance.values())
     intensity_split = {key: round(value / total_distance, 3) if total_distance else 0.0 for key, value in intensity_distance.items()}
+    effective_peak_volume = max((float(week["planned_distance_km"] or 0) for week in weekly_curve), default=round(peak_volume, 1))
     safety_text = "; ".join(safety["reasons"]) if safety["reasons"] else "no active safety gates"
     zone_text = []
     if zones["pace"]:
@@ -1370,18 +1451,33 @@ def build_plan_preview_blueprint(
         "goal_type": request.goal_type,
         "race_distance_km": goal_distance,
         "target_date": request.target_date,
+        "target_time_seconds": request.target_time_seconds,
+        "priority": request.priority,
         "weeks": weeks,
         "available_days_per_week": days,
+        "preferred_weekdays": preferred_weekdays,
+        "intensity_mode": request.intensity_mode,
         "start_date": start_date,
         "current_weekly_distance_km": current_volume,
-        "peak_weekly_distance_km": round(peak_volume, 1),
+        "peak_weekly_distance_km": round(effective_peak_volume, 1),
+        "constraints": {
+            "injury": request.injury,
+            "no_hard_workouts": request.no_hard_workouts,
+            "max_long_run_km": request.max_long_run_km,
+            "max_long_run_duration_minutes": request.max_long_run_duration_minutes,
+            "time_budget_minutes_per_week": request.time_budget_minutes_per_week,
+            "estimated_easy_pace_seconds_per_km": round(easy_pace_seconds_per_km),
+            "terrain": request.terrain,
+            "recent_race_distance_km": request.recent_race_distance_km,
+            "recent_race_time_seconds": request.recent_race_time_seconds,
+        },
         "baseline": baseline,
         "weekly_volume_curve": weekly_curve,
         "intensity_split": intensity_split,
         "risk_flags": risk_flags,
         "workouts": workouts,
         "explanation": (
-            f"Plan Builder Preview: план построен от текущего объема {current_volume:.1f} км/нед до пика {peak_volume:.1f} км/нед. "
+            f"Plan Builder Preview: план построен от текущего объема {current_volume:.1f} км/нед до пика {effective_peak_volume:.1f} км/нед. "
             f"Baseline source: {volume_source}, training age={baseline['training_age_level']}, confidence={baseline['confidence']}. "
             f"Safety gates: {safety_text}. Zones: {zone_summary}. "
             f"Profile completeness: {float(completeness['score']):.0%}, confidence={completeness['confidence']}. "
@@ -1400,6 +1496,17 @@ def plan_builder_preview(db: Session, user: User, request: PlanGenerateRequest, 
     return build_plan_preview_blueprint(request, profile, completeness, profile_safety, zones, context, start_date)
 
 
+def apply_generated_plan_status(db: Session, user: User, plan: TrainingPlan, activate: bool) -> None:
+    if not activate:
+        plan.status = "draft"
+        return
+    active_plans = list(db.scalars(select(TrainingPlan).where(TrainingPlan.user_id == user.id, TrainingPlan.status == "active")))
+    for active_plan in active_plans:
+        if active_plan.id != plan.id:
+            active_plan.status = "archived"
+    plan.status = "active"
+
+
 def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> TrainingPlan:
     preview = plan_builder_preview(db, user, request, persist_profile=True)
 
@@ -1413,6 +1520,7 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
         status="draft",
         explanation=str(preview["explanation"]).replace("Plan Builder Preview", "Profile-aware MVP"),
     )
+    apply_generated_plan_status(db, user, plan, request.activate)
     db.add(plan)
     db.flush()
 

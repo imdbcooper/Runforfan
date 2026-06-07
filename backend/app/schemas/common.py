@@ -253,8 +253,32 @@ class PlanGenerateRequest(BaseModel):
     goal_type: str = "marathon"
     race_distance_km: float | None = Field(default=42.2, ge=1, le=100)
     target_date: date | None = None
+    target_time_seconds: StrictInt | None = Field(default=None, ge=60, le=172800)
+    priority: str = Field(default="b", pattern="^(a|b|c|low|medium|high)$")
     available_days_per_week: int = Field(default=4, ge=2, le=7)
-    current_weekly_distance_km: float | None = None
+    current_weekly_distance_km: float | None = Field(default=None, ge=0, le=250)
+    longest_recent_run_km: float | None = Field(default=None, ge=0, le=100)
+    recent_race_distance_km: float | None = Field(default=None, ge=1, le=100)
+    recent_race_time_seconds: StrictInt | None = Field(default=None, ge=60, le=172800)
+    preferred_weekdays: list[StrictInt] | None = Field(default=None, max_length=7)
+    time_budget_minutes_per_week: StrictInt | None = Field(default=None, ge=30, le=5000)
+    intensity_mode: str = Field(default="mixed", pattern="^(hr|pace|rpe|mixed)$")
+    injury: bool = False
+    no_hard_workouts: bool = False
+    max_long_run_km: float | None = Field(default=None, ge=1, le=100)
+    max_long_run_duration_minutes: StrictInt | None = Field(default=None, ge=15, le=600)
+    terrain: str | None = Field(default=None, max_length=100)
+    activate: bool = False
+
+    @model_validator(mode="after")
+    def validate_preferred_weekdays(self):
+        if self.preferred_weekdays:
+            values = list(self.preferred_weekdays)
+            if any(value < 1 or value > 7 for value in values):
+                raise ValueError("preferred_weekdays must use ISO weekdays 1-7")
+            if len(set(values)) != len(values):
+                raise ValueError("preferred_weekdays must be unique")
+        return self
 
 
 class PlanBuilderBaselineOut(BaseModel):
@@ -298,11 +322,16 @@ class PlanBuilderPreviewOut(BaseModel):
     goal_type: str
     race_distance_km: float | None = None
     target_date: date | None = None
+    target_time_seconds: int | None = None
+    priority: str
     weeks: int
     available_days_per_week: int
+    preferred_weekdays: list[int] = Field(default_factory=list)
+    intensity_mode: str
     start_date: date
     current_weekly_distance_km: float
     peak_weekly_distance_km: float
+    constraints: dict = Field(default_factory=dict)
     baseline: PlanBuilderBaselineOut
     weekly_volume_curve: list[PlanBuilderWeeklyVolumeOut]
     intensity_split: dict[str, float]

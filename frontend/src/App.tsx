@@ -81,15 +81,35 @@ function stringOrNull(value: FormDataEntryValue | null) {
   return value === null || value === "" ? null : String(value)
 }
 
-function planBuilderPayload(form: HTMLFormElement) {
+function csvNumbers(value: FormDataEntryValue | null) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean).map((item) => Number(item)).filter((item) => Number.isFinite(item))
+}
+
+function planBuilderPayload(form: HTMLFormElement, activate = false) {
   const data = new FormData(form)
+  const targetTimeMinutes = numberOrNull(data.get("target_time_minutes"))
+  const recentRaceTimeMinutes = numberOrNull(data.get("recent_race_time_minutes"))
   return {
     title: stringOrNull(data.get("title")) || "Марафонская программа",
     goal_type: stringOrNull(data.get("goal_type")) || "marathon",
     race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
     target_date: stringOrNull(data.get("target_date")),
+    target_time_seconds: targetTimeMinutes ? Math.round(targetTimeMinutes * 60) : null,
+    priority: stringOrNull(data.get("priority")) || "b",
     available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
     current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
+    longest_recent_run_km: numberOrNull(data.get("longest_recent_run_km")),
+    recent_race_distance_km: numberOrNull(data.get("recent_race_distance_km")),
+    recent_race_time_seconds: recentRaceTimeMinutes ? Math.round(recentRaceTimeMinutes * 60) : null,
+    preferred_weekdays: csvNumbers(data.get("preferred_weekdays")),
+    time_budget_minutes_per_week: numberOrNull(data.get("time_budget_minutes_per_week")),
+    intensity_mode: stringOrNull(data.get("intensity_mode")) || "mixed",
+    injury: data.get("injury") === "on",
+    no_hard_workouts: data.get("no_hard_workouts") === "on",
+    max_long_run_km: numberOrNull(data.get("max_long_run_km")),
+    max_long_run_duration_minutes: numberOrNull(data.get("max_long_run_duration_minutes")),
+    terrain: stringOrNull(data.get("terrain")),
+    activate,
   }
 }
 
@@ -1086,9 +1106,21 @@ function Planning() {
 
   async function generate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const plan = await api.generatePlan(planBuilderPayload(event.currentTarget))
-    setResult(plan)
-    await loadPlans(plan.id)
+    await createPlan(false)
+  }
+
+  async function createPlan(activatePlan = false) {
+    if (!planBuilderForm.current) return
+    setBuilderPreviewError("")
+    try {
+      const plan = await api.generatePlan(planBuilderPayload(planBuilderForm.current, activatePlan))
+      setResult(plan)
+      await loadPlans(plan.id)
+      if (plan.status === "active") await loadRecommendations(plan.id)
+    } catch (error) {
+      console.error(error)
+      setBuilderPreviewError(activatePlan ? "Не удалось создать и активировать план" : "Не удалось создать draft-план")
+    }
   }
 
   async function previewBuilder() {
@@ -1343,12 +1375,21 @@ function Planning() {
       <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
       <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
         <Field label="Название"><Input name="title" defaultValue="Марафонская программа" /></Field>
-        <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option></Select></Field>
+        <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option><option value="base_building">Base building</option></Select></Field>
         <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
         <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
+        <Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field>
+        <Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">A race</option><option value="b">B race</option><option value="c">C race</option></Select></Field>
         <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
+        <Field label="Preferred days"><Input name="preferred_weekdays" placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
         <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
-        <div className="grid gap-2 sm:grid-cols-2"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview plan"}</Button><Button type="submit">Generate plan</Button></div>
+        <Field label="Longest recent run, км"><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder="optional" /></Field>
+        <div className="grid gap-2 sm:grid-cols-2"><Field label="Recent race, км"><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Recent race time, мин"><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field></div>
+        <div className="grid gap-2 sm:grid-cols-2"><Field label="Intensity"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">Mixed</option><option value="pace">Pace</option><option value="hr">HR</option><option value="rpe">RPE</option></Select></Field><Field label="Time budget, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="optional" /></Field></div>
+        <div className="grid gap-2 sm:grid-cols-2"><Field label="Max long run, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Max long run, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="optional" /></Field></div>
+        <Field label="Terrain"><Input name="terrain" placeholder="road, trail, treadmill" /></Field>
+        <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="injury" type="checkbox" /> injury constraint</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="no_hard_workouts" type="checkbox" /> no hard workouts</label></div>
+        <div className="grid gap-2 sm:grid-cols-3"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview"}</Button><Button type="submit">Create draft</Button><Button type="button" onClick={() => createPlan(true)}>Create active</Button></div>
       </form>
       {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
       {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
@@ -1412,7 +1453,7 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
     <div className="mt-3 grid gap-2">
       {preview.weekly_volume_curve.slice(0, 6).map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} km</span></div>)}
     </div>
-    <div className="mt-3 flex flex-wrap gap-2">{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+    <div className="mt-3 flex flex-wrap gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
     {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
     <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workout.distance_km?.toFixed(1) || "--"} km · {workout.intensity || "--"}</p></div>)}</div>
   </div>

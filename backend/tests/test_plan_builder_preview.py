@@ -4,9 +4,9 @@ from datetime import date, timedelta
 try:
     from pydantic import ValidationError
 
-    from app.models import AthleteProfile
+    from app.models import AthleteProfile, TrainingPlan, User
     from app.schemas.common import PlanGenerateRequest
-    from app.services.planning import build_plan_preview_blueprint
+    from app.services.planning import apply_generated_plan_status, build_plan_preview_blueprint
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
@@ -147,6 +147,239 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertIn("no_recent_long_run", codes)
         self.assertIn("missing_pace_zones", codes)
         self.assertIn("safety_gates", codes)
+
+    def test_preferred_weekdays_drive_schedule(self):
+        start_date = date(2026, 6, 8)  # Monday
+        profile = make_profile(
+            date_of_birth=date(1990, 1, 1),
+            resting_heart_rate_bpm=48,
+            max_heart_rate_bpm=188,
+            lactate_threshold_pace_seconds_per_km=300,
+            lactate_threshold_hr_bpm=170,
+            weight_kg=72,
+        )
+        request = PlanGenerateRequest(
+            title="Preferred days",
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=3,
+            preferred_weekdays=[2, 4, 6],
+            current_weekly_distance_km=25.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        first_week_dates = [workout["scheduled_date"] for workout in preview["workouts"] if workout["week_index"] == 1]
+        self.assertEqual([day.isoweekday() for day in first_week_dates], [2, 4, 6])
+
+    def test_no_hard_constraint_removes_hard_workouts_and_caps_long_run(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(
+            date_of_birth=date(1990, 1, 1),
+            resting_heart_rate_bpm=48,
+            max_heart_rate_bpm=188,
+            lactate_threshold_pace_seconds_per_km=300,
+            lactate_threshold_hr_bpm=170,
+            weight_kg=72,
+        )
+        request = PlanGenerateRequest(
+            title="Constraint plan",
+            goal_type="half_marathon",
+            race_distance_km=21.1,
+            available_days_per_week=4,
+            current_weekly_distance_km=30.0,
+            no_hard_workouts=True,
+            max_long_run_km=8.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        workout_types = {workout["workout_type"] for workout in preview["workouts"]}
+        self.assertNotIn("interval", workout_types)
+        self.assertNotIn("tempo", workout_types)
+        self.assertLessEqual(max(week["long_run_km"] for week in preview["weekly_volume_curve"]), 8.0)
+        self.assertTrue(preview["constraints"]["no_hard_workouts"])
+
+    def test_hr_mode_uses_hr_zones_without_pace_or_hrr(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(date_of_birth=date(1990, 1, 1), max_heart_rate_bpm=188)
+        request = PlanGenerateRequest(
+            title="HR plan",
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            intensity_mode="hr",
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        workout_types = {workout["workout_type"] for workout in preview["workouts"]}
+        self.assertIn("interval", workout_types)
+        self.assertIn("tempo", workout_types)
+        self.assertNotIn("missing_pace_zones", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_target_time_recent_race_and_terrain_affect_preview(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(
+            date_of_birth=date(1990, 1, 1),
+            resting_heart_rate_bpm=48,
+            max_heart_rate_bpm=188,
+            lactate_threshold_pace_seconds_per_km=300,
+            lactate_threshold_hr_bpm=170,
+            weight_kg=72,
+        )
+        request = PlanGenerateRequest(
+            title="Ambitious race",
+            goal_type="10k",
+            race_distance_km=10.0,
+            target_time_seconds=2400,
+            priority="a",
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            recent_race_distance_km=10.0,
+            recent_race_time_seconds=3000,
+            terrain="trail",
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        self.assertIn("ambitious_target_time", {flag["code"] for flag in preview["risk_flags"]})
+        self.assertIn("Terrain constraint: trail", preview["workouts"][0]["description"])
+        self.assertEqual(preview["priority"], "a")
+
+    def test_base_building_does_not_default_to_marathon_distance(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(goal_type="base_building", race_distance_km=42.2, available_days_per_week=3, current_weekly_distance_km=20.0)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        self.assertEqual(preview["race_distance_km"], 10.0)
+        self.assertNotIn("marathon_low_volume", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_duration_constraints_use_estimated_pace(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=3,
+            current_weekly_distance_km=30.0,
+            target_time_seconds=2400,
+            max_long_run_duration_minutes=45,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        self.assertEqual(preview["constraints"]["estimated_easy_pace_seconds_per_km"], 300)
+        self.assertLessEqual(max(week["long_run_km"] for week in preview["weekly_volume_curve"]), 9.0)
+
+    def test_manual_zero_volume_is_preserved_as_manual_source(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(goal_type="5k", race_distance_km=5.0, available_days_per_week=3, current_weekly_distance_km=0.0)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=40.0),
+            start_date,
+        )
+
+        self.assertEqual(preview["baseline"]["current_weekly_volume_source"], "manual_override")
+        self.assertEqual(preview["current_weekly_distance_km"], 3.0)
+
+    def test_time_budget_and_long_run_cap_bound_weekly_curve(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=7,
+            current_weekly_distance_km=40.0,
+            time_budget_minutes_per_week=70,
+            max_long_run_km=1.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        max_week = max(week["planned_distance_km"] for week in preview["weekly_volume_curve"])
+        self.assertLessEqual(max_week, 10.0)
+        self.assertEqual(preview["peak_weekly_distance_km"], max_week)
+        self.assertLessEqual(max(week["long_run_km"] for week in preview["weekly_volume_curve"]), 1.0)
+
+    def test_generated_plan_activation_archives_existing_active_plan(self):
+        existing_active = TrainingPlan(id=1, user_id=1, title="Old", goal_type="10k", status="active", available_days_per_week=3)
+        new_plan = TrainingPlan(id=2, user_id=1, title="New", goal_type="10k", status="draft", available_days_per_week=3)
+
+        class FakeDb:
+            def scalars(self, _query):
+                return [existing_active]
+
+        apply_generated_plan_status(FakeDb(), User(id=1, display_name="Runner"), new_plan, activate=True)
+
+        self.assertEqual(existing_active.status, "archived")
+        self.assertEqual(new_plan.status, "active")
 
 
 if __name__ == "__main__":
