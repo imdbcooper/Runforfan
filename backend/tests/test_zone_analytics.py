@@ -153,6 +153,25 @@ class ZoneAnalyticsTests(unittest.TestCase):
         workout.title = "Morning interval workout"
         self.assertEqual(planned_workout_zone(workout), "z4")
 
+    def test_support_workouts_classify_by_planned_type_and_activity_fallback(self):
+        zones = {"hr": [], "pace": [], "rpe": [], "metadata": {}}
+        strength_activity = make_activity(10, datetime(2026, 6, 1, 8, tzinfo=UTC), None, 1800)
+        strength_activity.activity_type = "manual_strength"
+        cross_training = make_activity(11, datetime(2026, 6, 2, 8, tzinfo=UTC), None, 1200)
+        cross_training.activity_type = "manual_cross_training"
+        mobility = make_workout(20, intensity="mobility", duration_seconds=900)
+        strength = make_workout(21, intensity="strength", duration_seconds=1800)
+
+        result = zone_distribution_from_data([strength_activity, cross_training], [], [mobility, strength], zones, date(2026, 6, 1), date(2026, 6, 7))
+        actual = {item["zone_key"]: item for item in result["actual_five_zone"]}
+        planned = {item["zone_key"]: item for item in result["planned_five_zone"]}
+
+        self.assertEqual(planned_workout_zone(mobility), "z1")
+        self.assertEqual(planned_workout_zone(strength), "z2")
+        self.assertEqual(actual["z2"]["duration_seconds"], 3000)
+        self.assertEqual(planned["z1"]["duration_seconds"], 900)
+        self.assertEqual(planned["z2"]["duration_seconds"], 1800)
+
     def test_zone_analytics_feedback_query_prefers_active_plans_without_dropping_history(self):
         class FakeScalarResult:
             def __iter__(self):

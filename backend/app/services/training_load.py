@@ -15,6 +15,20 @@ from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_RE
 LOAD_LOOKBACK_DAYS = 84
 DEFAULT_PERIOD_DAYS = 28
 RECOVERY_LOAD_THRESHOLD = 10.0
+SUPPORT_LOAD_FACTORS = {
+    "strength": 0.75,
+    "manual_strength": 0.75,
+    "ofp": 0.7,
+    "manual_ofp": 0.7,
+    "core": 0.5,
+    "manual_core": 0.5,
+    "mobility": 0.25,
+    "manual_mobility": 0.25,
+    "prehab": 0.25,
+    "manual_prehab": 0.25,
+    "cross_training": 0.9,
+    "manual_cross_training": 0.9,
+}
 
 
 def date_span(start: date, end: date) -> list[date]:
@@ -84,6 +98,16 @@ def pace_based_load(activity: Activity, profile: AthleteProfile | None) -> float
     return round((activity.duration_seconds / 60) * factor, 1)
 
 
+def support_duration_load(activity: Activity) -> tuple[float, str] | None:
+    if not activity.duration_seconds:
+        return None
+    activity_type = (activity.activity_type or "").lower()
+    for marker, factor in SUPPORT_LOAD_FACTORS.items():
+        if marker in activity_type:
+            return round((activity.duration_seconds / 60) * factor, 1), "support_duration_fallback"
+    return None
+
+
 def linked_workout_map(workouts: list[TrainingPlanWorkout]) -> dict[int, TrainingPlanWorkout]:
     return {workout.completed_activity_id: workout for workout in workouts if workout.completed_activity_id is not None}
 
@@ -97,6 +121,9 @@ def activity_load(activity: Activity, workout: TrainingPlanWorkout | None, profi
     hr_load = hr_trimp_load(activity, profile)
     if hr_load is not None:
         return hr_load, "hr_trimp", 0
+    support_load = support_duration_load(activity)
+    if support_load is not None:
+        return support_load[0], support_load[1], 0
     pace_load = pace_based_load(activity, profile)
     if pace_load is not None:
         return pace_load, "pace_based_fallback", 0
@@ -194,8 +221,7 @@ def weekly_points(daily: list[dict[str, object]]) -> list[dict[str, object]]:
         distance = sum(float(point["distance_km"]) for point in points)
         duration = sum(int(point["duration_seconds"]) for point in points)
         max_day_distance = max((float(point["distance_km"]) for point in points), default=0)
-        max_day_duration = max((int(point["duration_seconds"]) for point in points), default=0)
-        long_run_share = max_day_distance / distance if distance else (max_day_duration / duration if duration else None)
+        long_run_share = max_day_distance / distance if distance else None
         methods = {method for point in points for method in point["load_methods"]}
         result.append({
             "week_start": start,

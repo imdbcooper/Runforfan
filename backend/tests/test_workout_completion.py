@@ -15,7 +15,7 @@ def make_user() -> User:
     return User(id=1, display_name="Runner")
 
 
-def make_workout(*, status: str = "planned", distance_km: float = 10.0, workout_type: str = "easy") -> TrainingPlanWorkout:
+def make_workout(*, status: str = "planned", distance_km: float | None = 10.0, workout_type: str = "easy", duration_seconds: int = 3600) -> TrainingPlanWorkout:
     workout = TrainingPlanWorkout(
         id=10,
         plan_id=20,
@@ -26,7 +26,7 @@ def make_workout(*, status: str = "planned", distance_km: float = 10.0, workout_
         workout_type=workout_type,
         title="Workout",
         distance_km=distance_km,
-        duration_seconds=3600,
+        duration_seconds=duration_seconds,
         intensity="threshold" if workout_type == "interval" else "easy",
         description="Run",
     )
@@ -119,6 +119,18 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertEqual(score["adherence_status"], "overdone")
         self.assertIn("actual volume above plan", score["flags"])
         self.assertIsNotNone(score["intensity_score"])
+
+    def test_complete_strength_workout_creates_duration_only_support_activity(self):
+        workout = make_workout(distance_km=None, duration_seconds=1800, workout_type="strength")
+
+        complete_workout(FakeDb(), make_user(), workout, PlanWorkoutCompleteIn(actual_duration_seconds=1740, rpe=5))
+
+        self.assertEqual(workout.completed_activity.activity_type, "manual_strength")
+        self.assertIsNone(workout.completed_activity.distance_km)
+        self.assertIsNone(workout.completed_activity.average_pace_seconds_per_km)
+        score = workout_execution_score(workout)
+        self.assertEqual(score["status"], "completed")
+        self.assertGreaterEqual(score["volume_score"], 0.9)
 
 
 if __name__ == "__main__":

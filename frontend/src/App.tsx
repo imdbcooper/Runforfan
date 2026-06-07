@@ -37,6 +37,8 @@ type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" |
   event: CalendarEvent
 }
 
+const SUPPORT_WORKOUT_TYPES = new Set(["strength", "ofp", "mobility", "prehab", "core", "cross_training"])
+
 const nav = [
   ["overview", "Dashboard", Zap],
   ["activities", "Activities", Activity],
@@ -73,6 +75,34 @@ function formatDuration(seconds?: number | null) {
   const minutes = Math.floor((seconds % 3600) / 60)
   const rest = seconds % 60
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`
+}
+
+function isSupportWorkoutType(type?: string | null) {
+  return SUPPORT_WORKOUT_TYPES.has(type || "")
+}
+
+function formatWorkoutTarget(target: { distance_km?: number | null; duration_seconds?: number | null; workout_type?: string | null }) {
+  const duration = formatDuration(target.duration_seconds)
+  const distance = formatDistance(target.distance_km)
+  if (isSupportWorkoutType(target.workout_type)) return duration !== "--" ? duration : "support"
+  if (distance !== "--" && duration !== "--") return `${distance} · ${duration}`
+  if (distance !== "--") return distance
+  return duration
+}
+
+function formatWorkoutActual(workout: { actual_distance_km?: number | null; actual_duration_seconds?: number | null; workout_type?: string | null }) {
+  const duration = formatDuration(workout.actual_duration_seconds)
+  const distance = formatDistance(workout.actual_distance_km)
+  if (isSupportWorkoutType(workout.workout_type)) return duration !== "--" ? duration : "--"
+  if (distance !== "--" && duration !== "--") return `${distance} · ${duration}`
+  if (distance !== "--") return distance
+  return duration
+}
+
+function calendarEventLoad(event: CalendarEvent) {
+  if (event.distance_km) return event.distance_km
+  if (event.duration_seconds) return Math.max(1, event.duration_seconds / 600)
+  return 1
 }
 
 function numberOrNull(value: FormDataEntryValue | null) {
@@ -113,6 +143,11 @@ function planBuilderPayload(form: HTMLFormElement, activate = false) {
     max_long_run_km: numberOrNull(data.get("max_long_run_km")),
     max_long_run_duration_minutes: numberOrNull(data.get("max_long_run_duration_minutes")),
     terrain: stringOrNull(data.get("terrain")),
+    include_strength: data.get("include_strength") === "on",
+    strength_sessions_per_week: numberOrNull(data.get("strength_sessions_per_week")),
+    include_mobility: data.get("include_mobility") === "on",
+    mobility_sessions_per_week: numberOrNull(data.get("mobility_sessions_per_week")),
+    strength_equipment: stringOrNull(data.get("strength_equipment")),
     activate,
   }
 }
@@ -458,14 +493,14 @@ function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, onPlans }: { tod
     {focus ? <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_auto] md:items-end">
       <div className="min-w-0">
         <p className="text-base font-semibold text-white">{focus.title}</p>
-        <p className="mt-1 text-zinc-500">{formatDate(focus.scheduled_date)} · week {focus.week_index} · {focus.workout_type} · {formatDistance(focus.distance_km)}</p>
+        <p className="mt-1 text-zinc-500">{formatDate(focus.scheduled_date)} · week {focus.week_index} · {focus.workout_type} · {formatWorkoutTarget(focus)}</p>
         <p className="mt-2 max-w-3xl leading-5 text-zinc-400">{focus.description || "No target description"}</p>
         {focus.execution_score?.flags?.length ? <p className="mt-2 text-orange-200">{focus.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
       </div>
       <div className="grid grid-cols-3 gap-2 md:w-64">
         <Stat label="score" value={focus.execution_score?.score === null || focus.execution_score?.score === undefined ? "--" : `${Math.round(focus.execution_score.score * 100)}%`} />
         <Stat label="risk" value={focus.execution_score?.subjective_risk || "--"} />
-        <Stat label="actual" value={formatDistance(focus.actual_distance_km)} />
+        <Stat label="actual" value={formatWorkoutActual(focus)} />
       </div>
     </div> : <div className="p-4 text-xs text-zinc-500"><p>No active workout is scheduled yet.</p><Button className="mt-3" size="sm" variant="secondary" onClick={onPlans}>Create or activate plan</Button></div>}
   </Card>
@@ -499,7 +534,7 @@ function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSumma
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Workout</th><th>Date</th><th>Type</th><th>Plan</th><th>Actual</th><th>Score</th><th>Status</th></tr></thead>
-        <tbody>{currentWeek.workouts.map((workout) => <tr key={workout.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">#{workout.id} · week {workout.week_index}</div></td><td>{formatDate(workout.scheduled_date)}</td><td>{workout.workout_type}<div className="text-[11px] text-zinc-500">{workout.intensity || "--"}</div></td><td>{formatDistance(workout.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(workout.duration_seconds)}</div></td><td>{formatDistance(workout.actual_distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(workout.actual_duration_seconds)}</div></td><td>{workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`}<div className="text-[11px] text-zinc-500">{workout.execution_score?.subjective_risk || "--"}</div></td><td><Badge className={signalClass(workout.status)}>{workout.status}</Badge></td></tr>)}</tbody>
+        <tbody>{currentWeek.workouts.map((workout) => <tr key={workout.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">#{workout.id} · week {workout.week_index}</div></td><td>{formatDate(workout.scheduled_date)}</td><td>{workout.workout_type}<div className="text-[11px] text-zinc-500">{workout.intensity || "--"}</div></td><td>{formatWorkoutTarget(workout)}</td><td>{formatWorkoutActual(workout)}</td><td>{workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`}<div className="text-[11px] text-zinc-500">{workout.execution_score?.subjective_risk || "--"}</div></td><td><Badge className={signalClass(workout.status)}>{workout.status}</Badge></td></tr>)}</tbody>
       </table>
       {!currentWeek.workouts.length && <p className="p-4 text-xs text-zinc-500">No workouts in the current calendar week.</p>}
     </div>
@@ -818,7 +853,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
   for (const event of calendar?.events || []) {
     eventsByDate.set(event.date, [...(eventsByDate.get(event.date) || []), event])
   }
-  const dailyLoads = days.map((day) => (eventsByDate.get(day) || []).reduce((sum, event) => sum + (event.distance_km || 0), 0))
+  const dailyLoads = days.map((day) => (eventsByDate.get(day) || []).reduce((sum, event) => sum + calendarEventLoad(event), 0))
   const maxDailyLoad = Math.max(1, ...dailyLoads)
 
   return <div className="grid gap-4">
@@ -886,7 +921,7 @@ function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent
   const canReschedule = isWorkout && Boolean(event.planned_workout_id) && !event.linked_activity_id && ["planned", "rescheduled"].includes(event.status || "")
   const rescheduleDraft = rescheduleDrafts[event.id] ?? event.date
   return <div className={cn("rounded-md border p-2", isWorkout ? "border-zinc-800 bg-zinc-950" : isLinked ? "border-orange-400/20 bg-orange-400/10" : "border-zinc-800 bg-zinc-900/70")}>
-    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : "activity"} · {formatDistance(event.distance_km)} · {formatDuration(event.duration_seconds)}</p></div><Badge className={signalClass(event.status || undefined)}>{event.status || event.kind}</Badge></div>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : event.workout_type || "activity"} · {formatWorkoutTarget(event)}</p></div><Badge className={signalClass(event.status || undefined)}>{event.status || event.kind}</Badge></div>
     {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
     {event.linked_activity_id && isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Linked activity #{event.linked_activity_id}</p> : null}
     {event.planned_workout_id && !isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Matched to workout #{event.planned_workout_id}</p> : null}
@@ -927,7 +962,7 @@ function CalendarMatchCandidates({ event, state, busy, onLinkMatch }: { event: C
   return <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Workout candidates</p>
     {state.candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
-      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">{formatDate(candidate.workout.scheduled_date)} · {formatDistance(candidate.workout.distance_km)} · {candidate.workout.intensity || "--"}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">{formatDate(candidate.workout.scheduled_date)} · {formatWorkoutTarget(candidate.workout)} · {candidate.workout.intensity || "--"}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
       <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, candidate.workout.id, activityId)}>Link</Button></div>
     </div>)}
   </div>
@@ -1706,6 +1741,14 @@ function planPlannedDistance(plan: Plan) {
   return plan.workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
 }
 
+function planPlannedDuration(plan: Plan) {
+  return plan.workouts.reduce((sum, workout) => sum + (workout.duration_seconds || 0), 0)
+}
+
+function planSupportWorkouts(plan: Plan) {
+  return plan.workouts.filter((workout) => isSupportWorkoutType(workout.workout_type)).length
+}
+
 function planCurrentWeekLabel(plan: Plan) {
   const weekStart = startOfWeekISO()
   const weekEnd = addDays(weekStart, 6)
@@ -1750,6 +1793,7 @@ function planCurrentWeekIndex(plan: Plan) {
 function planWorkoutIntensityCategory(workout: PlanWorkout) {
   const type = workout.workout_type || ""
   const intensity = workout.intensity || ""
+  if (isSupportWorkoutType(type)) return type === "mobility" || type === "prehab" ? "mobility" : "strength"
   if (["interval", "tempo", "threshold", "hill", "race_pace"].includes(type) || ["interval", "tempo", "threshold", "race_pace", "hard"].includes(intensity)) return "hard"
   if (type === "steady" || intensity.includes("steady")) return "steady"
   return "easy"
@@ -1763,7 +1807,8 @@ function fallbackPlanWeeks(plan: Plan): PlanWeekSummary[] {
     const weekly = plan.weekly_adherence.find((item) => item.week_index === weekIndex)
     const plannedDistance = workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
     const plannedDuration = workouts.reduce((sum, workout) => sum + (workout.duration_seconds || 0), 0) || null
-    const longRun = Math.max(...workouts.map((workout) => workout.distance_km || 0), 0) || null
+    const supportWorkouts = workouts.filter((workout) => isSupportWorkoutType(workout.workout_type))
+    const longRun = Math.max(...workouts.filter((workout) => !isSupportWorkoutType(workout.workout_type)).map((workout) => workout.distance_km || 0), 0) || null
     const week: PlanWeekSummary = {
       week_index: weekIndex,
       planned_distance_km: Number(plannedDistance.toFixed(1)),
@@ -1774,6 +1819,8 @@ function fallbackPlanWeeks(plan: Plan): PlanWeekSummary[] {
       distance_completion_rate: weekly?.distance_completion_rate || 0,
       planned_time_label: formatDuration(plannedDuration),
       hard_sessions: workouts.filter((workout) => planWorkoutIntensityCategory(workout) === "hard").length,
+      support_workouts: supportWorkouts.length,
+      support_duration_seconds: supportWorkouts.reduce((sum, workout) => sum + (workout.duration_seconds || 0), 0),
       long_run_km: longRun,
       deload: previousDistance !== null && plannedDistance < previousDistance * 0.9,
       workouts,
@@ -1785,13 +1832,18 @@ function fallbackPlanWeeks(plan: Plan): PlanWeekSummary[] {
 }
 
 function planIntensitySplit(plan: Plan) {
-  const totals = { easy: 0, steady: 0, hard: 0 }
-  for (const workout of plan.workouts) totals[planWorkoutIntensityCategory(workout) as keyof typeof totals] += workout.distance_km || 0
+  const totals: Record<string, number> = { easy: 0, steady: 0, hard: 0, strength: 0, mobility: 0 }
+  for (const workout of plan.workouts) {
+    const category = planWorkoutIntensityCategory(workout)
+    totals[category] = (totals[category] || 0) + (workout.distance_km || (isSupportWorkoutType(workout.workout_type) ? (workout.duration_seconds || 0) / 3600 : 0))
+  }
   const total = Math.max(Object.values(totals).reduce((sum, value) => sum + value, 0), 1)
-  return Object.entries(totals).map(([key, value]) => ({ key, value, percent: Math.round((value / total) * 100) }))
+  return Object.entries(totals).filter(([, value]) => value > 0).map(([key, value]) => ({ key, value, percent: Math.round((value / total) * 100) }))
 }
 
 function workoutTargetMode(workout: PlanWorkout) {
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "strength"
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "mobility"
   if (workout.intensity?.includes("HR") || workout.description?.includes("HR")) return "HR"
   if (workout.intensity?.includes("RPE") || workout.description?.includes("RPE")) return "RPE"
   if (workout.description?.includes("pace") || workout.description?.includes("пейс")) return "pace"
@@ -1799,6 +1851,8 @@ function workoutTargetMode(workout: PlanWorkout) {
 }
 
 function workoutBlocks(workout: PlanWorkout) {
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return ["Warmup", "Calves/soleus", "Single-leg strength", "Glutes/core", "Cooldown"]
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return ["Ankle mobility", "Hip mobility", "Glute activation", "Breathing"]
   if (workout.workout_type === "interval") return ["Warmup 10-15m", "Repeats at target", "Easy recovery", "Cooldown"]
   if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return ["Warmup", "Controlled quality block", "Cooldown"]
   if (workout.workout_type === "long") return ["Easy start", "Steady middle", "Fuel/hydrate", "Easy finish"]
@@ -1807,6 +1861,8 @@ function workoutBlocks(workout: PlanWorkout) {
 }
 
 function workoutPurpose(workout: PlanWorkout) {
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Build runner durability: calves, hips, posterior chain and trunk stability."
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Restore range of motion and keep common runner weak links controlled."
   if (workout.workout_type === "long") return "Build aerobic endurance and race-specific durability."
   if (workout.workout_type === "interval") return "Raise threshold/VO2 stimulus while keeping recovery controlled."
   if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return "Practice sustainable quality without turning the week into a race."
@@ -1815,6 +1871,8 @@ function workoutPurpose(workout: PlanWorkout) {
 }
 
 function workoutSafetyNote(workout: PlanWorkout) {
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Avoid failure, heavy soreness and painful movements; keep 1-2 reps in reserve."
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Keep it easy and pain-free; mobility should improve readiness, not add fatigue."
   if (["interval", "tempo", "threshold", "race_pace", "long"].includes(workout.workout_type)) return "Reduce or skip if pain, poor sleep, unusual fatigue or HR drift is present."
   return "Keep it conversational; shorten if recovery signals are worse than expected."
 }
@@ -2201,7 +2259,7 @@ function Planning() {
   const planMode = !result ? null : !hasSafetyInfo ? "legacy" : conservative ? "safety gated" : "standard"
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
-      <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware rules, zones and safety gates.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
+      <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware running plus strength/OFP support sessions.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
       <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
         <Field label="Название"><Input name="title" defaultValue="Марафонская программа" /></Field>
         <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option><option value="base_building">Base building</option></Select></Field>
@@ -2217,6 +2275,11 @@ function Planning() {
         <div className="grid gap-2 sm:grid-cols-2"><Field label="Intensity"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">Mixed</option><option value="pace">Pace</option><option value="hr">HR</option><option value="rpe">RPE</option></Select></Field><Field label="Time budget, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="optional" /></Field></div>
         <div className="grid gap-2 sm:grid-cols-2"><Field label="Max long run, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Max long run, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="optional" /></Field></div>
         <Field label="Terrain"><Input name="terrain" placeholder="road, trail, treadmill" /></Field>
+        <div className="rounded-md border border-zinc-800 bg-zinc-950 p-2">
+          <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">ОФП / support</p>
+          <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_strength" type="checkbox" defaultChecked /> strength/OFP</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_mobility" type="checkbox" defaultChecked /> mobility/prehab</label></div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3"><Field label="Strength / week"><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label="Mobility / week"><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label="Equipment"><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">Bodyweight</option><option value="bands">Bands</option><option value="dumbbells">Dumbbells</option><option value="gym">Gym</option></Select></Field></div>
+        </div>
         <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="injury" type="checkbox" /> injury constraint</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="no_hard_workouts" type="checkbox" /> no hard workouts</label></div>
         <div className="grid gap-2 sm:grid-cols-3"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview"}</Button><Button type="submit">Create draft</Button><Button type="button" onClick={() => createPlan(true)}>Create active</Button></div>
       </form>
@@ -2259,18 +2322,20 @@ function Planning() {
 
 function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
   const maxVolume = Math.max(...preview.weekly_volume_curve.map((week) => week.planned_distance_km), 1)
-  const split = ["easy", "steady", "hard"].map((key) => ({ key, value: Math.round((preview.intensity_split[key] || 0) * 100) }))
+  const split = Object.entries(preview.intensity_split).map(([key, value]) => ({ key, value: Math.round(value * 100) }))
   const firstWorkouts = preview.workouts.slice(0, 8)
+  const supportSessions = preview.weekly_volume_curve.reduce((sum, week) => sum + (week.support_sessions || 0), 0)
   return <div className="mx-4 mb-4 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div><p className="font-semibold text-white">Builder preview</p><p className="mt-1 text-zinc-500">Baseline, risk flags and first workouts before saving a draft.</p></div>
       <Badge className={preview.risk_flags.some((flag) => flag.severity === "critical" || flag.severity === "warning") ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{preview.risk_flags.length} flags</Badge>
     </div>
     <p className="mt-3 leading-5 text-zinc-400">{preview.explanation}</p>
-    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+    <div className="mt-3 grid grid-cols-4 gap-2 text-center">
       <Stat label="weeks" value={preview.weeks} />
       <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix="km" />
       <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix="km" />
+      <Stat label="support" value={supportSessions} />
     </div>
     <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Baseline</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
@@ -2283,11 +2348,11 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
       <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
     </div>
     <div className="mt-3 grid gap-2">
-      {preview.weekly_volume_curve.slice(0, 6).map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} km</span></div>)}
+      {preview.weekly_volume_curve.slice(0, 6).map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_7rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} km · S{week.support_sessions || 0}</span></div>)}
     </div>
     <div className="mt-3 flex flex-wrap gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
     {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
-    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workout.distance_km?.toFixed(1) || "--"} km · {workout.intensity || "--"}</p></div>)}</div>
+    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
   </div>
 }
 
@@ -2299,7 +2364,8 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
   return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
     <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
       <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{plan.status}</Badge></div>
-      <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="workouts" value={plan.workouts.length} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="done" value={`${adherence}%`} /></div>
+      <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="workouts" value={plan.workouts.length} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="support" value={planSupportWorkouts(plan)} /></div>
+      <div className="mt-1 grid grid-cols-2 gap-1 text-center text-[11px]"><Stat label="duration" value={formatDuration(planPlannedDuration(plan))} /><Stat label="done" value={`${adherence}%`} /></div>
     </div>
     <div className="mt-2 grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Plan title" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Saving..." : "Rename"}</Button></div>
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2322,11 +2388,13 @@ function PlanDetailHeader({ plan, currentWeekIndex }: { plan: Plan; currentWeekI
       <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Plan header</p><h3 className="mt-1 text-base font-semibold text-white">{plan.title}</h3><p className="mt-1 text-zinc-500">{planGoalLabel(plan)}</p></div>
       <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)}>{plan.status}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">current week {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">current week --</Badge>}</div>
     </div>
-    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-4">
+    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-6">
       <Stat label="target date" value={formatDate(plan.target_date)} />
       <Stat label="target time" value={formatTargetTime(plan.target_time_seconds)} />
       <Stat label="planned km" value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
       <Stat label="completed km" value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
+      <Stat label="support" value={planSupportWorkouts(plan)} />
+      <Stat label="duration" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} />
     </div>
     <div className="mt-3 grid gap-1.5 text-[11px] text-zinc-500 md:grid-cols-2">{history.map((item) => <div key={item.label} className="rounded border border-zinc-900 bg-zinc-950 px-2 py-1"><span className="font-mono uppercase tracking-[0.12em] text-zinc-600">{item.label}</span><span className="ml-2 text-zinc-300">{item.value}</span></div>)}</div>
   </div>
@@ -2336,15 +2404,15 @@ function PlanVolumeChart({ weeks }: { weeks: PlanWeekSummary[] }) {
   const maxVolume = Math.max(...weeks.map((week) => Math.max(week.planned_distance_km, week.completed_distance_km)), 1)
   if (!weeks.length) return null
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Volume chart</p><p className="mt-1 text-zinc-500">Weekly planned vs actual distance.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{weeks.length} weeks</Badge></div>
-    <div className="mt-3 grid gap-2">{weeks.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="grid gap-1"><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(3, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-zinc-400/70" style={{ width: `${Math.round((week.completed_distance_km / maxVolume) * 100)}%` }} /></div></div><span className="text-right text-zinc-400">{week.completed_distance_km.toFixed(1)}/{week.planned_distance_km.toFixed(1)}</span></div>)}</div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Volume chart</p><p className="mt-1 text-zinc-500">Weekly running distance with support-session markers.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{weeks.length} weeks</Badge></div>
+    <div className="mt-3 grid gap-2">{weeks.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_7rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="grid gap-1"><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(3, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-zinc-400/70" style={{ width: `${Math.round((week.completed_distance_km / maxVolume) * 100)}%` }} /></div></div><span className="text-right text-zinc-400">{week.completed_distance_km.toFixed(1)}/{week.planned_distance_km.toFixed(1)} км · S{week.support_workouts}</span></div>)}</div>
   </div>
 }
 
 function PlanIntensitySplit({ split }: { split: { key: string; value: number; percent: number }[] }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Intensity split</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">easy / steady / hard</Badge></div>
-    <div className="mt-3 grid gap-2 md:grid-cols-3">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)} км</p></div>)}</div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Intensity split</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">planned time</Badge></div>
+    <div className="mt-3 grid gap-2 md:grid-cols-5">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)}</p></div>)}</div>
   </div>
 }
 
@@ -2381,11 +2449,12 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
 function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDrafts, completionDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onCompletionDraft, onCompleteWorkout, onSaveFeedback }: { summary: PlanWeekSummary; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; completionDrafts: Record<number, CompletionDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onCompletionDraft: (workout: PlanWorkout, patch: Partial<CompletionDraft>) => void; onCompleteWorkout: (workout: PlanWorkout) => Promise<void>; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
     <div className="border-b border-zinc-800 px-3 py-2">
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} км</Badge>{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-5">
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} км</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} км</div></div>
+        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">support</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">done</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} км</div></div>
       </div>
@@ -2399,21 +2468,22 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
       const canGiveFeedback = ["done", "missed", "skipped"].includes(workout.status)
       const canCompleteManually = !workout.completed_activity_id && ["planned", "rescheduled", "missed", "skipped"].includes(workout.status)
       const canReschedule = !workout.completed_activity_id && ["planned", "rescheduled", "missed", "skipped"].includes(workout.status)
+      const supportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div></div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {formatWorkoutTarget(workout)} · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div></div>
         <div className="mt-2 grid gap-2 md:grid-cols-4">
-          <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatDistance(workout.distance_km)} · {formatDuration(workout.duration_seconds)}</p></div>
+          <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
           <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Purpose</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
           <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Safety note</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
         <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
-        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatDistance(workout.actual_distance_km)} · {formatDuration(workout.actual_duration_seconds)}</div> : null}
+        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
         {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div><div className="mt-1 flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
         {canCompleteManually ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Manual completion</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Workout Detail</Badge></div>
           <div className="grid gap-2 md:grid-cols-4">
-            <Input type="number" min="0" max="250" step="0.1" placeholder="actual km" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />
+            {supportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">duration-only</div> : <Input type="number" min="0" max="250" step="0.1" placeholder="actual km" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}
             <Input type="number" min="1" max="2880" step="1" placeholder="minutes" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} />
             <Input type="number" min="0" max="10" step="1" placeholder="RPE" value={completionDraft.rpe} onChange={(event) => onCompletionDraft(workout, { rpe: event.target.value })} />
             <Input type="number" min="30" max="240" step="1" placeholder="avg HR" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} />

@@ -10,6 +10,15 @@ from app.services.calculations import CalculationResult, calculate_vdot
 
 
 BEST_EFFORT_TARGETS_KM = (1.0, 5.0, 10.0, 21.1)
+SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
+
+
+def planned_workout_duration_seconds(workout: TrainingPlanWorkout, pace_seconds_per_km: float = 420.0) -> int:
+    if workout.duration_seconds:
+        return workout.duration_seconds
+    if workout.distance_km:
+        return int(workout.distance_km * pace_seconds_per_km)
+    return 0
 
 
 def date_range_label(from_date: date | None, to_date: date | None) -> str:
@@ -155,6 +164,8 @@ def adherence_from_workouts(workouts: list[TrainingPlanWorkout]) -> dict[str, ob
     linked = [workout for workout in workouts if workout.completed_activity_id is not None]
     planned_distance = sum(workout.distance_km or 0 for workout in workouts)
     completed_distance = sum((workout.completed_activity.distance_km if workout.completed_activity else 0) or 0 for workout in linked)
+    planned_duration = sum(planned_workout_duration_seconds(workout) for workout in workouts)
+    completed_duration = sum((workout.completed_activity.duration_seconds if workout.completed_activity else 0) or 0 for workout in linked)
     warnings: list[str] = []
     if missed:
         warnings.append(f"{len(missed)} missed planned workouts")
@@ -169,8 +180,12 @@ def adherence_from_workouts(workouts: list[TrainingPlanWorkout]) -> dict[str, ob
         "unlinked_done_workouts": len([workout for workout in done if workout.completed_activity_id is None]),
         "planned_distance_km": round(planned_distance, 2),
         "completed_distance_km": round(completed_distance, 2),
+        "planned_duration_seconds": planned_duration,
+        "completed_duration_seconds": completed_duration,
         "completion_rate": round(len(done) / len(workouts), 2) if workouts else 0,
         "distance_completion_rate": round(completed_distance / planned_distance, 2) if planned_distance else 0,
+        "duration_completion_rate": round(completed_duration / planned_duration, 2) if planned_duration else 0,
+        "support_workouts": sum(1 for workout in workouts if (workout.workout_type or "") in SUPPORT_WORKOUT_TYPES),
         "warnings": warnings,
     }
 

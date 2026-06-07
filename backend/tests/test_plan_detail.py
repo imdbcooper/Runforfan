@@ -16,10 +16,11 @@ def make_workout(
     week_index: int,
     day_index: int,
     workout_type: str,
-    distance_km: float,
+    distance_km: float | None,
     duration_seconds: int | None = None,
     status: str = "planned",
     linked_distance_km: float | None = None,
+    linked_duration_seconds: int = 1800,
 ) -> TrainingPlanWorkout:
     activity = None
     if linked_distance_km is not None:
@@ -28,7 +29,7 @@ def make_workout(
             user_id=1,
             title=f"Activity {workout_id}",
             distance_km=linked_distance_km,
-            duration_seconds=1800,
+            duration_seconds=linked_duration_seconds,
         )
     return TrainingPlanWorkout(
         id=workout_id,
@@ -93,6 +94,104 @@ class PlanDetailTests(unittest.TestCase):
         self.assertEqual(result["target_time_seconds"], 2400)
         self.assertIn("created_at", result)
         self.assertIn("updated_at", result)
+
+    def test_plan_adherence_estimates_duration_for_legacy_running_workouts(self):
+        run = make_workout(
+            1,
+            week_index=1,
+            day_index=1,
+            workout_type="easy",
+            distance_km=5.0,
+            duration_seconds=None,
+            status="done",
+            linked_distance_km=5.0,
+            linked_duration_seconds=1800,
+        )
+        plan = TrainingPlan(
+            id=13,
+            user_id=1,
+            title="Legacy duration plan",
+            goal_type="10k",
+            available_days_per_week=3,
+            status="active",
+            workouts=[run],
+        )
+
+        adherence = plan_to_dict(plan)["adherence"]
+
+        self.assertEqual(adherence["planned_duration_seconds"], 2100)
+        self.assertEqual(adherence["duration_completion_rate"], 0.86)
+
+    def test_duration_only_support_workout_contributes_time_not_distance(self):
+        strength = make_workout(
+            4,
+            week_index=1,
+            day_index=4,
+            workout_type="strength",
+            distance_km=None,
+            duration_seconds=1800,
+            status="done",
+            linked_distance_km=None,
+            linked_duration_seconds=1700,
+        )
+        strength.completed_activity = Activity(id=104, user_id=1, title="Strength", activity_type="manual_strength", duration_seconds=1700)
+        strength.completed_activity_id = 104
+        plan = TrainingPlan(
+            id=11,
+            user_id=1,
+            title="Support plan",
+            goal_type="base_building",
+            available_days_per_week=3,
+            status="active",
+            workouts=[strength],
+        )
+
+        summary = plan_week_summaries(plan)[0]
+        adherence = plan_to_dict(plan)["adherence"]
+
+        self.assertEqual(summary["planned_distance_km"], 0)
+        self.assertEqual(summary["planned_duration_seconds"], 1800)
+        self.assertEqual(summary["support_workouts"], 1)
+        self.assertEqual(summary["completed_duration_seconds"], 1700)
+        self.assertEqual(adherence["support_workouts"], 1)
+        self.assertEqual(adherence["duration_completion_rate"], 0.94)
+
+    def test_mixed_plan_warns_when_support_duration_is_short(self):
+        run = make_workout(
+            1,
+            week_index=1,
+            day_index=1,
+            workout_type="easy",
+            distance_km=5.0,
+            duration_seconds=1800,
+            status="done",
+            linked_distance_km=5.0,
+            linked_duration_seconds=1800,
+        )
+        strength = make_workout(
+            2,
+            week_index=1,
+            day_index=2,
+            workout_type="strength",
+            distance_km=None,
+            duration_seconds=1800,
+            status="done",
+        )
+        strength.completed_activity = Activity(id=102, user_id=1, title="Strength", activity_type="manual_strength", duration_seconds=600)
+        strength.completed_activity_id = 102
+        plan = TrainingPlan(
+            id=12,
+            user_id=1,
+            title="Mixed support plan",
+            goal_type="10k",
+            available_days_per_week=3,
+            status="active",
+            workouts=[run, strength],
+        )
+
+        warnings = plan_to_dict(plan)["adherence"]["warnings"]
+
+        self.assertIn("ОФП/support длительность заметно ниже плана", warnings)
 
 
 if __name__ == "__main__":

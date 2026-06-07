@@ -243,6 +243,47 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertIn("tempo", workout_types)
         self.assertNotIn("missing_pace_zones", {flag["code"] for flag in preview["risk_flags"]})
 
+    def test_preview_adds_duration_only_strength_and_mobility_support(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(date_of_birth=date(1990, 1, 1), lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(
+            title="Mixed plan",
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            include_strength=True,
+            strength_sessions_per_week=1,
+            include_mobility=True,
+            mobility_sessions_per_week=1,
+            strength_equipment="bands",
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        support = [workout for workout in preview["workouts"] if workout["workout_type"] in {"strength", "mobility"}]
+        self.assertEqual(len(support), preview["weeks"] * 2)
+        self.assertTrue(all(workout["distance_km"] is None for workout in support))
+        self.assertTrue(all(workout["duration_seconds"] > 0 for workout in support))
+        self.assertEqual(preview["weekly_volume_curve"][0]["support_sessions"], 2)
+        self.assertEqual(preview["constraints"]["strength_sessions_per_week"], 1)
+        self.assertIn("bands", support[0]["description"])
+        self.assertGreater(preview["intensity_split"]["strength"], 0)
+        self.assertGreater(preview["intensity_split"]["mobility"], 0)
+        total_duration = sum(int(workout.get("duration_seconds") or 0) for workout in preview["workouts"])
+        strength_duration = sum(int(workout.get("duration_seconds") or 0) for workout in preview["workouts"] if workout["workout_type"] == "strength")
+        mobility_duration = sum(int(workout.get("duration_seconds") or 0) for workout in preview["workouts"] if workout["workout_type"] == "mobility")
+        self.assertEqual(preview["intensity_split"]["strength"], round(strength_duration / total_duration, 3))
+        self.assertEqual(preview["intensity_split"]["mobility"], round(mobility_duration / total_duration, 3))
+
     def test_target_time_recent_race_and_terrain_affect_preview(self):
         start_date = date(2026, 6, 8)
         profile = make_profile(
@@ -367,6 +408,64 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertLessEqual(max_week, 10.0)
         self.assertEqual(preview["peak_weekly_distance_km"], max_week)
         self.assertLessEqual(max(week["long_run_km"] for week in preview["weekly_volume_curve"]), 1.0)
+
+    def test_time_budget_limits_support_sessions_before_running_volume(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            time_budget_minutes_per_week=30,
+            include_strength=True,
+            strength_sessions_per_week=1,
+            include_mobility=True,
+            mobility_sessions_per_week=1,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1]
+        first_week_duration = sum(int(workout.get("duration_seconds") or 0) for workout in first_week)
+
+        self.assertLessEqual(first_week_duration, 30 * 60)
+        self.assertEqual(preview["constraints"]["strength_sessions_per_week"], 0)
+        self.assertEqual(preview["constraints"]["mobility_sessions_per_week"], 1)
+        self.assertTrue(preview["constraints"]["support_limited_by_time_budget"])
+        self.assertIn("support_limited_by_time_budget", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_tight_time_budget_flags_running_floor_instead_of_shrinking_below_floor(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            target_time_seconds=172800,
+            time_budget_minutes_per_week=30,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        self.assertGreaterEqual(preview["weekly_volume_curve"][0]["planned_distance_km"], 1.0)
+        self.assertIn("time_budget_below_running_floor", {flag["code"] for flag in preview["risk_flags"]})
 
     def test_generated_plan_activation_archives_existing_active_plan(self):
         existing_active = TrainingPlan(id=1, user_id=1, title="Old", goal_type="10k", status="active", available_days_per_week=3)

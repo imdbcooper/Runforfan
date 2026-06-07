@@ -170,8 +170,12 @@ class AnalyticsAdherenceOut(BaseModel):
     unlinked_done_workouts: int
     planned_distance_km: float
     completed_distance_km: float
+    planned_duration_seconds: int = 0
+    completed_duration_seconds: int = 0
     completion_rate: float
     distance_completion_rate: float
+    duration_completion_rate: float = 0
+    support_workouts: int = 0
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -584,6 +588,11 @@ class PlanGenerateRequest(BaseModel):
     max_long_run_km: float | None = Field(default=None, ge=1, le=100)
     max_long_run_duration_minutes: StrictInt | None = Field(default=None, ge=15, le=600)
     terrain: str | None = Field(default=None, max_length=100)
+    include_strength: bool = False
+    strength_sessions_per_week: StrictInt | None = Field(default=None, ge=0, le=3)
+    include_mobility: bool = False
+    mobility_sessions_per_week: StrictInt | None = Field(default=None, ge=0, le=4)
+    strength_equipment: str | None = Field(default=None, max_length=64)
     activate: bool = False
 
     @model_validator(mode="after")
@@ -613,6 +622,8 @@ class PlanBuilderWeeklyVolumeOut(BaseModel):
     planned_distance_km: float
     long_run_km: float
     hard_sessions: int
+    support_sessions: int = 0
+    support_duration_seconds: int = 0
 
 
 class PlanBuilderRiskFlagOut(BaseModel):
@@ -629,6 +640,7 @@ class PlanBuilderPreviewWorkoutOut(BaseModel):
     workout_type: str
     title: str
     distance_km: float | None = None
+    duration_seconds: int | None = None
     intensity: str | None = None
     description: str | None = None
 
@@ -729,8 +741,12 @@ class PlanAdherenceOut(BaseModel):
     unlinked_done_workouts: int = 0
     planned_distance_km: float
     completed_distance_km: float
+    planned_duration_seconds: int = 0
+    completed_duration_seconds: int = 0
     completion_rate: float
     distance_completion_rate: float
+    duration_completion_rate: float = 0
+    support_workouts: int = 0
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -772,6 +788,8 @@ class PlanWeekSummaryOut(BaseModel):
     distance_completion_rate: float
     planned_time_label: str
     hard_sessions: int
+    support_workouts: int = 0
+    support_duration_seconds: int = 0
     long_run_km: float | None = None
     deload: bool = False
     workouts: list[PlanWorkoutOut] = Field(default_factory=list)
@@ -785,6 +803,7 @@ class PlanActivityMatchCandidateOut(BaseModel):
     reasons: list[str]
     date_delta_days: int | None = None
     distance_delta_km: float | None = None
+    duration_delta_seconds: int | None = None
 
 
 class PlanWorkoutMatchCandidateOut(BaseModel):
@@ -794,6 +813,7 @@ class PlanWorkoutMatchCandidateOut(BaseModel):
     reasons: list[str]
     date_delta_days: int | None = None
     distance_delta_km: float | None = None
+    duration_delta_seconds: int | None = None
 
 
 class PlanRecommendationOut(BaseModel):

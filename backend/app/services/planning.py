@@ -22,6 +22,9 @@ AUTO_MATCH_DATE_WINDOW_DAYS = 3
 DEFAULT_WEEKLY_VOLUME_KM = 15.0
 HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
 HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
+SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
+STRENGTH_WORKOUT_TYPES = {"strength", "ofp", "core"}
+MOBILITY_WORKOUT_TYPES = {"mobility", "prehab"}
 APPLICABLE_RECOMMENDATION_ACTIONS = {
     "hold_next_week_volume",
     "reduce_next_week_volume",
@@ -107,6 +110,32 @@ def schedule_offsets(days: int) -> list[int]:
         7: [0, 1, 2, 3, 4, 5, 6],
     }
     return schedules.get(days, schedules[4])
+
+
+def is_support_workout_type(workout_type: str | None) -> bool:
+    return (workout_type or "") in SUPPORT_WORKOUT_TYPES
+
+
+def activity_type_is_support(activity_type: str | None) -> bool:
+    value = (activity_type or "").lower()
+    return any(marker in value for marker in SUPPORT_WORKOUT_TYPES)
+
+
+def support_match_markers(workout_type: str) -> set[str]:
+    markers = {workout_type}
+    if workout_type in STRENGTH_WORKOUT_TYPES:
+        markers.update({"strength", "ofp", "сил", "офп", "core", "gym"})
+    if workout_type in MOBILITY_WORKOUT_TYPES:
+        markers.update({"mobility", "prehab", "моб", "stretch", "activation"})
+    if workout_type == "cross_training":
+        markers.update({"cross training", "cross-training"})
+    return markers
+
+
+def activity_matches_support_marker(activity: Activity, workout_type: str) -> bool:
+    haystack = f"{activity.activity_type or ''} {activity.title or ''}".lower().replace("_", " ").replace("-", " ")
+    markers = {marker.lower().replace("_", " ").replace("-", " ") for marker in support_match_markers(workout_type)}
+    return any(marker in haystack for marker in markers)
 
 
 def schedule_offsets_for_plan(start_date: date, days: int, preferred_weekdays: list[int] | None = None) -> list[int]:
@@ -345,7 +374,142 @@ def workout_template(days: int, conservative: bool, has_precise_zones: bool) -> 
     return template[:days]
 
 
+def requested_support_sessions(requested: int | None, enabled: bool, default_value: int, maximum: int) -> int:
+    if not enabled:
+        return 0
+    if requested is not None:
+        return max(0, min(maximum, int(requested)))
+    return default_value if enabled else 0
+
+
+def support_session_settings(request: PlanGenerateRequest, training_age_level: str, conservative: bool) -> dict[str, int]:
+    default_strength = 1 if request.include_strength else 0
+    if request.include_strength and training_age_level in {"intermediate", "advanced"} and not conservative:
+        default_strength = 2
+    strength_sessions = requested_support_sessions(request.strength_sessions_per_week, request.include_strength, default_strength, 3)
+    if conservative or request.injury:
+        strength_sessions = min(strength_sessions, 1)
+    mobility_sessions = requested_support_sessions(request.mobility_sessions_per_week, request.include_mobility, 1 if request.include_mobility else 0, 4)
+
+    if conservative or request.injury:
+        strength_duration = 20 * 60
+    elif training_age_level == "advanced":
+        strength_duration = 35 * 60
+    elif training_age_level == "intermediate":
+        strength_duration = 30 * 60
+    else:
+        strength_duration = 25 * 60
+    mobility_duration = 15 * 60 if training_age_level != "beginner" else 12 * 60
+    return {
+        "strength_sessions": strength_sessions,
+        "mobility_sessions": mobility_sessions,
+        "strength_duration_seconds": strength_duration,
+        "mobility_duration_seconds": mobility_duration,
+    }
+
+
+def support_settings_duration_seconds(settings: dict[str, int]) -> int:
+    return (
+        settings["strength_sessions"] * settings["strength_duration_seconds"]
+        + settings["mobility_sessions"] * settings["mobility_duration_seconds"]
+    )
+
+
+def fit_support_settings_to_time_budget(settings: dict[str, int], time_budget_minutes: int | None, easy_pace_seconds_per_km: float) -> tuple[dict[str, int], bool]:
+    if not time_budget_minutes:
+        return dict(settings), False
+    adjusted = dict(settings)
+    max_support_seconds = max(0, int(time_budget_minutes * 60 - easy_pace_seconds_per_km))
+    limited = False
+    while support_settings_duration_seconds(adjusted) > max_support_seconds and (adjusted["strength_sessions"] or adjusted["mobility_sessions"]):
+        if adjusted["strength_sessions"] and (not adjusted["mobility_sessions"] or adjusted["strength_duration_seconds"] >= adjusted["mobility_duration_seconds"]):
+            adjusted["strength_sessions"] -= 1
+        elif adjusted["mobility_sessions"]:
+            adjusted["mobility_sessions"] -= 1
+        limited = True
+    return adjusted, limited
+
+
+def support_workout_description(workout_type: str, equipment: str | None = None) -> str:
+    if workout_type == "mobility":
+        return "Mobility/prehab: ankle and hip mobility, foot activation, glute activation and relaxed breathing. Keep it easy; stop if pain changes gait."
+    equipment_text = f" Equipment: {equipment}." if equipment else " Use bodyweight or simple home equipment."
+    return (
+        "Runner strength/OFP: calves/soleus, glutes, hamstrings, single-leg stability and trunk control. "
+        "Keep technique clean, avoid failure and leave 1-2 reps in reserve."
+        f"{equipment_text}"
+    )
+
+
+def support_anchor_dates(week_workouts: list[dict[str, object]], sessions: int, fallback_start: date) -> list[date]:
+    if sessions <= 0:
+        return []
+    candidates = [
+        workout
+        for workout in week_workouts
+        if not preview_workout_is_hard(workout) and workout.get("workout_type") != "long" and isinstance(workout.get("scheduled_date"), date)
+    ]
+    if not candidates:
+        candidates = [workout for workout in week_workouts if isinstance(workout.get("scheduled_date"), date)]
+    dates: list[date] = []
+    for workout in candidates:
+        scheduled = workout.get("scheduled_date")
+        if isinstance(scheduled, date) and scheduled not in dates:
+            dates.append(scheduled)
+        if len(dates) >= sessions:
+            return dates
+    while len(dates) < sessions:
+        dates.append(fallback_start)
+    return dates
+
+
+def support_workouts_for_week(
+    week: int,
+    days: int,
+    week_start: date,
+    week_workouts: list[dict[str, object]],
+    settings: dict[str, int],
+    request: PlanGenerateRequest,
+) -> list[dict[str, object]]:
+    support: list[dict[str, object]] = []
+    strength_dates = support_anchor_dates(week_workouts, settings["strength_sessions"], week_start)
+    for index, scheduled in enumerate(strength_dates, start=1):
+        support.append({
+            "week_index": week,
+            "day_index": days + len(support) + 1,
+            "scheduled_date": scheduled,
+            "workout_type": "strength",
+            "title": f"ОФП / силовая {'A' if index == 1 else 'B'}",
+            "distance_km": None,
+            "duration_seconds": settings["strength_duration_seconds"],
+            "intensity": "strength",
+            "description": support_workout_description("strength", request.strength_equipment),
+        })
+    mobility_dates: list[date] = []
+    long_dates = [workout["scheduled_date"] for workout in week_workouts if workout.get("workout_type") == "long" and isinstance(workout.get("scheduled_date"), date)]
+    if long_dates:
+        mobility_dates.append(min(long_dates[0] + timedelta(days=1), week_start + timedelta(days=6)))
+    mobility_dates.extend(support_anchor_dates(week_workouts, max(0, settings["mobility_sessions"] - len(mobility_dates)), week_start))
+    for scheduled in mobility_dates[:settings["mobility_sessions"]]:
+        support.append({
+            "week_index": week,
+            "day_index": days + len(support) + 1,
+            "scheduled_date": scheduled,
+            "workout_type": "mobility",
+            "title": "Mobility / prehab",
+            "distance_km": None,
+            "duration_seconds": settings["mobility_duration_seconds"],
+            "intensity": "recovery",
+            "description": support_workout_description("mobility"),
+        })
+    return support
+
+
 def workout_description(workout_type: str, intensity: str, zones: dict, conservative: bool) -> str:
+    if workout_type == "strength":
+        return support_workout_description("strength")
+    if workout_type in {"mobility", "prehab"}:
+        return support_workout_description("mobility")
     if workout_type == "interval":
         target = target_text(zones, pace_key="interval", hr_key="z4", fallback="RPE 6-7, без выхода в максимальную интенсивность")
         return f"Работа около порога: 3-5 длинных отрезков с восстановлением. Цель: {target}."
@@ -407,6 +571,10 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
         if feedback.rpe is not None:
             if workout_is_hard(workout):
                 target_low, target_high = 6, 8
+            elif workout.workout_type in STRENGTH_WORKOUT_TYPES:
+                target_low, target_high = 4, 7
+            elif workout.workout_type in MOBILITY_WORKOUT_TYPES:
+                target_low, target_high = 1, 3
             elif workout.workout_type in {"steady", "tempo"} or (workout.intensity or "") == "steady":
                 target_low, target_high = 3, 6
             else:
@@ -499,7 +667,15 @@ def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
     }
 
 
-def adherence_summary(workouts: list[TrainingPlanWorkout]) -> dict[str, object]:
+def planned_workout_duration_seconds(workout: TrainingPlanWorkout, pace_seconds_per_km: float = 420.0) -> int:
+    if workout.duration_seconds:
+        return workout.duration_seconds
+    if workout.distance_km:
+        return int(workout.distance_km * pace_seconds_per_km)
+    return 0
+
+
+def adherence_summary(workouts: list[TrainingPlanWorkout], pace_seconds_per_km: float = 420.0) -> dict[str, object]:
     total = len(workouts)
     done = [workout for workout in workouts if workout.status == "done"]
     missed = [workout for workout in workouts if workout.status == "missed"]
@@ -507,14 +683,34 @@ def adherence_summary(workouts: list[TrainingPlanWorkout]) -> dict[str, object]:
     linked = [workout for workout in done if workout.completed_activity]
     planned_distance = sum(workout.distance_km or 0 for workout in workouts)
     completed_distance = sum((workout.completed_activity.distance_km or 0) for workout in linked)
+    planned_duration = sum(planned_workout_duration_seconds(workout, pace_seconds_per_km) for workout in workouts)
+    completed_duration = sum(workout.completed_activity.duration_seconds or 0 for workout in linked)
+    support = [workout for workout in workouts if is_support_workout_type(workout.workout_type)]
+    support_workouts = len(support)
+    due_support = [workout for workout in support if workout.status in {"done", "missed", "skipped"}]
+    support_done = [workout for workout in due_support if workout.status == "done" and workout.completed_activity]
+    planned_support_duration = sum(planned_workout_duration_seconds(workout, pace_seconds_per_km) for workout in due_support)
+    completed_support_duration = sum(workout.completed_activity.duration_seconds or 0 for workout in support_done)
     warnings = []
     if done and len(linked) < len(done):
         warnings.append("Есть выполненные тренировки без привязанной фактической активности")
     distance_rate = completed_distance / planned_distance if planned_distance else 0
+    duration_rate = completed_duration / planned_duration if planned_duration else 0
     if distance_rate >= 1.2:
         warnings.append("Фактический объем заметно выше плана")
     elif planned_distance and distance_rate <= 0.75 and done:
         warnings.append("Фактический объем заметно ниже плана")
+    elif not planned_distance and planned_duration and done:
+        if duration_rate >= 1.2:
+            warnings.append("Фактическая длительность заметно выше плана")
+        elif duration_rate <= 0.75:
+            warnings.append("Фактическая длительность заметно ниже плана")
+    if planned_support_duration and due_support:
+        support_duration_rate = completed_support_duration / planned_support_duration
+        if support_duration_rate >= 1.2:
+            warnings.append("ОФП/support длительность заметно выше плана")
+        elif support_duration_rate <= 0.75:
+            warnings.append("ОФП/support длительность заметно ниже плана")
     return {
         "total_workouts": total,
         "done_workouts": len(done),
@@ -524,18 +720,22 @@ def adherence_summary(workouts: list[TrainingPlanWorkout]) -> dict[str, object]:
         "unlinked_done_workouts": len(done) - len(linked),
         "planned_distance_km": round(planned_distance, 1),
         "completed_distance_km": round(completed_distance, 1),
+        "planned_duration_seconds": planned_duration,
+        "completed_duration_seconds": completed_duration,
         "completion_rate": round(len(done) / total, 2) if total else 0,
         "distance_completion_rate": round(distance_rate, 2) if planned_distance else 0,
+        "duration_completion_rate": round(duration_rate, 2) if planned_duration else 0,
+        "support_workouts": support_workouts,
         "warnings": warnings,
     }
 
 
-def weekly_adherence_summary(workouts: list[TrainingPlanWorkout]) -> list[dict[str, object]]:
+def weekly_adherence_summary(workouts: list[TrainingPlanWorkout], pace_seconds_per_km: float = 420.0) -> list[dict[str, object]]:
     summaries = []
     week_indexes = sorted({workout.week_index for workout in workouts})
     for week_index in week_indexes:
         week_workouts = [workout for workout in workouts if workout.week_index == week_index]
-        summary = adherence_summary(week_workouts)
+        summary = adherence_summary(week_workouts, pace_seconds_per_km)
         summary["week_index"] = week_index
         summary["planned_workouts"] = summary.pop("total_workouts")
         summaries.append(summary)
@@ -572,14 +772,11 @@ def plan_week_summaries(plan: TrainingPlan) -> list[dict[str, object]]:
         linked = [workout for workout in completed if workout.completed_activity]
         completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in linked)
         completed_duration = sum(workout.completed_activity.duration_seconds or 0 for workout in linked)
-        planned_duration = sum(
-            workout.duration_seconds if workout.duration_seconds else int((workout.distance_km or 0) * pace_seconds_per_km)
-            for workout in week_workouts
-            if workout.duration_seconds or workout.distance_km
-        ) or None
+        planned_duration = sum(planned_workout_duration_seconds(workout, pace_seconds_per_km) for workout in week_workouts) or None
         long_candidates = [workout.distance_km or 0 for workout in week_workouts if workout.workout_type == "long"]
         long_run = max(long_candidates or [workout.distance_km or 0 for workout in week_workouts] or [0])
-        adherence = adherence_summary(week_workouts)
+        adherence = adherence_summary(week_workouts, pace_seconds_per_km)
+        support_workouts = [workout for workout in week_workouts if is_support_workout_type(workout.workout_type)]
         summary = {
             "week_index": week_index,
             "planned_distance_km": round(planned_distance, 1),
@@ -587,9 +784,11 @@ def plan_week_summaries(plan: TrainingPlan) -> list[dict[str, object]]:
             "completed_distance_km": round(completed_distance, 1),
             "completed_duration_seconds": completed_duration,
             "completion_rate": round(len(completed) / len(week_workouts), 2) if week_workouts else 0,
-            "distance_completion_rate": round(completed_distance / planned_distance, 2) if planned_distance else 0,
+            "distance_completion_rate": adherence["distance_completion_rate"],
             "planned_time_label": format_duration_label(planned_duration),
             "hard_sessions": sum(1 for workout in week_workouts if workout_is_hard(workout)),
+            "support_workouts": len(support_workouts),
+            "support_duration_seconds": sum(workout.duration_seconds or 0 for workout in support_workouts),
             "long_run_km": round(long_run, 1) if long_run else None,
             "deload": previous_planned_distance is not None and planned_distance < previous_planned_distance * 0.9,
             "workouts": [workout_to_dict(workout) for workout in week_workouts],
@@ -732,7 +931,7 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             suggested_payload={"action": "reduce_intensity", "days": 3},
         ))
 
-    if summary["distance_completion_rate"] >= 1.2:
+    if summary["planned_distance_km"] and summary["distance_completion_rate"] >= 1.2:
         recommendations.append(recommendation_item(
             "recovery",
             "warning",
@@ -741,7 +940,7 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             [f"distance completion rate {summary['distance_completion_rate']:.0%}"],
             suggested_payload={"action": "reduce_intensity", "days": 2},
         ))
-    elif summary["distance_completion_rate"] <= 0.75 and summary["linked_workouts"] > 0:
+    elif summary["planned_distance_km"] and summary["distance_completion_rate"] <= 0.75 and summary["linked_workouts"] > 0:
         recommendations.append(recommendation_item(
             "reduce_volume",
             "warning",
@@ -1072,11 +1271,25 @@ def distance_score(actual_km: float | None, planned_km: float | None) -> float:
     return max(0.0, min(1.0, 1 - relative_delta / 0.6))
 
 
+def duration_score(actual_seconds: int | None, planned_seconds: int | None) -> float:
+    if not actual_seconds or not planned_seconds:
+        return 0.45
+    relative_delta = abs(actual_seconds - planned_seconds) / max(planned_seconds, 1)
+    return max(0.0, min(1.0, 1 - relative_delta / 0.6))
+
+
 def workout_type_score(activity: Activity, workout: TrainingPlanWorkout) -> tuple[float, list[str]]:
     reasons = []
     workout_type = workout.workout_type or ""
     title = (activity.title or "").lower()
+    activity_type = (activity.activity_type or "").lower()
     has_intervals = activity_has_interval_structure(activity)
+    if workout_type in SUPPORT_WORKOUT_TYPES:
+        if activity_matches_support_marker(activity, workout_type):
+            return 1.0, ["тип активности совпадает с support-тренировкой"]
+        if activity.distance_km is None:
+            return 0.35, ["duration-only активность без явного support-маркера требует ручного подтверждения"]
+        return 0.2, ["план support-типа, но активность похожа на беговую"]
     if workout_type == "interval":
         if has_intervals:
             return 1.0, ["интервальная структура активности совпадает с планом"]
@@ -1104,6 +1317,9 @@ def score_activity_workout_match(activity: Activity, workout: TrainingPlanWorkou
     distance_delta = None
     if activity.distance_km is not None and workout.distance_km is not None:
         distance_delta = round(activity.distance_km - workout.distance_km, 2)
+    duration_delta = None
+    if activity.duration_seconds is not None and workout.duration_seconds is not None:
+        duration_delta = int(activity.duration_seconds - workout.duration_seconds)
 
     reasons = []
     if delta_days is None:
@@ -1115,23 +1331,38 @@ def score_activity_workout_match(activity: Activity, workout: TrainingPlanWorkou
     else:
         reasons.append("активность далеко от плановой даты")
 
-    if distance_delta is None:
-        reasons.append("дистанция не задана для одной из сторон")
-    elif abs(distance_delta) <= max(0.75, (workout.distance_km or 0) * 0.12):
-        reasons.append("дистанция близка к плану")
-    elif distance_delta > 0:
-        reasons.append("фактическая дистанция выше плановой")
+    if workout.distance_km is not None:
+        volume_component = distance_score(activity.distance_km, workout.distance_km)
+        if distance_delta is None:
+            reasons.append("дистанция не задана для одной из сторон")
+        elif abs(distance_delta) <= max(0.75, (workout.distance_km or 0) * 0.12):
+            reasons.append("дистанция близка к плану")
+        elif distance_delta > 0:
+            reasons.append("фактическая дистанция выше плановой")
+        else:
+            reasons.append("фактическая дистанция ниже плановой")
     else:
-        reasons.append("фактическая дистанция ниже плановой")
+        volume_component = duration_score(activity.duration_seconds, workout.duration_seconds)
+        if duration_delta is None:
+            reasons.append("длительность не задана для одной из сторон")
+        elif abs(duration_delta) <= max(300, int((workout.duration_seconds or 0) * 0.15)):
+            reasons.append("длительность близка к плану")
+        elif duration_delta > 0:
+            reasons.append("фактическая длительность выше плановой")
+        else:
+            reasons.append("фактическая длительность ниже плановой")
 
     type_score, type_reasons = workout_type_score(activity, workout)
     reasons.extend(type_reasons)
     score = round(
         date_score(delta_days) * 0.48
-        + distance_score(activity.distance_km, workout.distance_km) * 0.34
+        + volume_component * 0.34
         + type_score * 0.18,
         2,
     )
+    if is_support_workout_type(workout.workout_type) and not activity_matches_support_marker(activity, workout.workout_type or ""):
+        score = min(score, AUTO_MATCH_MIN_SCORE - 0.01)
+        reasons.append("auto-link отключен без явного support-маркера")
     confidence = "high" if score >= AUTO_MATCH_MIN_SCORE else "medium" if score >= 0.55 else "low"
     return {
         "score": score,
@@ -1139,6 +1370,7 @@ def score_activity_workout_match(activity: Activity, workout: TrainingPlanWorkou
         "reasons": reasons,
         "date_delta_days": delta_days,
         "distance_delta_km": distance_delta,
+        "duration_delta_seconds": duration_delta,
     }
 
 
@@ -1275,6 +1507,7 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
 
 def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
     workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
+    pace_seconds_per_km = plan_detail_pace_seconds_per_km(plan)
     return {
         "id": plan.id,
         "title": plan.title,
@@ -1286,8 +1519,8 @@ def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
         "status": plan.status,
         "explanation": plan.explanation,
         "workouts": [workout_to_dict(workout) for workout in workouts],
-        "adherence": adherence_summary(workouts),
-        "weekly_adherence": weekly_adherence_summary(workouts),
+        "adherence": adherence_summary(workouts, pace_seconds_per_km),
+        "weekly_adherence": weekly_adherence_summary(workouts, pace_seconds_per_km),
         "created_at": plan.created_at,
         "updated_at": plan.updated_at,
     }
@@ -1298,6 +1531,11 @@ def preview_workout_is_hard(workout: dict[str, object]) -> bool:
 
 
 def preview_intensity_category(workout: dict[str, object]) -> str:
+    workout_type = str(workout.get("workout_type") or "")
+    if workout_type in STRENGTH_WORKOUT_TYPES:
+        return "strength"
+    if workout_type in MOBILITY_WORKOUT_TYPES:
+        return "mobility"
     if preview_workout_is_hard(workout):
         return "hard"
     if "steady" in str(workout.get("intensity") or "") or workout.get("workout_type") == "steady":
@@ -1476,6 +1714,10 @@ def build_plan_preview_blueprint(
     safety = build_safety_context(profile, completeness, safety_context, goal_distance, request)
     conservative = bool(safety["conservative"])
     has_precise_zones = bool(completeness["can_calculate_pace_zones"] or completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"] or request.intensity_mode == "rpe")
+    easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
+    support_settings = support_session_settings(request, str(baseline["training_age_level"]), conservative)
+    support_settings, support_limited_by_budget = fit_support_settings_to_time_budget(support_settings, request.time_budget_minutes_per_week, easy_pace_seconds_per_km)
+    weekly_support_duration_seconds = support_settings_duration_seconds(support_settings)
     preferred_weekdays = request.preferred_weekdays or []
     priority_multiplier = 1.05 if request.priority in {"a", "high"} else 0.95 if request.priority in {"c", "low"} else 1.0
     target_time_multiplier = 1.03 if request.target_time_seconds else 1.0
@@ -1487,15 +1729,16 @@ def build_plan_preview_blueprint(
 
     workouts: list[dict[str, object]] = []
     weekly_curve: list[dict[str, object]] = []
-    intensity_distance = {"easy": 0.0, "steady": 0.0, "hard": 0.0}
-    easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
+    intensity_volume = {"easy": 0.0, "steady": 0.0, "hard": 0.0, "strength": 0.0, "mobility": 0.0}
+    running_floor_limited_by_budget = False
     for week in range(1, weeks + 1):
         progression = week / weeks
         week_volume = current_volume + (peak_volume - current_volume) * min(1, progression * 1.15)
         if week % 4 == 0:
             week_volume *= 0.78
         if request.time_budget_minutes_per_week:
-            budget_distance = request.time_budget_minutes_per_week * 60 / easy_pace_seconds_per_km
+            running_budget_seconds = max(0, request.time_budget_minutes_per_week * 60 - weekly_support_duration_seconds)
+            budget_distance = running_budget_seconds / easy_pace_seconds_per_km
             week_volume = min(week_volume, max(1.0, budget_distance))
         long_cap = 0.62 if conservative else 0.75
         long_run = min(goal_distance * long_cap, week_volume * (0.34 if conservative else 0.38))
@@ -1505,9 +1748,9 @@ def build_plan_preview_blueprint(
             long_run = min(long_run, request.max_long_run_duration_minutes * 60 / easy_pace_seconds_per_km)
         long_run = min(long_run, week_volume)
         easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
+        week_start = start_date + timedelta(days=(week - 1) * 7)
         week_workouts = workout_template(days, conservative=conservative, has_precise_zones=has_precise_zones)
-        week_distance = 0.0
-        hard_sessions = 0
+        week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
             distance = round(long_run if workout_type == "long" else easy_distance, 1)
             workout = {
@@ -1517,23 +1760,54 @@ def build_plan_preview_blueprint(
                 "workout_type": workout_type,
                 "title": title,
                 "distance_km": distance,
+                "duration_seconds": max(1, round(distance * easy_pace_seconds_per_km)),
                 "intensity": intensity,
                 "description": wizard_workout_description(workout_description(workout_type, intensity, zones, conservative), request, goal_distance),
             }
-            workouts.append(workout)
-            week_distance += distance
-            if preview_workout_is_hard(workout):
-                hard_sessions += 1
-            intensity_distance[preview_intensity_category(workout)] += distance
+            week_preview_workouts.append(workout)
+        if request.time_budget_minutes_per_week:
+            running_budget_seconds = max(0, request.time_budget_minutes_per_week * 60 - weekly_support_duration_seconds)
+            while sum(int(workout.get("duration_seconds") or 0) for workout in week_preview_workouts) > running_budget_seconds:
+                adjustable = [workout for workout in week_preview_workouts if float(workout.get("distance_km") or 0) > 0.1]
+                if not adjustable:
+                    break
+                current_running_distance = round(sum(float(workout.get("distance_km") or 0) for workout in week_preview_workouts), 1)
+                if current_running_distance <= 1.0 or current_running_distance - 0.1 <= 1.0:
+                    running_floor_limited_by_budget = True
+                    break
+                workout = max(adjustable, key=lambda item: float(item.get("distance_km") or 0))
+                workout["distance_km"] = round(max(0.1, float(workout.get("distance_km") or 0) - 0.1), 1)
+                workout["duration_seconds"] = max(1, round(float(workout["distance_km"]) * easy_pace_seconds_per_km))
+            rounded_distance = round(sum(float(workout.get("distance_km") or 0) for workout in week_preview_workouts), 1)
+            if rounded_distance < 1.0 and week_preview_workouts:
+                workout = max(week_preview_workouts, key=lambda item: float(item.get("distance_km") or 0))
+                workout["distance_km"] = round(float(workout.get("distance_km") or 0) + (1.0 - rounded_distance), 1)
+                workout["duration_seconds"] = max(1, round(float(workout["distance_km"]) * easy_pace_seconds_per_km))
+                if sum(int(workout.get("duration_seconds") or 0) for workout in week_preview_workouts) > running_budget_seconds:
+                    running_floor_limited_by_budget = True
+        week_distance = sum(float(workout.get("distance_km") or 0) for workout in week_preview_workouts)
+        long_run = max((float(workout.get("distance_km") or 0) for workout in week_preview_workouts if workout.get("workout_type") == "long"), default=0.0)
+        hard_sessions = sum(1 for workout in week_preview_workouts if preview_workout_is_hard(workout))
+        for workout in week_preview_workouts:
+            intensity_volume[preview_intensity_category(workout)] += int(workout.get("duration_seconds") or 0)
+        workouts.extend(week_preview_workouts)
+        support_workouts = support_workouts_for_week(week, days, week_start, week_preview_workouts, support_settings, request)
+        workouts.extend(support_workouts)
+        support_duration = sum(int(workout.get("duration_seconds") or 0) for workout in support_workouts)
+        for support_workout in support_workouts:
+            category = preview_intensity_category(support_workout)
+            intensity_volume[category] = intensity_volume.get(category, 0.0) + int(support_workout.get("duration_seconds") or 0)
         weekly_curve.append({
             "week_index": week,
             "planned_distance_km": round(week_distance, 1),
             "long_run_km": round(long_run, 1),
             "hard_sessions": hard_sessions,
+            "support_sessions": len(support_workouts),
+            "support_duration_seconds": support_duration,
         })
 
-    total_distance = sum(intensity_distance.values())
-    intensity_split = {key: round(value / total_distance, 3) if total_distance else 0.0 for key, value in intensity_distance.items()}
+    total_intensity_volume = sum(intensity_volume.values())
+    intensity_split = {key: round(value / total_intensity_volume, 3) if total_intensity_volume else 0.0 for key, value in intensity_volume.items()}
     effective_peak_volume = max((float(week["planned_distance_km"] or 0) for week in weekly_curve), default=round(peak_volume, 1))
     safety_text = "; ".join(safety["reasons"]) if safety["reasons"] else "no active safety gates"
     zone_text = []
@@ -1543,6 +1817,28 @@ def build_plan_preview_blueprint(
         zone_text.append(f"HR zones: {len(zones['hr'])}")
     zone_summary = ", ".join(zone_text) if zone_text else "no precise zones, using RPE targets"
     risk_flags = builder_risk_flags(request, baseline, weekly_curve, workouts, safety, completeness, goal_distance, weeks, start_date)
+    if support_limited_by_budget:
+        risk_flags.append({
+            "code": "support_limited_by_time_budget",
+            "severity": "warning",
+            "message": "ОФП/support sessions reduced to fit the weekly time budget.",
+            "reasons": [
+                f"time budget: {request.time_budget_minutes_per_week} min/week",
+                f"reserved running time: at least {round(easy_pace_seconds_per_km / 60)} min/week",
+                f"adjusted support duration: {round(weekly_support_duration_seconds / 60)} min/week",
+            ],
+        })
+    if running_floor_limited_by_budget:
+        risk_flags.append({
+            "code": "time_budget_below_running_floor",
+            "severity": "warning",
+            "message": "Weekly time budget is too tight to fit support and the minimum running floor.",
+            "reasons": [
+                f"time budget: {request.time_budget_minutes_per_week} min/week",
+                "minimum running floor: 1.0 km/week",
+                f"adjusted support duration: {round(weekly_support_duration_seconds / 60)} min/week",
+            ],
+        })
     return {
         "title": request.title or f"План на {race_name(goal_distance)}",
         "goal_type": request.goal_type,
@@ -1563,6 +1859,13 @@ def build_plan_preview_blueprint(
             "max_long_run_km": request.max_long_run_km,
             "max_long_run_duration_minutes": request.max_long_run_duration_minutes,
             "time_budget_minutes_per_week": request.time_budget_minutes_per_week,
+            "include_strength": request.include_strength,
+            "strength_sessions_per_week": support_settings["strength_sessions"],
+            "include_mobility": request.include_mobility,
+            "mobility_sessions_per_week": support_settings["mobility_sessions"],
+            "weekly_support_duration_seconds": weekly_support_duration_seconds,
+            "support_limited_by_time_budget": support_limited_by_budget,
+            "strength_equipment": request.strength_equipment,
             "estimated_easy_pace_seconds_per_km": round(easy_pace_seconds_per_km),
             "terrain": request.terrain,
             "recent_race_distance_km": request.recent_race_distance_km,
@@ -1575,6 +1878,7 @@ def build_plan_preview_blueprint(
         "workouts": workouts,
         "explanation": (
             f"Plan Builder Preview: план построен от текущего объема {current_volume:.1f} км/нед до пика {effective_peak_volume:.1f} км/нед. "
+            f"Support sessions: strength {support_settings['strength_sessions']}/week, mobility {support_settings['mobility_sessions']}/week. "
             f"Baseline source: {volume_source}, training age={baseline['training_age_level']}, confidence={baseline['confidence']}. "
             f"Safety gates: {safety_text}. Zones: {zone_summary}. "
             f"Profile completeness: {float(completeness['score']):.0%}, confidence={completeness['confidence']}. "
@@ -1632,6 +1936,7 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
             workout_type=str(workout["workout_type"]),
             title=str(workout["title"]),
             distance_km=float(workout["distance_km"]) if workout["distance_km"] is not None else None,
+            duration_seconds=int(workout["duration_seconds"]) if workout.get("duration_seconds") is not None else None,
             intensity=str(workout["intensity"]) if workout["intensity"] is not None else None,
             description=str(workout["description"]) if workout["description"] is not None else None,
         ))
@@ -1798,6 +2103,13 @@ def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout
     return feedback
 
 
+def manual_activity_type_for_workout(workout: TrainingPlanWorkout) -> str:
+    workout_type = workout.workout_type or ""
+    if workout_type in SUPPORT_WORKOUT_TYPES:
+        return f"manual_{workout_type}"
+    return "manual_workout"
+
+
 def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutCompleteIn) -> TrainingPlanWorkout:
     if workout.plan.user_id != user.id:
         raise ValueError("Workout not found")
@@ -1813,7 +2125,7 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
         average_pace = round(payload.actual_duration_seconds / payload.actual_distance_km)
     activity = Activity(
         user_id=user.id,
-        activity_type="manual_workout",
+        activity_type=manual_activity_type_for_workout(workout),
         title=f"Manual completion: {workout.title}",
         started_at=completed_at,
         distance_km=payload.actual_distance_km,

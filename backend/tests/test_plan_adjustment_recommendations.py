@@ -1,11 +1,11 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 try:
     from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutFeedbackIn
-    from app.services.planning import apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, workout_execution_score
+    from app.services.planning import AUTO_MATCH_MIN_SCORE, apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, score_activity_workout_match, workout_execution_score
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("SQLAlchemy is required for planning recommendation tests") from exc
@@ -38,11 +38,12 @@ def make_workout(
     *,
     status: str = "planned",
     workout_type: str = "easy",
-    distance_km: float = 5.0,
+    distance_km: float | None = 5.0,
     completed_activity: Activity | None = None,
     intensity: str = "easy",
     week_index: int = 1,
     day_index: int = 1,
+    duration_seconds: int | None = None,
 ) -> TrainingPlanWorkout:
     return TrainingPlanWorkout(
         id=workout_id,
@@ -55,7 +56,7 @@ def make_workout(
         workout_type=workout_type,
         title=f"Workout {workout_id}",
         distance_km=distance_km,
-        duration_seconds=None,
+        duration_seconds=duration_seconds,
         intensity=intensity,
         description=None,
     )
@@ -187,6 +188,53 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["recent_completed_distance_km"], 4.0)
         self.assertEqual(result["metrics"]["upcoming_planned_distance_km"], 8.0)
         self.assertIn("hold_volume", self.recommendation_types(result))
+
+    def test_support_workouts_do_not_trigger_distance_reduction(self):
+        strength_activity = Activity(id=201, user_id=1, title="Strength", activity_type="manual_strength", distance_km=None, duration_seconds=1800)
+        plan = make_plan(
+            make_workout(1, TODAY, status="done", workout_type="strength", distance_km=None, duration_seconds=1800, completed_activity=strength_activity),
+            make_workout(2, date(2026, 6, 9), workout_type="strength", distance_km=None, duration_seconds=1800, day_index=2),
+        )
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+
+        self.assertEqual(result["metrics"]["planned_distance_km"], 0)
+        self.assertNotIn("reduce_volume", self.recommendation_types(result))
+        self.assertFalse([change for change in preview["changes"] if change["field"] == "distance_km"])
+
+    def test_markerless_duration_activity_does_not_auto_match_support_workout(self):
+        activity = Activity(
+            id=202,
+            user_id=1,
+            title="Manual session",
+            activity_type="manual",
+            started_at=datetime(2026, 6, 7, 10, 0),
+            distance_km=None,
+            duration_seconds=1800,
+        )
+        workout = make_workout(1, TODAY, workout_type="strength", distance_km=None, duration_seconds=1800)
+
+        score = score_activity_workout_match(activity, workout)
+
+        self.assertLess(score["score"], AUTO_MATCH_MIN_SCORE)
+        self.assertIn("auto-link отключен без явного support-маркера", score["reasons"])
+
+    def test_cross_training_marker_is_normalized_for_support_match(self):
+        activity = Activity(
+            id=203,
+            user_id=1,
+            title="Manual cross training",
+            activity_type="manual_cross_training",
+            started_at=datetime(2026, 6, 7, 10, 0),
+            distance_km=None,
+            duration_seconds=1800,
+        )
+        workout = make_workout(1, TODAY, workout_type="cross_training", distance_km=None, duration_seconds=1800)
+
+        score = score_activity_workout_match(activity, workout)
+
+        self.assertGreaterEqual(score["score"], AUTO_MATCH_MIN_SCORE)
 
     def test_safety_gate_recommends_zone_review(self):
         plan = make_plan(

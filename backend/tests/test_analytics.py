@@ -68,6 +68,17 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(summary["adherence"]["missed_workouts"], 1)
         self.assertEqual(summary["consistency"]["training_days"], 2)
 
+    def test_adherence_estimates_duration_for_legacy_running_workouts(self):
+        workout = make_workout(1, date(2026, 6, 2), "done")
+        workout.duration_seconds = None
+        workout.completed_activity = make_activity(10, datetime(2026, 6, 2, 8, tzinfo=UTC), 5.0, 1800)
+        workout.completed_activity_id = 10
+
+        summary = analytics_summary_from_data([], [workout], date(2026, 6, 1), date(2026, 6, 7))
+
+        self.assertEqual(summary["adherence"]["planned_duration_seconds"], 2100)
+        self.assertEqual(summary["adherence"]["duration_completion_rate"], 0.86)
+
     def test_weighted_pace_ignores_duration_only_activities(self):
         distance_activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 140)
         duration_only = Activity(id=2, user_id=1, title="Strength", started_at=datetime(2026, 6, 2, 8, tzinfo=UTC), distance_km=None, duration_seconds=3600)

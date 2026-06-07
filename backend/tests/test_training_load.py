@@ -141,6 +141,16 @@ class TrainingLoadTests(unittest.TestCase):
         self.assertEqual(point["load_method"], "hr_trimp")
         self.assertGreater(point["load"], 0)
 
+    def test_support_activity_uses_duration_fallback_without_distance(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), distance_km=None, duration_seconds=1800, stress=None)
+        activity.activity_type = "manual_strength"
+
+        result = training_load_from_data([activity], [], None, date(2026, 6, 1), date(2026, 6, 1))
+        point = result["daily"]["points"][0]
+
+        self.assertEqual(point["load_method"], "support_duration_fallback")
+        self.assertEqual(point["load"], 22.5)
+
 
 if __name__ == "__main__":
     unittest.main()

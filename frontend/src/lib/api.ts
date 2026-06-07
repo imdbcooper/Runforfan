@@ -189,8 +189,12 @@ export type PlanAdherence = {
   unlinked_done_workouts: number
   planned_distance_km: number
   completed_distance_km: number
+  planned_duration_seconds: number
+  completed_duration_seconds: number
   completion_rate: number
   distance_completion_rate: number
+  duration_completion_rate: number
+  support_workouts: number
   warnings: string[]
 }
 
@@ -207,6 +211,7 @@ export type PlanActivityMatchCandidate = {
   reasons: string[]
   date_delta_days: number | null
   distance_delta_km: number | null
+  duration_delta_seconds: number | null
 }
 
 export type PlanWorkoutMatchCandidate = {
@@ -216,6 +221,7 @@ export type PlanWorkoutMatchCandidate = {
   reasons: string[]
   date_delta_days: number | null
   distance_delta_km: number | null
+  duration_delta_seconds: number | null
 }
 
 export type PlanRecommendation = {
@@ -303,6 +309,8 @@ export type PlanWeekSummary = {
   distance_completion_rate: number
   planned_time_label: string
   hard_sessions: number
+  support_workouts: number
+  support_duration_seconds: number
   long_run_km: number | null
   deload: boolean
   workouts: PlanWorkout[]
@@ -325,6 +333,8 @@ export type PlanBuilderWeeklyVolume = {
   planned_distance_km: number
   long_run_km: number
   hard_sessions: number
+  support_sessions: number
+  support_duration_seconds: number
 }
 
 export type PlanBuilderRiskFlag = {
@@ -341,6 +351,7 @@ export type PlanBuilderPreviewWorkout = {
   workout_type: string
   title: string
   distance_km: number | null
+  duration_seconds: number | null
   intensity: string | null
   description: string | null
 }

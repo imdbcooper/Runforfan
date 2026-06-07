@@ -30,9 +30,15 @@ PACE_TO_FIVE_ZONE = {"easy": "z1", "steady": "z2", "threshold": "z3", "interval"
 PLANNED_INTENSITY_TO_FIVE_ZONE = {
     "recovery": "z1",
     "rest": "z1",
+    "mobility": "z1",
+    "prehab": "z1",
     "easy": "z2",
     "base": "z2",
     "long": "z2",
+    "strength": "z2",
+    "ofp": "z2",
+    "core": "z2",
+    "cross_training": "z2",
     "steady": "z3",
     "moderate": "z3",
     "tempo": "z3",
@@ -44,6 +50,15 @@ PLANNED_INTENSITY_TO_FIVE_ZONE = {
     "time_trial": "z5",
     "hard": "z5",
 }
+
+
+def support_activity_zone(activity: Activity, workout: TrainingPlanWorkout | None) -> str | None:
+    markers = " ".join([activity.activity_type or "", activity.title or "", workout.workout_type if workout else "", workout.title if workout else ""]).lower().replace("_", " ").replace("-", " ")
+    if any(marker in markers for marker in ("mobility", "prehab", "stretch", "моб")):
+        return "z1"
+    if any(marker in markers for marker in ("strength", "ofp", "сил", "офп", "core", "gym", "cross training")):
+        return "z2"
+    return None
 
 
 def zone_value_matches(zone: dict[str, object], value: float) -> bool:
@@ -237,6 +252,8 @@ def zone_distribution_from_data(activities: list[Activity], linked_workouts: lis
                 detailed_key = five_zone_key("pace", str(pace_zone["zone_key"]))
             if detailed_key is None and rpe_zone:
                 detailed_key = five_zone_key("rpe", str(rpe_zone["zone_key"]))
+            if detailed_key is None:
+                detailed_key = support_activity_zone(activity, workout)
             add_duration(five_duration, five_counts, detailed_key, duration)
             if bucket and detailed_key:
                 bucket_durations[bucket][detailed_key] += duration
