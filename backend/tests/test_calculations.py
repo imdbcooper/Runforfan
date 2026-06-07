@@ -5,8 +5,10 @@ from app.services.calculations import (
     age_from_birthdate,
     calculate_ctl_atl_tsb,
     calculate_hrr_zones,
+    calculate_monotony_strain,
     calculate_pace_seconds_per_km,
     calculate_speed_kmh,
+    calculate_srpe_load,
     calculate_threshold_pace_zones,
     calculate_vdot,
     estimate_hrmax_tanaka,
@@ -48,6 +50,19 @@ class CalculationTests(unittest.TestCase):
         self.assertIn("ctl", result)
         self.assertIn("atl", result)
         self.assertIn("tsb", result)
+        self.assertEqual(result["tsb"].value, round(result["ctl"].value - result["atl"].value, 1))
+
+    def test_srpe_load_and_monotony_strain(self):
+        self.assertEqual(calculate_srpe_load(60, 5).value, 300)
+        self.assertEqual(calculate_srpe_load(60, 5).method, "session_rpe")
+
+        result = calculate_monotony_strain([100, 80, 120, 90, 110, 0, 60])
+        self.assertIsNotNone(result["monotony"].value)
+        self.assertIsNotNone(result["strain"].value)
+
+        flat = calculate_monotony_strain([50, 50, 50])
+        self.assertIsNone(flat["monotony"].value)
+        self.assertIsNone(flat["strain"].value)
 
 
 if __name__ == "__main__":

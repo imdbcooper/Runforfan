@@ -1,4 +1,4 @@
-import { Activity, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Trophy, Upload, X, Zap } from "lucide-react"
+import { Activity, BatteryCharging, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "performance" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "performance" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
@@ -43,6 +43,7 @@ const nav = [
   ["imports", "Imports", Upload],
   ["calendar", "Calendar", CalendarDays],
   ["analytics", "Analytics", ChartSpline],
+  ["load", "Load & Recovery", BatteryCharging],
   ["performance", "Performance", Trophy],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
@@ -298,6 +299,7 @@ function App() {
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
+            {page === "load" && <TrainingLoadRecovery />}
             {page === "performance" && <PerformanceAnalytics />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
@@ -1059,6 +1061,172 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
 
     <Card className="p-4"><div className="grid gap-3 text-xs md:grid-cols-3"><Stat label="training days" value={summary?.consistency.training_days || 0} /><Stat label="days / week" value={summary?.consistency.training_days_per_week || 0} /><Stat label="missed planned" value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
   </div>
+}
+
+function TrainingLoadRecovery() {
+  const [preset, setPreset] = useState("28d")
+  const [customFrom, setCustomFrom] = useState("")
+  const [customTo, setCustomTo] = useState("")
+  const [daily, setDaily] = useState<TrainingLoadDaily | null>(null)
+  const [weekly, setWeekly] = useState<TrainingLoadWeekly | null>(null)
+  const [fitness, setFitness] = useState<TrainingLoadFitnessFatigue | null>(null)
+  const [warnings, setWarnings] = useState<TrainingLoadWarning[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const query = analyticsQuery(preset, customFrom, customTo)
+    let cancelled = false
+    async function loadTrainingLoad() {
+      setLoading(true)
+      setError("")
+      try {
+        await devLogin()
+        const [nextDaily, nextWeekly, nextFitness, nextWarnings] = await Promise.all([
+          api.trainingLoadDaily(query),
+          api.trainingLoadWeekly(query),
+          api.trainingLoadFitnessFatigue(query),
+          api.trainingLoadWarnings(query),
+        ])
+        if (!cancelled) {
+          setDaily(nextDaily)
+          setWeekly(nextWeekly)
+          setFitness(nextFitness)
+          setWarnings(nextWarnings)
+        }
+      } catch (caught) {
+        console.error(caught)
+        if (!cancelled) setError("Training Load API недоступен")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void loadTrainingLoad()
+    return () => { cancelled = true }
+  }, [preset, customFrom, customTo])
+
+  const dailyPoints = daily?.points || []
+  const weeklyPoints = weekly?.points || []
+  const latestWeek = weeklyPoints.length ? weeklyPoints[weeklyPoints.length - 1] : null
+  const hardDays = dailyPoints.filter((point) => point.hard_session)
+  const recoveryDays = dailyPoints.filter((point) => point.recovery_day).slice(-7)
+  const current = fitness?.current
+  const method = fitness?.method || daily?.method || "unavailable"
+
+  return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Training Load & Recovery</p><h2 className="mt-2 text-lg font-semibold text-white">Fitness, fatigue and recovery signals</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Daily/weekly load, CTL/ATL/TSB heuristics, monotony, strain, hard-session spacing and recovery-day alerts. These metrics are coaching signals, not medical predictions.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{daily?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{method}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
+        <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
+        <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
+        <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
+      </div>
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+    </Card>
+
+    <div className="grid gap-3 md:grid-cols-4">
+      <Card className="p-3"><Stat label="CTL" value={current?.ctl.value ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="ATL" value={current?.atl.value ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="TSB" value={current?.tsb.value ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="method" value={method} /></Card>
+      <Card className="p-3"><Stat label="monotony" value={latestWeek?.monotony ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="strain" value={latestWeek?.strain ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="hard days" value={latestWeek?.hard_sessions ?? 0} /></Card>
+      <Card className="p-3"><Stat label="recovery days" value={latestWeek?.recovery_days ?? 0} /></Card>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <LoadBarChart title="Daily load" points={dailyPoints.slice(-14)} label={(point) => formatDate(point.date)} value={(point) => point.load} suffix="au" />
+      <WeeklyLoadChart points={weeklyPoints.slice(-10)} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      <FitnessFatigueChart fitness={fitness} />
+      <TrainingLoadWarnings warnings={warnings} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <HardSessionSpacing hardDays={hardDays} />
+      <RecoveryDaysCard recoveryDays={recoveryDays} />
+    </div>
+  </div>
+}
+
+function LoadBarChart({ title, points, label, value, suffix }: { title: string; points: TrainingLoadDailyPoint[]; label: (point: TrainingLoadDailyPoint) => string; value: (point: TrainingLoadDailyPoint) => number; suffix: string }) {
+  const max = Math.max(1, ...points.map(value))
+  return <Card>
+    <CardHeader><CardTitle>{title}</CardTitle><Badge>{points.length} days</Badge></CardHeader>
+    <div className="grid gap-2 p-4">
+      {points.length ? points.map((point) => {
+        const numeric = value(point)
+        return <div key={point.date} className="grid grid-cols-[5rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{label(point)}</span><div className="h-2 rounded bg-zinc-900"><div className={cn("h-full rounded", point.hard_session ? "bg-orange-400" : point.recovery_day ? "bg-zinc-500" : "bg-orange-300/70")} style={{ width: `${Math.max(4, numeric / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{numeric.toFixed(1)} {suffix}</strong></div>
+      }) : <p className="text-xs text-zinc-500">Нет daily load points.</p>}
+    </div>
+  </Card>
+}
+
+function WeeklyLoadChart({ points }: { points: TrainingLoadWeekly["points"] }) {
+  const max = Math.max(1, ...points.map((point) => point.load))
+  return <Card>
+    <CardHeader><CardTitle>Weekly load</CardTitle><Badge>{points.length} weeks</Badge></CardHeader>
+    <div className="grid gap-2 p-4">
+      {points.length ? points.map((point) => <div key={point.week_start} className="grid grid-cols-[6rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{formatDate(point.week_start)}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, point.load / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{point.load.toFixed(1)} au</strong></div>) : <p className="text-xs text-zinc-500">Нет weekly load points.</p>}
+    </div>
+  </Card>
+}
+
+function FitnessFatigueChart({ fitness }: { fitness: TrainingLoadFitnessFatigue | null }) {
+  const points = fitness?.points.slice(-10) || []
+  return <Card>
+    <CardHeader><div><CardTitle>CTL / ATL / TSB</CardTitle><p className="text-xs text-zinc-500">{fitness?.explanation || "EWMA load heuristics."}</p></div><Badge>{points.length} points</Badge></CardHeader>
+    <div className="overflow-x-auto p-4">
+      <table className="w-full min-w-[620px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Date</th><th>Load</th><th>CTL</th><th>ATL</th><th>TSB</th></tr></thead>
+        <tbody>{points.map((point) => <tr key={point.date} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-medium text-white">{formatDate(point.date)}</td><td>{point.load.toFixed(1)}</td><td>{point.ctl.toFixed(1)}</td><td>{point.atl.toFixed(1)}</td><td><Badge className={point.tsb <= -10 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : point.tsb >= 5 ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-400"}>{point.tsb.toFixed(1)}</Badge></td></tr>)}</tbody>
+      </table>
+      {!points.length ? <p className="p-3 text-xs text-zinc-500">Нет fitness/fatigue points.</p> : null}
+    </div>
+  </Card>
+}
+
+function TrainingLoadWarnings({ warnings }: { warnings: TrainingLoadWarning[] }) {
+  return <Card>
+    <CardHeader><CardTitle>Load alerts</CardTitle><Badge>{warnings.length} signals</Badge></CardHeader>
+    <div className="grid gap-2 p-4">
+      {warnings.map((warning) => <div key={`${warning.title}-${warning.metric || "signal"}`} className={cn("rounded-md border px-3 py-2 text-xs", signalClass(warning.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{warning.title}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{warning.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-300">{warning.message}</p>{warning.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{warning.reasons.slice(0, 3).join(" · ")}</p> : null}</div>)}
+      {!warnings.length ? <p className="text-xs text-zinc-500">Нет load alerts.</p> : null}
+    </div>
+  </Card>
+}
+
+function HardSessionSpacing({ hardDays }: { hardDays: TrainingLoadDailyPoint[] }) {
+  return <Card>
+    <CardHeader><CardTitle>Hard sessions spacing</CardTitle><Badge>{hardDays.length} hard days</Badge></CardHeader>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Date</th><th>Load</th><th>Gap</th><th>Reasons</th></tr></thead>
+        <tbody>{hardDays.map((day, index) => {
+          const previous = hardDays[index - 1]
+          const gap = previous ? Math.round((dateFromISO(day.date).getTime() - dateFromISO(previous.date).getTime()) / 86400000) : null
+          return <tr key={day.date} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-medium text-white">{formatDate(day.date)}</td><td>{day.load.toFixed(1)} au</td><td><Badge className={gap !== null && gap < 2 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{gap === null ? "first" : `${gap} d`}</Badge></td><td className="max-w-[16rem] text-zinc-500">{day.hard_reasons.join(" · ")}</td></tr>
+        })}</tbody>
+      </table>
+      {!hardDays.length ? <p className="p-4 text-xs text-zinc-500">Hard sessions не обнаружены.</p> : null}
+    </div>
+  </Card>
+}
+
+function RecoveryDaysCard({ recoveryDays }: { recoveryDays: TrainingLoadDailyPoint[] }) {
+  return <Card>
+    <CardHeader><CardTitle>Recovery days</CardTitle><Badge>{recoveryDays.length} recent</Badge></CardHeader>
+    <div className="divide-y divide-zinc-800">
+      {recoveryDays.map((day) => <div key={day.date} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{formatDate(day.date)}</div><div><p className="text-zinc-300">{day.load.toFixed(1)} au · {formatDuration(day.duration_seconds)}</p><p className="mt-1 text-zinc-500">{day.activity_count ? `${day.activity_count} light activity` : "No recorded activity"}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">recovery</Badge></div>)}
+      {!recoveryDays.length ? <p className="p-4 text-xs text-zinc-500">Recovery days за последнюю неделю не найдены.</p> : null}
+    </div>
+  </Card>
 }
 
 function confidenceClass(confidence?: string) {

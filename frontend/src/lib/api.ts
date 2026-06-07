@@ -520,6 +520,77 @@ export type AnalyticsInsight = {
   reasons: string[]
 }
 
+export type TrainingLoadDailyPoint = {
+  date: string
+  load: number
+  load_method: string
+  load_methods: string[]
+  distance_km: number
+  duration_seconds: number
+  activity_count: number
+  srpe_count: number
+  hard_session: boolean
+  hard_reasons: string[]
+  recovery_day: boolean
+}
+
+export type TrainingLoadDaily = {
+  period: AnalyticsPeriod
+  method: string
+  points: TrainingLoadDailyPoint[]
+}
+
+export type TrainingLoadWeeklyPoint = {
+  week_start: string
+  week_label: string
+  load: number
+  load_method: string
+  distance_km: number
+  duration_seconds: number
+  activity_count: number
+  hard_sessions: number
+  recovery_days: number
+  long_run_share: number | null
+  monotony: number | null
+  strain: number | null
+}
+
+export type TrainingLoadWeekly = {
+  period: AnalyticsPeriod
+  method: string
+  points: TrainingLoadWeeklyPoint[]
+}
+
+export type TrainingLoadFitnessPoint = {
+  date: string
+  load: number
+  ctl: number
+  atl: number
+  tsb: number
+}
+
+export type TrainingLoadFitnessFatigue = {
+  period: AnalyticsPeriod
+  method: string
+  explanation: string
+  current: {
+    ctl: CalculationResult
+    atl: CalculationResult
+    tsb: CalculationResult
+  }
+  points: TrainingLoadFitnessPoint[]
+}
+
+export type TrainingLoadWarning = {
+  severity: "info" | "warning" | "critical" | string
+  title: string
+  message: string
+  reasons: string[]
+  metric: string | null
+  value: number | null
+  threshold: number | null
+}
+
 export type PerformanceResult = {
   id: number
   user_id: number
@@ -706,6 +777,10 @@ export const api = {
   analytics: (params = "") => request<AnalyticsSummary>(`/analytics/summary${params}`),
   analyticsTimeseries: (params = "") => request<AnalyticsTimeseries>(`/analytics/timeseries${params}`),
   analyticsInsights: (params = "") => request<AnalyticsInsight[]>(`/analytics/insights${params}`),
+  trainingLoadDaily: (params = "") => request<TrainingLoadDaily>(`/analytics/load/daily${params}`),
+  trainingLoadWeekly: (params = "") => request<TrainingLoadWeekly>(`/analytics/load/weekly${params}`),
+  trainingLoadFitnessFatigue: (params = "") => request<TrainingLoadFitnessFatigue>(`/analytics/load/fitness-fatigue${params}`),
+  trainingLoadWarnings: (params = "") => request<TrainingLoadWarning[]>(`/analytics/load/warnings${params}`),
   performanceResults: (params = "") => request<PerformanceResult[]>(`/performance/results${params}`),
   createPerformanceResult: (payload: Record<string, unknown>) => request<PerformanceResult>("/performance/results", { method: "POST", body: JSON.stringify(payload) }),
   performanceVdot: () => request<PerformanceVdot>("/performance/vdot"),

@@ -40,7 +40,7 @@ GET /health
 - `backend/app/main.py` — FastAPI-приложение и подключение роутеров.
 - `backend/app/models/entities.py` — SQLAlchemy-модели.
 - `backend/app/api/routes/` — API-роутеры.
-- `backend/app/services/` — бизнес-логика: auth, analytics, performance, recognition, planning, calculations, profile/zones.
+- `backend/app/services/` — бизнес-логика: auth, analytics/load, performance, recognition, planning, calculations, profile/zones.
 - `backend/app/seed/demo.py` — перенос текущих тренировок в demo-user.
 - `backend/app/storage/uploads/` — uploads volume для скриншотов.
 - `frontend/` — новый React/Vite frontend на Tailwind и shadcn-style компонентах.
@@ -62,6 +62,10 @@ GET /health
 - `GET /api/analytics/summary?from=&to=` — обзорная аналитика пользователя за период: KPI, weighted pace, HR, adherence, consistency, best efforts и VO2max/VDOT estimate.
 - `GET /api/analytics/timeseries?metric=&granularity=&from=&to=` — недельные/месячные ряды для distance, duration, workouts, pace, HR и load.
 - `GET /api/analytics/insights?from=&to=` — 3-5 explainable analytics notes для выбранного периода.
+- `GET /api/analytics/load/daily?from=&to=` — daily load points с primary method, hard/recovery flags и sRPE fallback metadata.
+- `GET /api/analytics/load/weekly?from=&to=` — weekly load, monotony, strain, hard sessions, recovery days и long-run share.
+- `GET /api/analytics/load/fitness-fatigue?from=&to=` — CTL/ATL/TSB EWMA heuristics с объяснением.
+- `GET /api/analytics/load/warnings?from=&to=` — load/recovery alerts: monotony, fatigue balance, intensity share, hard-session spacing и recovery days.
 - `GET /api/performance/results` — сохраненные race/time trial результаты текущего пользователя.
 - `POST /api/performance/results` — добавить race/time trial результат с условиями, noisy flag и optional activity link.
 - `GET /api/performance/vdot` — VDOT estimate из race/time trial source, threshold trend и pace zones.
@@ -171,6 +175,7 @@ API настроек AI:
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
+- Training Load & Recovery показывает daily/weekly load, CTL/ATL/TSB, monotony/strain, hard-session spacing, recovery days и explainable load alerts.
 - Performance Analytics хранит race/time trial results, считает VDOT только из eligible hard sources, показывает Riegel predictions, PBs, threshold trend и pace zones derived from threshold/VDOT.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
@@ -221,6 +226,7 @@ npm run build
 - Imports.
 - Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
+- Load & Recovery: daily/weekly load, CTL/ATL/TSB, monotony, strain, hard spacing и recovery alerts.
 - Performance: race/time trial results, VDOT, Riegel predictions, PBs, threshold trend и pace zones.
 - Profile & zones.
 - Планы: Plan Builder wizard preview/generate, create draft/create active, Plan Detail, список программ, actions и workout execution/matching.

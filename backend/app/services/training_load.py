@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanWorkout, User
+from app.services.analytics import activity_local_date, date_range_label, load_activities, profile_timezone
+from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_REF, calculate_monotony_strain, calculate_srpe_load, ewma_load
+
+
+LOAD_LOOKBACK_DAYS = 84
+DEFAULT_PERIOD_DAYS = 28
+RECOVERY_LOAD_THRESHOLD = 10.0
+
+
+def date_span(start: date, end: date) -> list[date]:
+    if end < start:
+        return []
+    return [start + timedelta(days=index) for index in range((end - start).days + 1)]
+
+
+def week_start(value: date) -> date:
+    return value - timedelta(days=value.weekday())
+
+
+def calculation_dict(value: float, method: str, source_reference: str, confidence: str = "low") -> dict[str, object]:
+    return CalculationResult(round(value, 1), "au", method, confidence, source_reference).as_dict()
+
+
+def primary_method(methods: set[str]) -> str:
+    if not methods:
+        return "unavailable"
+    if len(methods) == 1:
+        return next(iter(methods))
+    return "mixed"
+
+
+def load_planned_workouts_with_feedback(db: Session, user: User, activity_ids: list[int]) -> list[TrainingPlanWorkout]:
+    if not activity_ids:
+        return []
+    return list(db.scalars(
+        select(TrainingPlanWorkout)
+        .join(TrainingPlan)
+        .where(
+            TrainingPlan.user_id == user.id,
+            TrainingPlanWorkout.completed_activity_id.in_(activity_ids),
+        )
+        .options(selectinload(TrainingPlanWorkout.feedback), selectinload(TrainingPlanWorkout.completed_activity))
+    ))
+
+
+def hr_trimp_load(activity: Activity, profile: AthleteProfile | None) -> float | None:
+    if not profile or not activity.average_heart_rate_bpm or not activity.duration_seconds:
+        return None
+    if not profile.resting_heart_rate_bpm or not profile.max_heart_rate_bpm:
+        return None
+    hrr = profile.max_heart_rate_bpm - profile.resting_heart_rate_bpm
+    if hrr <= 0:
+        return None
+    ratio = min(max((activity.average_heart_rate_bpm - profile.resting_heart_rate_bpm) / hrr, 0), 1)
+    return round((activity.duration_seconds / 60) * ratio * ratio * 2.0, 1)
+
+
+def activity_pace_seconds(activity: Activity) -> int | None:
+    if activity.average_pace_seconds_per_km:
+        return activity.average_pace_seconds_per_km
+    if activity.distance_km and activity.duration_seconds:
+        return round(activity.duration_seconds / activity.distance_km)
+    return None
+
+
+def pace_based_load(activity: Activity, profile: AthleteProfile | None) -> float | None:
+    if not activity.duration_seconds:
+        return None
+    factor = 1.0
+    pace = activity_pace_seconds(activity)
+    threshold = profile.lactate_threshold_pace_seconds_per_km if profile else None
+    if pace and threshold and pace > 0:
+        factor = min(max(threshold / pace, 0.75), 1.6)
+    return round((activity.duration_seconds / 60) * factor, 1)
+
+
+def linked_workout_map(workouts: list[TrainingPlanWorkout]) -> dict[int, TrainingPlanWorkout]:
+    return {workout.completed_activity_id: workout for workout in workouts if workout.completed_activity_id is not None}
+
+
+def activity_load(activity: Activity, workout: TrainingPlanWorkout | None, profile: AthleteProfile | None) -> tuple[float, str, int]:
+    if activity.aerobic_training_stress is not None:
+        return round(float(activity.aerobic_training_stress), 1), "aerobic_training_stress", 0
+    if workout and workout.feedback and workout.feedback.rpe is not None and activity.duration_seconds:
+        load = calculate_srpe_load(activity.duration_seconds / 60, workout.feedback.rpe)
+        return float(load.value or 0), "session_rpe", 1
+    hr_load = hr_trimp_load(activity, profile)
+    if hr_load is not None:
+        return hr_load, "hr_trimp", 0
+    pace_load = pace_based_load(activity, profile)
+    if pace_load is not None:
+        return pace_load, "pace_based_fallback", 0
+    return 0.0, "unavailable", 0
+
+
+def hard_session_reasons(activity: Activity, workout: TrainingPlanWorkout | None, load: float) -> list[str]:
+    reasons: list[str] = []
+    feedback = workout.feedback if workout else None
+    if load >= 80:
+        reasons.append("load >= 80")
+    if feedback and feedback.rpe is not None and feedback.rpe >= 7:
+        reasons.append("RPE >= 7")
+    if feedback and feedback.fatigue is not None and feedback.fatigue >= 8:
+        reasons.append("fatigue >= 8")
+    workout_markers = {"interval", "tempo", "threshold", "race", "time_trial", "hard"}
+    if workout and (workout.workout_type in workout_markers or workout.intensity in workout_markers):
+        reasons.append("hard planned intensity")
+    effect = (activity.aerobic_training_effect or "").lower()
+    if "anaerobic" in effect or "threshold" in effect:
+        reasons.append("hard training effect")
+    return reasons
+
+
+def empty_bucket(day: date) -> dict[str, object]:
+    return {
+        "date": day,
+        "load": 0.0,
+        "load_methods": set(),
+        "distance_km": 0.0,
+        "duration_seconds": 0,
+        "activity_count": 0,
+        "srpe_count": 0,
+        "hard_session": False,
+        "hard_reasons": [],
+        "recovery_day": True,
+    }
+
+
+def bucket_activity(bucket: dict[str, object], activity: Activity, workout: TrainingPlanWorkout | None, profile: AthleteProfile | None) -> None:
+    load, method, srpe_count = activity_load(activity, workout, profile)
+    bucket["load"] = round(float(bucket["load"]) + load, 1)
+    if method != "unavailable":
+        bucket["load_methods"].add(method)
+    bucket["distance_km"] = round(float(bucket["distance_km"]) + (activity.distance_km or 0), 2)
+    bucket["duration_seconds"] = int(bucket["duration_seconds"]) + max(activity.duration_seconds or 0, 0)
+    bucket["activity_count"] = int(bucket["activity_count"]) + 1
+    bucket["srpe_count"] = int(bucket["srpe_count"]) + srpe_count
+    reasons = hard_session_reasons(activity, workout, load)
+    if reasons:
+        bucket["hard_session"] = True
+        bucket["hard_reasons"].extend(reasons)
+    bucket["recovery_day"] = float(bucket["load"]) <= RECOVERY_LOAD_THRESHOLD
+
+
+def daily_point(bucket: dict[str, object]) -> dict[str, object]:
+    methods = sorted(bucket["load_methods"])
+    return {
+        "date": bucket["date"],
+        "load": round(float(bucket["load"]), 1),
+        "load_method": primary_method(set(methods)),
+        "load_methods": methods,
+        "distance_km": round(float(bucket["distance_km"]), 2),
+        "duration_seconds": int(bucket["duration_seconds"]),
+        "activity_count": int(bucket["activity_count"]),
+        "srpe_count": int(bucket["srpe_count"]),
+        "hard_session": bool(bucket["hard_session"]),
+        "hard_reasons": sorted(set(bucket["hard_reasons"])),
+        "recovery_day": bool(bucket["recovery_day"]),
+    }
+
+
+def append_fitness(points: list[dict[str, object]], all_daily: list[dict[str, object]]) -> list[dict[str, object]]:
+    ctl = 0.0
+    atl = 0.0
+    fitness_points: list[dict[str, object]] = []
+    selected_dates = {point["date"] for point in points}
+    for point in all_daily:
+        load = float(point["load"])
+        ctl = ewma_load(ctl, load, 42)
+        atl = ewma_load(atl, load, 7)
+        if point["date"] in selected_dates:
+            fitness_points.append({"date": point["date"], "load": round(load, 1), "ctl": round(ctl, 1), "atl": round(atl, 1), "tsb": round(ctl - atl, 1)})
+    return fitness_points
+
+
+def weekly_points(daily: list[dict[str, object]]) -> list[dict[str, object]]:
+    weeks: dict[date, list[dict[str, object]]] = defaultdict(list)
+    for point in daily:
+        weeks[week_start(point["date"])].append(point)
+    result: list[dict[str, object]] = []
+    for start, points in sorted(weeks.items()):
+        loads = [float(point["load"]) for point in points]
+        monotony = calculate_monotony_strain(loads)
+        distance = sum(float(point["distance_km"]) for point in points)
+        duration = sum(int(point["duration_seconds"]) for point in points)
+        max_day_distance = max((float(point["distance_km"]) for point in points), default=0)
+        max_day_duration = max((int(point["duration_seconds"]) for point in points), default=0)
+        long_run_share = max_day_distance / distance if distance else (max_day_duration / duration if duration else None)
+        methods = {method for point in points for method in point["load_methods"]}
+        result.append({
+            "week_start": start,
+            "week_label": f"{start.isoformat()} week",
+            "load": round(sum(loads), 1),
+            "load_method": primary_method(methods),
+            "distance_km": round(distance, 2),
+            "duration_seconds": duration,
+            "activity_count": sum(int(point["activity_count"]) for point in points),
+            "hard_sessions": sum(1 for point in points if point["hard_session"]),
+            "recovery_days": sum(1 for point in points if point["recovery_day"]),
+            "long_run_share": round(long_run_share, 2) if long_run_share is not None else None,
+            "monotony": monotony["monotony"].value,
+            "strain": monotony["strain"].value,
+        })
+    return result
+
+
+def warning(severity: str, title: str, message: str, reasons: list[str], metric: str | None = None, value: float | None = None, threshold: float | None = None) -> dict[str, object]:
+    return {"severity": severity, "title": title, "message": message, "reasons": reasons, "metric": metric, "value": value, "threshold": threshold}
+
+
+def load_warnings(daily: list[dict[str, object]], weekly: list[dict[str, object]], fitness: list[dict[str, object]]) -> list[dict[str, object]]:
+    warnings: list[dict[str, object]] = []
+    current = fitness[-1] if fitness else None
+    if current:
+        tsb = float(current["tsb"])
+        if tsb <= -20:
+            warnings.append(warning("critical", "High fatigue balance", "TSB is deeply negative; treat CTL/ATL/TSB as a heuristic and consider easier days.", ["TSB <= -20"], "tsb", tsb, -20))
+        elif tsb <= -10:
+            warnings.append(warning("warning", "Fatigue trending high", "ATL is materially above CTL, which can indicate short-term fatigue.", ["TSB <= -10"], "tsb", tsb, -10))
+    latest_week = weekly[-1] if weekly else None
+    if latest_week:
+        monotony = latest_week.get("monotony")
+        if monotony is not None and float(monotony) >= 2:
+            warnings.append(warning("warning", "High monotony", "Recent daily load is too uniform; monotony is a warning signal, not a hard stop.", ["monotony >= 2"], "monotony", float(monotony), 2))
+        share = latest_week.get("long_run_share")
+        if share is not None and float(share) >= 0.35:
+            warnings.append(warning("warning", "Long run share high", "The largest day takes too much of weekly distance/time.", ["long_run_share >= 35%"], "long_run_share", float(share), 0.35))
+    recent = daily[-7:]
+    hard_days = [point for point in recent if point["hard_session"]]
+    activity_days = [point for point in recent if int(point["activity_count"]) > 0]
+    if activity_days and len(hard_days) / len(activity_days) > 0.4:
+        warnings.append(warning("warning", "Too much intensity", "Hard sessions make up more than 40% of recent training days.", ["hard_days / activity_days > 0.4"], "hard_session_share", round(len(hard_days) / len(activity_days), 2), 0.4))
+    period_hard_days = [point for point in daily if point["hard_session"]]
+    close_pairs = []
+    for previous, current_day in zip(period_hard_days, period_hard_days[1:]):
+        delta = (current_day["date"] - previous["date"]).days
+        if delta < 2:
+            close_pairs.append(f"{previous['date'].isoformat()} -> {current_day['date'].isoformat()}")
+    if close_pairs:
+        warnings.append(warning("warning", "Hard sessions too close", "Hard sessions are spaced closer than 48 hours.", close_pairs, "hard_session_spacing_days", 1, 2))
+    recovery_days = sum(1 for point in recent if point["recovery_day"])
+    if recent and recovery_days < 2:
+        warnings.append(warning("warning", "Few recovery days", "Recent week has fewer than two low-load recovery days.", ["recovery_days < 2"], "recovery_days", recovery_days, 2))
+    if not warnings:
+        warnings.append(warning("info", "No load alerts", "No high monotony, intensity concentration or fatigue-balance alerts for the selected period.", ["heuristics within current thresholds"]))
+    return warnings[:6]
+
+
+def training_load_from_data(activities: list[Activity], workouts: list[TrainingPlanWorkout], profile: AthleteProfile | None, from_date: date, to_date: date, timezone: ZoneInfo = ZoneInfo("UTC")) -> dict[str, object]:
+    warmup_start = from_date - timedelta(days=LOAD_LOOKBACK_DAYS)
+    buckets = {day: empty_bucket(day) for day in date_span(warmup_start, to_date)}
+    workout_by_activity_id = linked_workout_map(workouts)
+    for activity in activities:
+        activity_date = activity_local_date(activity, timezone)
+        if activity_date is None or activity_date not in buckets:
+            continue
+        bucket_activity(buckets[activity_date], activity, workout_by_activity_id.get(activity.id), profile)
+    all_daily = [daily_point(buckets[day]) for day in sorted(buckets)]
+    selected_daily = [point for point in all_daily if from_date <= point["date"] <= to_date]
+    fitness_points = append_fitness(selected_daily, all_daily)
+    weekly = weekly_points(selected_daily)
+    method = primary_method({method for point in selected_daily for method in point["load_methods"]})
+    current_fitness = fitness_points[-1] if fitness_points else {"ctl": 0.0, "atl": 0.0, "tsb": 0.0}
+    period = {"from_date": from_date, "to_date": to_date, "label": date_range_label(from_date, to_date)}
+    return {
+        "period": period,
+        "method": method,
+        "daily": {"period": period, "method": method, "points": selected_daily},
+        "weekly": {"period": period, "method": method, "points": weekly},
+        "fitness_fatigue": {
+            "period": period,
+            "method": method,
+            "explanation": "CTL/ATL/TSB are EWMA heuristics over daily training load, not medical predictions.",
+            "current": {
+                "ctl": calculation_dict(float(current_fitness["ctl"]), "ewma_42d", BANISTER_REF),
+                "atl": calculation_dict(float(current_fitness["atl"]), "ewma_7d", BANISTER_REF),
+                "tsb": calculation_dict(float(current_fitness["tsb"]), "ctl_minus_atl", BANISTER_REF),
+            },
+            "points": fitness_points,
+        },
+        "warnings": load_warnings(selected_daily, weekly, fitness_points),
+    }
+
+
+def training_load_context(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    timezone = profile_timezone(db, user)
+    end_date = to_date or datetime.now(timezone).date()
+    start_date = from_date or end_date - timedelta(days=DEFAULT_PERIOD_DAYS - 1)
+    warmup_start = start_date - timedelta(days=LOAD_LOOKBACK_DAYS)
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    activities = load_activities(db, user, warmup_start, end_date, timezone)
+    workouts = load_planned_workouts_with_feedback(db, user, [activity.id for activity in activities])
+    return training_load_from_data(activities, workouts, profile, start_date, end_date, timezone)
+
+
+def training_load_daily(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    return training_load_context(db, user, from_date, to_date)["daily"]
+
+
+def training_load_weekly(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    return training_load_context(db, user, from_date, to_date)["weekly"]
+
+
+def training_load_fitness_fatigue(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    return training_load_context(db, user, from_date, to_date)["fitness_fatigue"]
+
+
+def training_load_warning_list(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> list[dict[str, object]]:
+    return training_load_context(db, user, from_date, to_date)["warnings"]

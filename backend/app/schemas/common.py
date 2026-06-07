@@ -237,6 +237,73 @@ class AnalyticsInsightOut(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class TrainingLoadDailyPointOut(BaseModel):
+    date: Date
+    load: float
+    load_method: str
+    load_methods: list[str] = Field(default_factory=list)
+    distance_km: float
+    duration_seconds: int
+    activity_count: int
+    srpe_count: int = 0
+    hard_session: bool = False
+    hard_reasons: list[str] = Field(default_factory=list)
+    recovery_day: bool = False
+
+
+class TrainingLoadDailyOut(BaseModel):
+    period: AnalyticsPeriodOut
+    method: str
+    points: list[TrainingLoadDailyPointOut] = Field(default_factory=list)
+
+
+class TrainingLoadWeeklyPointOut(BaseModel):
+    week_start: Date
+    week_label: str
+    load: float
+    load_method: str
+    distance_km: float
+    duration_seconds: int
+    activity_count: int
+    hard_sessions: int
+    recovery_days: int
+    long_run_share: float | None = None
+    monotony: float | None = None
+    strain: float | None = None
+
+
+class TrainingLoadWeeklyOut(BaseModel):
+    period: AnalyticsPeriodOut
+    method: str
+    points: list[TrainingLoadWeeklyPointOut] = Field(default_factory=list)
+
+
+class TrainingLoadFitnessFatiguePointOut(BaseModel):
+    date: Date
+    load: float
+    ctl: float
+    atl: float
+    tsb: float
+
+
+class TrainingLoadFitnessFatigueOut(BaseModel):
+    period: AnalyticsPeriodOut
+    method: str
+    explanation: str
+    current: dict[str, CalculationOut]
+    points: list[TrainingLoadFitnessFatiguePointOut] = Field(default_factory=list)
+
+
+class TrainingLoadWarningOut(BaseModel):
+    severity: str
+    title: str
+    message: str
+    reasons: list[str] = Field(default_factory=list)
+    metric: str | None = None
+    value: float | None = None
+    threshold: float | None = None
+
+
 class PerformanceResultCreate(BaseModel):
     result_type: str = Field(default="race", pattern="^(race|time_trial)$")
     name: str = Field(default="Race result", min_length=1, max_length=255)
