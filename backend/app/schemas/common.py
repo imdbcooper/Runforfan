@@ -237,6 +237,110 @@ class AnalyticsInsightOut(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class PerformanceResultCreate(BaseModel):
+    result_type: str = Field(default="race", pattern="^(race|time_trial)$")
+    name: str = Field(default="Race result", min_length=1, max_length=255)
+    result_date: datetime | None = None
+    distance_km: float = Field(gt=0, le=500)
+    duration_seconds: StrictInt = Field(gt=0, le=172800)
+    activity_id: int | None = None
+    source: str = Field(default="manual", pattern="^(manual|activity|device|import)$")
+    terrain: str = Field(default="road", pattern="^(road|track|trail|mixed|treadmill|unknown)$")
+    weather: str | None = Field(default=None, max_length=255)
+    elevation_gain_m: float | None = Field(default=None, ge=0, le=10000)
+    temperature_c: float | None = Field(default=None, ge=-50, le=60)
+    is_noisy: bool = False
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PerformanceResultOut(BaseModel):
+    id: int
+    user_id: int
+    activity_id: int | None = None
+    result_type: str
+    name: str
+    result_date: datetime
+    distance_km: float
+    duration_seconds: int
+    pace_seconds_per_km: int
+    source: str
+    terrain: str
+    weather: str | None = None
+    elevation_gain_m: float | None = None
+    temperature_c: float | None = None
+    is_noisy: bool
+    noisy_reasons: list[str] = Field(default_factory=list)
+    age_days: int | None = None
+    estimated_vdot: CalculationOut | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PerformanceThresholdTrendPointOut(BaseModel):
+    result_id: int
+    result_date: datetime
+    distance_km: float
+    duration_seconds: int
+    threshold_pace_seconds_per_km: int
+    source: str
+    confidence: str
+
+
+class PerformancePaceZoneOut(BaseModel):
+    zone_key: str
+    label: str | None = None
+    lower_value: float | None = None
+    upper_value: float | None = None
+    unit: str
+    method: str
+    confidence: str
+    source_reference: str | None = None
+
+
+class PerformanceVdotOut(BaseModel):
+    estimate: CalculationOut | None = None
+    source: PerformanceResultOut | None = None
+    confidence: str
+    warnings: list[str] = Field(default_factory=list)
+    threshold_trend: list[PerformanceThresholdTrendPointOut] = Field(default_factory=list)
+    pace_zones: list[PerformancePaceZoneOut] = Field(default_factory=list)
+
+
+class PerformancePredictionOut(BaseModel):
+    target_distance_km: float
+    label: str
+    predicted_duration_seconds: int | None = None
+    predicted_pace_seconds_per_km: int | None = None
+    source_result_id: int | None = None
+    source_result_name: str | None = None
+    source_distance_km: float | None = None
+    source_duration_seconds: int | None = None
+    method: str
+    confidence: str
+    extrapolation_ratio: float | None = None
+    extrapolation_limited: bool = False
+    noisy: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    source_reference: str
+
+
+class PerformancePbOut(BaseModel):
+    target_distance_km: float
+    label: str
+    result_id: int
+    name: str
+    result_type: str
+    result_date: datetime
+    distance_km: float
+    duration_seconds: int
+    normalized_duration_seconds: int
+    pace_seconds_per_km: int
+    estimated_vdot: CalculationOut | None = None
+    is_noisy: bool = False
+    noisy_reasons: list[str] = Field(default_factory=list)
+
+
 class AthleteProfileOut(AthleteProfileUpdate):
     id: int
     user_id: int

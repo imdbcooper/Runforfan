@@ -520,6 +520,94 @@ export type AnalyticsInsight = {
   reasons: string[]
 }
 
+export type PerformanceResult = {
+  id: number
+  user_id: number
+  activity_id: number | null
+  result_type: "race" | "time_trial" | string
+  name: string
+  result_date: string
+  distance_km: number
+  duration_seconds: number
+  pace_seconds_per_km: number
+  source: string
+  terrain: string
+  weather: string | null
+  elevation_gain_m: number | null
+  temperature_c: number | null
+  is_noisy: boolean
+  noisy_reasons: string[]
+  age_days: number | null
+  estimated_vdot: CalculationResult | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type PerformanceThresholdTrendPoint = {
+  result_id: number
+  result_date: string
+  distance_km: number
+  duration_seconds: number
+  threshold_pace_seconds_per_km: number
+  source: string
+  confidence: string
+}
+
+export type PerformancePaceZone = {
+  zone_key: string
+  label: string | null
+  lower_value: number | null
+  upper_value: number | null
+  unit: string
+  method: string
+  confidence: string
+  source_reference: string | null
+}
+
+export type PerformanceVdot = {
+  estimate: CalculationResult | null
+  source: PerformanceResult | null
+  confidence: string
+  warnings: string[]
+  threshold_trend: PerformanceThresholdTrendPoint[]
+  pace_zones: PerformancePaceZone[]
+}
+
+export type PerformancePrediction = {
+  target_distance_km: number
+  label: string
+  predicted_duration_seconds: number | null
+  predicted_pace_seconds_per_km: number | null
+  source_result_id: number | null
+  source_result_name: string | null
+  source_distance_km: number | null
+  source_duration_seconds: number | null
+  method: string
+  confidence: string
+  extrapolation_ratio: number | null
+  extrapolation_limited: boolean
+  noisy: boolean
+  warnings: string[]
+  source_reference: string
+}
+
+export type PerformancePb = {
+  target_distance_km: number
+  label: string
+  result_id: number
+  name: string
+  result_type: string
+  result_date: string
+  distance_km: number
+  duration_seconds: number
+  normalized_duration_seconds: number
+  pace_seconds_per_km: number
+  estimated_vdot: CalculationResult | null
+  is_noisy: boolean
+  noisy_reasons: string[]
+}
+
 export type DashboardSummary = {
   generated_at: string
   today: string
@@ -618,6 +706,11 @@ export const api = {
   analytics: (params = "") => request<AnalyticsSummary>(`/analytics/summary${params}`),
   analyticsTimeseries: (params = "") => request<AnalyticsTimeseries>(`/analytics/timeseries${params}`),
   analyticsInsights: (params = "") => request<AnalyticsInsight[]>(`/analytics/insights${params}`),
+  performanceResults: (params = "") => request<PerformanceResult[]>(`/performance/results${params}`),
+  createPerformanceResult: (payload: Record<string, unknown>) => request<PerformanceResult>("/performance/results", { method: "POST", body: JSON.stringify(payload) }),
+  performanceVdot: () => request<PerformanceVdot>("/performance/vdot"),
+  performancePredictions: () => request<PerformancePrediction[]>("/performance/predictions"),
+  performancePbs: () => request<PerformancePb[]>("/performance/pbs"),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),

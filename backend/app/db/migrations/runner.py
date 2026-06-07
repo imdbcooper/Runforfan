@@ -151,6 +151,36 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS weather_notes TEXT",
         ),
     ),
+    (
+        "20260607_0008_performance_results",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS performance_results (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
+                result_type VARCHAR(32) NOT NULL DEFAULT 'race',
+                name VARCHAR(255) NOT NULL,
+                result_date TIMESTAMP WITH TIME ZONE NOT NULL,
+                distance_km DOUBLE PRECISION NOT NULL,
+                duration_seconds INTEGER NOT NULL,
+                source VARCHAR(64) NOT NULL DEFAULT 'manual',
+                terrain VARCHAR(64) NOT NULL DEFAULT 'road',
+                weather VARCHAR(255),
+                elevation_gain_m DOUBLE PRECISION,
+                temperature_c DOUBLE PRECISION,
+                is_noisy BOOLEAN NOT NULL DEFAULT FALSE,
+                notes TEXT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_performance_results_user_id ON performance_results (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_performance_results_activity_id ON performance_results (activity_id)",
+            "CREATE INDEX IF NOT EXISTS ix_performance_results_result_date ON performance_results (result_date)",
+            "CREATE INDEX IF NOT EXISTS ix_performance_results_user_date ON performance_results (user_id, result_date DESC)",
+        ),
+    ),
 )
 
 

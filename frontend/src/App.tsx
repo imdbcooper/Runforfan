@@ -1,4 +1,4 @@
-import { Activity, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Upload, X, Zap } from "lucide-react"
+import { Activity, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "performance" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
@@ -43,6 +43,7 @@ const nav = [
   ["imports", "Imports", Upload],
   ["calendar", "Calendar", CalendarDays],
   ["analytics", "Analytics", ChartSpline],
+  ["performance", "Performance", Trophy],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
   ["settings", "LLM providers", Settings],
@@ -297,6 +298,7 @@ function App() {
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
+            {page === "performance" && <PerformanceAnalytics />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
             {page === "settings" && <SettingsPage providers={providers} onChanged={refreshGlobal} />}
@@ -1057,6 +1059,221 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
 
     <Card className="p-4"><div className="grid gap-3 text-xs md:grid-cols-3"><Stat label="training days" value={summary?.consistency.training_days || 0} /><Stat label="days / week" value={summary?.consistency.training_days_per_week || 0} /><Stat label="missed planned" value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
   </div>
+}
+
+function confidenceClass(confidence?: string) {
+  if (confidence === "high") return "border-zinc-600 bg-zinc-900 text-zinc-100"
+  if (confidence === "medium") return "border-orange-400/40 bg-orange-400/15 text-orange-100"
+  return "border-rose-400/30 bg-rose-500/10 text-rose-200"
+}
+
+function performanceResultPayload(form: HTMLFormElement) {
+  const data = new FormData(form)
+  const distance = numberOrNull(data.get("distance_km"))
+  const durationMinutes = numberOrNull(data.get("duration_minutes"))
+  const activityId = numberOrNull(data.get("activity_id"))
+  const resultDate = stringOrNull(data.get("result_date"))
+  if (!distance || !durationMinutes) throw new Error("Укажите дистанцию и время результата")
+  return {
+    result_type: stringOrNull(data.get("result_type")) || "race",
+    name: stringOrNull(data.get("name")) || "Race result",
+    result_date: resultDate ? new Date(resultDate).toISOString() : null,
+    distance_km: distance,
+    duration_seconds: Math.round(durationMinutes * 60),
+    activity_id: activityId ? Math.round(activityId) : null,
+    source: activityId ? "activity" : "manual",
+    terrain: stringOrNull(data.get("terrain")) || "road",
+    weather: stringOrNull(data.get("weather")),
+    elevation_gain_m: numberOrNull(data.get("elevation_gain_m")),
+    temperature_c: numberOrNull(data.get("temperature_c")),
+    is_noisy: data.get("is_noisy") === "on",
+    notes: stringOrNull(data.get("notes")),
+  }
+}
+
+function PerformanceAnalytics() {
+  const [results, setResults] = useState<PerformanceResult[]>([])
+  const [vdot, setVdot] = useState<PerformanceVdot | null>(null)
+  const [predictions, setPredictions] = useState<PerformancePrediction[]>([])
+  const [pbs, setPbs] = useState<PerformancePb[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  async function loadPerformance() {
+    setLoading(true)
+    setError("")
+    try {
+      await devLogin()
+      const [nextResults, nextVdot, nextPredictions, nextPbs] = await Promise.all([
+        api.performanceResults(),
+        api.performanceVdot(),
+        api.performancePredictions(),
+        api.performancePbs(),
+      ])
+      setResults(nextResults)
+      setVdot(nextVdot)
+      setPredictions(nextPredictions)
+      setPbs(nextPbs)
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Performance API недоступен")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadPerformance() }, [])
+
+  async function submitResult(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    setSaving(true)
+    setError("")
+    try {
+      await api.createPerformanceResult(performanceResultPayload(form))
+      form.reset()
+      await loadPerformance()
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Не удалось сохранить результат")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const raceResults = results.filter((result) => result.result_type === "race")
+  const timeTrials = results.filter((result) => result.result_type === "time_trial")
+  const source = vdot?.source
+  const latestPb = pbs[0]
+
+  return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Performance Analytics</p><h2 className="mt-2 text-lg font-semibold text-white">Race readiness and equivalent performances</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Race/time trial results drive VDOT, Riegel predictions, personal bests, threshold trend and pace zones. Easy runs are not used as VDOT sources.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge className={confidenceClass(vdot?.confidence)}>{vdot?.confidence || "low"} confidence</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+      </div>
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+      {vdot?.warnings.length ? <div className="mt-3 grid gap-2">{vdot.warnings.map((warning) => <p key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</p>)}</div> : null}
+    </Card>
+
+    <div className="grid gap-3 md:grid-cols-4">
+      <Card className="p-3"><Stat label="VDOT" value={vdot?.estimate?.value ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="source" value={source ? `${source.distance_km.toFixed(1)} km` : "--"} /></Card>
+      <Card className="p-3"><Stat label="predictions" value={predictions.length} /></Card>
+      <Card className="p-3"><Stat label="PB rows" value={pbs.length} /></Card>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
+      <Card>
+        <CardHeader><div><CardTitle>Add result</CardTitle><p className="text-xs text-zinc-500">Сохраняйте только races или controlled time trials.</p></div><Badge>manual</Badge></CardHeader>
+        <form onSubmit={submitResult} className="grid gap-3 p-4 text-xs md:grid-cols-2 xl:grid-cols-1">
+          <Field label="Тип"><Select name="result_type" defaultValue="race"><option value="race">Race</option><option value="time_trial">Time trial</option></Select></Field>
+          <Field label="Название"><Input name="name" placeholder="5K race / 20 min TT" /></Field>
+          <Field label="Дата"><Input name="result_date" type="datetime-local" /></Field>
+          <Field label="Дистанция, км"><Input name="distance_km" type="number" min="0.1" max="500" step="0.01" placeholder="5.00" /></Field>
+          <Field label="Время, минуты"><Input name="duration_minutes" type="number" min="0.1" max="2880" step="0.1" placeholder="20.0" /></Field>
+          <Field label="Activity ID"><Input name="activity_id" type="number" min="1" placeholder="optional" /></Field>
+          <Field label="Покрытие"><Select name="terrain" defaultValue="road"><option value="road">Road</option><option value="track">Track</option><option value="trail">Trail</option><option value="mixed">Mixed</option><option value="treadmill">Treadmill</option><option value="unknown">Unknown</option></Select></Field>
+          <Field label="Погода"><Input name="weather" placeholder="heat, wind, rain" /></Field>
+          <Field label="Набор, м"><Input name="elevation_gain_m" type="number" min="0" step="1" placeholder="optional" /></Field>
+          <Field label="Температура C"><Input name="temperature_c" type="number" min="-50" max="60" step="0.5" placeholder="optional" /></Field>
+          <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="is_noisy" type="checkbox" /> noisy source</label>
+          <Field label="Заметки"><Input name="notes" placeholder="optional" /></Field>
+          <Button type="submit" size="sm" disabled={saving}>{saving ? "Saving..." : "Save result"}</Button>
+        </form>
+      </Card>
+
+      <Card>
+        <CardHeader><div><CardTitle>VDOT source</CardTitle><p className="text-xs text-zinc-500">Source selection prefers recent race/time trial results with reliable conditions.</p></div><Badge className={confidenceClass(vdot?.confidence)}>{vdot?.confidence || "low"}</Badge></CardHeader>
+        <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_1fr]">
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-3xl font-semibold text-white">{vdot?.estimate?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot?.estimate ? `${vdot.estimate.method} · ${vdot.estimate.source_reference}` : "No eligible race/time trial yet."}</p></div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Selected result</p><p className="mt-1 text-lg font-semibold text-white">{source?.name || "--"}</p><p className="mt-1 text-zinc-500">{source ? `${source.distance_km.toFixed(2)} км · ${formatDuration(source.duration_seconds)} · ${source.age_days ?? 0} days old` : "Add a result >= 3 km."}</p>{source?.noisy_reasons.length ? <p className="mt-2 text-orange-200">Noisy: {source.noisy_reasons.join(" · ")}</p> : null}</div>
+        </div>
+      </Card>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-2">
+      <PerformanceResultsTable title="Race results" results={raceResults} />
+      <PerformanceResultsTable title="Time trials" results={timeTrials} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      <PerformancePredictions predictions={predictions} />
+      <PerformancePbs pbs={pbs} latestPb={latestPb} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <PerformanceThresholdTrend points={vdot?.threshold_trend || []} />
+      <PerformancePaceZones zones={vdot?.pace_zones || []} />
+    </div>
+  </div>
+}
+
+function PerformanceResultsTable({ title, results }: { title: string; results: PerformanceResult[] }) {
+  return <Card>
+    <CardHeader><CardTitle>{title}</CardTitle><Badge>{results.length} rows</Badge></CardHeader>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Result</th><th>Date</th><th>Distance</th><th>Time</th><th>Pace</th><th>VDOT</th><th>Signal</th></tr></thead>
+        <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} км</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}/км</td><td>{result.estimated_vdot?.value ?? "--"}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
+      </table>
+      {!results.length ? <p className="p-4 text-xs text-zinc-500">Нет сохраненных результатов этого типа.</p> : null}
+    </div>
+  </Card>
+}
+
+function PerformancePredictions({ predictions }: { predictions: PerformancePrediction[] }) {
+  return <Card>
+    <CardHeader><div><CardTitle>Equivalent race predictions</CardTitle><p className="text-xs text-zinc-500">Riegel predictions show confidence and extrapolation warnings.</p></div><Badge>{predictions.length} targets</Badge></CardHeader>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[680px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Target</th><th>Prediction</th><th>Pace</th><th>Source</th><th>Confidence</th><th>Notes</th></tr></thead>
+        <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} км</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}/км</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}</td></tr>)}</tbody>
+      </table>
+      {!predictions.length ? <p className="p-4 text-xs text-zinc-500">Нужен race/time trial результат &gt;= 3 км для прогнозов.</p> : null}
+    </div>
+  </Card>
+}
+
+function PerformancePbs({ pbs, latestPb }: { pbs: PerformancePb[]; latestPb?: PerformancePb }) {
+  return <Card>
+    <CardHeader><div><CardTitle>Personal bests</CardTitle><p className="text-xs text-zinc-500">PB uses near-exact race/time trial distances only.</p></div><Badge>{latestPb ? latestPb.label : "--"}</Badge></CardHeader>
+    <div className="divide-y divide-zinc-800">
+      {pbs.map((pb) => <div key={pb.label} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[4.5rem_1fr_auto]"><div className="font-semibold text-white">{pb.label}</div><div><p className="text-zinc-300">{formatDuration(pb.normalized_duration_seconds)} · {formatPace(pb.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{pb.name} · {formatDateTime(pb.result_date)} · actual {pb.distance_km.toFixed(2)} км</p></div><Badge className={pb.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>VDOT {pb.estimated_vdot?.value ?? "--"}</Badge></div>)}
+      {!pbs.length ? <p className="p-4 text-xs text-zinc-500">Нет PB по стандартным дистанциям.</p> : null}
+    </div>
+  </Card>
+}
+
+function PerformanceThresholdTrend({ points }: { points: PerformanceVdot["threshold_trend"] }) {
+  const values = points.map((point) => point.threshold_pace_seconds_per_km).filter((value) => Number.isFinite(value))
+  const min = Math.max(1, Math.min(...values, 99999))
+  return <Card>
+    <CardHeader><div><CardTitle>Threshold trend</CardTitle><p className="text-xs text-zinc-500">Estimated 60-minute pace from race/time trial results.</p></div><Badge>{points.length} points</Badge></CardHeader>
+    <div className="grid gap-2 p-4">
+      {points.map((point) => <div key={point.result_id} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{new Date(point.result_date).toLocaleDateString("ru-RU", { month: "short", day: "2-digit" })}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, min / point.threshold_pace_seconds_per_km * 100)}%` }} /></div><strong className="text-right text-zinc-300">{formatPace(point.threshold_pace_seconds_per_km)}</strong></div>)}
+      {!points.length ? <p className="text-xs text-zinc-500">Добавьте результаты, чтобы увидеть trend.</p> : null}
+    </div>
+  </Card>
+}
+
+function formatPerformanceZoneRange(zone: PerformancePaceZone) {
+  const format = (value: number | null) => value === null ? "--" : zone.unit === "seconds_per_km" ? `${formatPace(Math.round(value))}/км` : `${value}`
+  return `${format(zone.lower_value)} - ${format(zone.upper_value)}`
+}
+
+function PerformancePaceZones({ zones }: { zones: PerformancePaceZone[] }) {
+  return <Card>
+    <CardHeader><div><CardTitle>Pace zones</CardTitle><p className="text-xs text-zinc-500">Derived from profile threshold pace or VDOT threshold estimate.</p></div><Badge>{zones.length} zones</Badge></CardHeader>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Zone</th><th>Range</th><th>Method</th><th>Confidence</th></tr></thead>
+        <tbody>{zones.map((zone) => <tr key={zone.zone_key} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{zone.label || zone.zone_key}<div className="text-[11px] text-zinc-500">{zone.zone_key}</div></td><td>{formatPerformanceZoneRange(zone)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.method}</Badge><div className="mt-1 max-w-[16rem] text-[10px] text-zinc-600">{zone.source_reference}</div></td><td><Badge className={confidenceClass(zone.confidence)}>{zone.confidence}</Badge></td></tr>)}</tbody>
+      </table>
+      {!zones.length ? <p className="p-4 text-xs text-zinc-500">Нет данных для pace zones.</p> : null}
+    </div>
+  </Card>
 }
 
 function ProfileZones({ profile, completeness, safety, zones, measurements, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onChanged: () => Promise<void> }) {

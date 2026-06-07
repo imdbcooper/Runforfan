@@ -31,6 +31,7 @@ class User(Base, TimestampMixin):
     athlete_profile: Mapped["AthleteProfile | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
     measurements: Mapped[list["AthleteMeasurement"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     training_zones: Mapped[list["TrainingZone"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    performance_results: Mapped[list["PerformanceResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -232,6 +233,29 @@ class LactateThresholdMeasurement(Base, TimestampMixin):
     distance_km: Mapped[float | None] = mapped_column(Float)
     distance_is_estimated: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceResult(Base, TimestampMixin):
+    __tablename__ = "performance_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    activity_id: Mapped[int | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"), index=True)
+    result_type: Mapped[str] = mapped_column(String(32), default="race")
+    name: Mapped[str] = mapped_column(String(255))
+    result_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    distance_km: Mapped[float] = mapped_column(Float)
+    duration_seconds: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(64), default="manual")
+    terrain: Mapped[str] = mapped_column(String(64), default="road")
+    weather: Mapped[str | None] = mapped_column(String(255))
+    elevation_gain_m: Mapped[float | None] = mapped_column(Float)
+    temperature_c: Mapped[float | None] = mapped_column(Float)
+    is_noisy: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="performance_results")
+    activity: Mapped[Activity | None] = relationship()
 
 
 class ImportBatch(Base, TimestampMixin):

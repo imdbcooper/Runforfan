@@ -12,6 +12,7 @@ from app.models.entities import (  # noqa: F401
     ImportRecognitionAttempt,
     LactateThresholdMeasurement,
     LlmProviderSetting,
+    PerformanceResult,
     RunningGoal,
     ScreenshotSource,
     TrainingPlan,

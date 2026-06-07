@@ -40,7 +40,7 @@ GET /health
 - `backend/app/main.py` — FastAPI-приложение и подключение роутеров.
 - `backend/app/models/entities.py` — SQLAlchemy-модели.
 - `backend/app/api/routes/` — API-роутеры.
-- `backend/app/services/` — бизнес-логика: auth, analytics, recognition, planning, calculations, profile/zones.
+- `backend/app/services/` — бизнес-логика: auth, analytics, performance, recognition, planning, calculations, profile/zones.
 - `backend/app/seed/demo.py` — перенос текущих тренировок в demo-user.
 - `backend/app/storage/uploads/` — uploads volume для скриншотов.
 - `frontend/` — новый React/Vite frontend на Tailwind и shadcn-style компонентах.
@@ -62,6 +62,11 @@ GET /health
 - `GET /api/analytics/summary?from=&to=` — обзорная аналитика пользователя за период: KPI, weighted pace, HR, adherence, consistency, best efforts и VO2max/VDOT estimate.
 - `GET /api/analytics/timeseries?metric=&granularity=&from=&to=` — недельные/месячные ряды для distance, duration, workouts, pace, HR и load.
 - `GET /api/analytics/insights?from=&to=` — 3-5 explainable analytics notes для выбранного периода.
+- `GET /api/performance/results` — сохраненные race/time trial результаты текущего пользователя.
+- `POST /api/performance/results` — добавить race/time trial результат с условиями, noisy flag и optional activity link.
+- `GET /api/performance/vdot` — VDOT estimate из race/time trial source, threshold trend и pace zones.
+- `GET /api/performance/predictions` — Riegel equivalent race predictions с confidence/extrapolation warnings.
+- `GET /api/performance/pbs` — personal bests по стандартным дистанциям.
 - `GET /api/profile` — профиль спортсмена текущего пользователя.
 - `PUT /api/profile` — обновление физиологических параметров, порогов и safety-настроек.
 - `GET /api/profile/completeness` — оценка полноты данных для расчетов.
@@ -166,6 +171,7 @@ API настроек AI:
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
+- Performance Analytics хранит race/time trial results, считает VDOT только из eligible hard sources, показывает Riegel predictions, PBs, threshold trend и pace zones derived from threshold/VDOT.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
@@ -215,6 +221,7 @@ npm run build
 - Imports.
 - Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
+- Performance: race/time trial results, VDOT, Riegel predictions, PBs, threshold trend и pace zones.
 - Profile & zones.
 - Планы: Plan Builder wizard preview/generate, create draft/create active, Plan Detail, список программ, actions и workout execution/matching.
 - AI настройки.
