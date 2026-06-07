@@ -180,5 +180,5 @@ def apply_measurement_to_profile(profile: AthleteProfile, payload: AthleteMeasur
             profile.lactate_threshold_hr_bpm = round(float(threshold_hr))
         if threshold_pace:
             profile.lactate_threshold_pace_seconds_per_km = round(float(threshold_pace))
-        return bool(threshold_pace)
+        return bool(threshold_hr or threshold_pace)
     return False

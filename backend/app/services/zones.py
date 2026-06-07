@@ -8,9 +8,12 @@ from app.services.calculations import (
     age_from_birthdate,
     calculate_hrmax_zones,
     calculate_hrr_zones,
+    calculate_rpe_zones,
+    calculate_threshold_hr_zones,
     calculate_threshold_pace_zones,
     estimate_hrmax_tanaka,
 )
+from app.services.performance import estimate_threshold_pace_from_result, load_results, select_vdot_source
 from app.services.profile import get_or_create_profile
 
 
@@ -19,6 +22,7 @@ ZONE_INPUT_FIELDS = {
     "resting_heart_rate_bpm",
     "max_heart_rate_bpm",
     "max_hr_source",
+    "lactate_threshold_hr_bpm",
     "lactate_threshold_pace_seconds_per_km",
 }
 
@@ -33,10 +37,12 @@ def _effective_max_hr(profile: AthleteProfile) -> tuple[int | None, str]:
     return None, "missing"
 
 
-def calculated_zones(profile: AthleteProfile) -> list[dict[str, object]]:
+def calculated_zones(profile: AthleteProfile, vdot_threshold_pace: int | None = None, vdot_confidence: str = "low") -> list[dict[str, object]]:
     zones: list[dict[str, object]] = []
     max_hr, max_hr_source = _effective_max_hr(profile)
-    if max_hr and profile.resting_heart_rate_bpm:
+    if profile.lactate_threshold_hr_bpm:
+        zones.extend(calculate_threshold_hr_zones(profile.lactate_threshold_hr_bpm))
+    elif max_hr and profile.resting_heart_rate_bpm:
         zones.extend(calculate_hrr_zones(profile.resting_heart_rate_bpm, max_hr))
     elif max_hr:
         hrmax_zones = calculate_hrmax_zones(max_hr)
@@ -46,7 +52,17 @@ def calculated_zones(profile: AthleteProfile) -> list[dict[str, object]]:
         zones.extend(hrmax_zones)
     if profile.lactate_threshold_pace_seconds_per_km:
         zones.extend(calculate_threshold_pace_zones(profile.lactate_threshold_pace_seconds_per_km))
+    elif vdot_threshold_pace:
+        zones.extend({**zone, "method": "vdot_threshold_estimate", "confidence": vdot_confidence} for zone in calculate_threshold_pace_zones(vdot_threshold_pace))
+    zones.extend(calculate_rpe_zones())
     return zones
+
+
+def vdot_threshold_pace(db: Session, user: User) -> tuple[int | None, str]:
+    source = select_vdot_source(load_results(db, user))
+    if source is None:
+        return None, "low"
+    return estimate_threshold_pace_from_result(source)
 
 
 def zone_to_dict(zone: TrainingZone) -> dict[str, object]:
@@ -67,12 +83,13 @@ def zone_to_dict(zone: TrainingZone) -> dict[str, object]:
 
 def zones_response(db: Session, user: User) -> dict:
     profile = get_or_create_profile(db, user, commit=True)
+    pace, pace_confidence = vdot_threshold_pace(db, user)
     stored = list(db.scalars(select(TrainingZone).where(TrainingZone.user_id == user.id, TrainingZone.is_active.is_(True))))
     stored_dicts = [zone_to_dict(zone) for zone in stored]
     manual_types = {zone.zone_type for zone in stored if zone.method == "manual"}
     stored_signatures = {(zone.zone_type, zone.method, zone.zone_key) for zone in stored}
     calculated = [
-        zone for zone in calculated_zones(profile)
+        zone for zone in calculated_zones(profile, pace, pace_confidence)
         if zone_type_for_unit(str(zone["unit"])) not in manual_types
         and (zone_type_for_unit(str(zone["unit"])), str(zone["method"]), str(zone["zone_key"])) not in stored_signatures
     ]
@@ -123,8 +140,9 @@ def invalidate_calculated_zones(db: Session, user_id: int, zone_types: set[str] 
 
 def recalculate_and_store_zones(db: Session, user: User) -> dict:
     profile = get_or_create_profile(db, user)
+    pace, pace_confidence = vdot_threshold_pace(db, user)
     db.execute(delete(TrainingZone).where(TrainingZone.user_id == user.id, TrainingZone.method != "manual"))
-    for zone in calculated_zones(profile):
+    for zone in calculated_zones(profile, pace, pace_confidence):
         db.add(TrainingZone(
             user_id=user.id,
             zone_type=zone_type_for_unit(str(zone["unit"])),

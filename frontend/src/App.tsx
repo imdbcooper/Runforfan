@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "performance" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
@@ -44,6 +44,7 @@ const nav = [
   ["calendar", "Calendar", CalendarDays],
   ["analytics", "Analytics", ChartSpline],
   ["load", "Load & Recovery", BatteryCharging],
+  ["zones", "Zones Analytics", Shield],
   ["performance", "Performance", Trophy],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
@@ -300,6 +301,7 @@ function App() {
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
             {page === "load" && <TrainingLoadRecovery />}
+            {page === "zones" && <ZonesAnalytics />}
             {page === "performance" && <PerformanceAnalytics />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
@@ -1153,6 +1155,121 @@ function TrainingLoadRecovery() {
       <RecoveryDaysCard recoveryDays={recoveryDays} />
     </div>
   </div>
+}
+
+function ZonesAnalytics() {
+  const [preset, setPreset] = useState("28d")
+  const [customFrom, setCustomFrom] = useState("")
+  const [customTo, setCustomTo] = useState("")
+  const [granularity, setGranularity] = useState("week")
+  const [distribution, setDistribution] = useState<ZoneDistribution | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const query = analyticsQuery(preset, customFrom, customTo)
+    const params = `${query}${query ? "&" : "?"}granularity=${granularity}`
+    let cancelled = false
+    async function loadZones() {
+      setLoading(true)
+      setError("")
+      try {
+        await devLogin()
+        const next = await api.zoneDistribution(params)
+        if (!cancelled) setDistribution(next)
+      } catch (caught) {
+        console.error(caught)
+        if (!cancelled) setError("Zones Analytics API недоступен")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void loadZones()
+    return () => { cancelled = true }
+  }, [preset, customFrom, customTo, granularity])
+
+  const meta = distribution?.metadata || {}
+  const classified = Number(meta.classified_actual_duration_seconds || 0)
+  const unclassified = Number(meta.unclassified_actual_duration_seconds || 0)
+  const total = classified + unclassified
+
+  return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Zones Analytics</p><h2 className="mt-2 text-lg font-semibold text-white">Intensity distribution and zone governance</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">HR, pace and RPE zones with threshold-based precedence, VDOT pace fallback, Seiler 3-zone split, weekly/monthly buckets and planned-vs-actual distribution.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{distribution?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{granularity}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-[10rem_8rem_1fr_1fr]">
+        <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
+        <Select value={granularity} onChange={(event) => setGranularity(event.target.value)}><option value="week">Week</option><option value="month">Month</option></Select>
+        <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
+        <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
+      </div>
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+    </Card>
+
+    <div className="grid gap-3 md:grid-cols-4">
+      <Card className="p-3"><Stat label="classified" value={formatDuration(classified)} /></Card>
+      <Card className="p-3"><Stat label="coverage" value={total ? `${Math.round(classified / total * 100)}%` : "--"} /></Card>
+      <Card className="p-3"><Stat label="activities" value={Number(meta.activity_count || 0)} /></Card>
+      <Card className="p-3"><Stat label="planned workouts" value={Number(meta.planned_workout_count || 0)} /></Card>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <ZoneDistributionBars title="5-zone actual" items={distribution?.actual_five_zone || []} />
+      <ZoneDistributionBars title="Seiler 3-zone" items={distribution?.seiler_three_zone || []} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-3">
+      <ZoneDistributionBars title="Heart-rate distribution" items={distribution?.actual_hr || []} compact />
+      <ZoneDistributionBars title="Pace distribution" items={distribution?.actual_pace || []} compact />
+      <ZoneDistributionBars title="RPE distribution" items={distribution?.actual_rpe || []} compact />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <PlannedActualZones rows={distribution?.planned_vs_actual || []} />
+      <ZoneTimeBuckets distribution={distribution} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <Card><CardHeader><div><CardTitle>Configured zones</CardTitle><p className="text-xs text-zinc-500">Manual overrides suppress calculated zones by type; calculated zones show method and confidence.</p></div><Badge>{(distribution?.zones.hr.length || 0) + (distribution?.zones.pace.length || 0) + (distribution?.zones.rpe.length || 0)} zones</Badge></CardHeader><div className="grid gap-4 p-4"><ZoneTable title="Heart rate" zones={distribution?.zones.hr || []} /><ZoneTable title="Pace" zones={distribution?.zones.pace || []} /><ZoneTable title="RPE" zones={distribution?.zones.rpe || []} /></div></Card>
+      <Card><CardHeader><CardTitle>Classification notes</CardTitle><Badge>{unclassified ? "partial" : "covered"}</Badge></CardHeader><div className="grid gap-2 p-4 text-xs text-zinc-400"><p>Priority: {(meta.classification_priority as string[] | undefined)?.join(" -> ") || "hr -> pace -> rpe"}.</p><p>Unclassified duration: {formatDuration(unclassified)}. Usually this means missing HR/pace/RPE data or no matching zone range.</p><p>Planned distribution estimates workouts from active plans using intensity/workout type and planned duration.</p></div></Card>
+    </div>
+  </div>
+}
+
+function ZoneDistributionBars({ title, items, compact = false }: { title: string; items: ZoneDistributionItem[]; compact?: boolean }) {
+  return <Card>
+    <CardHeader><CardTitle>{title}</CardTitle><Badge>{items.length} zones</Badge></CardHeader>
+    <div className="grid gap-2 p-4">
+      {items.map((item) => <div key={`${title}-${item.zone_key}`} className={cn("grid items-center gap-2 text-[11px]", compact ? "grid-cols-[5.5rem_1fr_4rem]" : "grid-cols-[7rem_1fr_6rem]")}><span className="truncate text-zinc-400">{item.label}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(item.percentage ? 4 : 0, item.percentage)}%` }} /></div><strong className="text-right text-zinc-300">{item.percentage.toFixed(1)}%</strong><span className="col-span-full text-zinc-600">{formatDuration(item.duration_seconds)} · {item.source_count} samples</span></div>)}
+      {!items.length ? <p className="text-xs text-zinc-500">Нет данных для распределения.</p> : null}
+    </div>
+  </Card>
+}
+
+function PlannedActualZones({ rows }: { rows: ZonePlannedActual[] }) {
+  return <Card>
+    <CardHeader><div><CardTitle>Planned vs actual</CardTitle><p className="text-xs text-zinc-500">Zone distribution from active plan intensity compared with classified actual duration.</p></div><Badge>{rows.length} rows</Badge></CardHeader>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-left text-xs">
+        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Zone</th><th>Planned</th><th>Actual</th><th>Delta</th></tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.zone_key} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{row.label}<div className="font-mono text-[10px] text-zinc-600">{row.zone_key}</div></td><td>{formatDuration(row.planned_duration_seconds)}<div className="text-[11px] text-zinc-500">{row.planned_percentage.toFixed(1)}%</div></td><td>{formatDuration(row.actual_duration_seconds)}<div className="text-[11px] text-zinc-500">{row.actual_percentage.toFixed(1)}%</div></td><td><Badge className={Math.abs(row.diff_percentage) >= 15 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{row.diff_percentage > 0 ? "+" : ""}{row.diff_percentage.toFixed(1)}%</Badge></td></tr>)}</tbody>
+      </table>
+      {!rows.length ? <p className="p-4 text-xs text-zinc-500">Нет planned-vs-actual rows.</p> : null}
+    </div>
+  </Card>
+}
+
+function ZoneTimeBuckets({ distribution }: { distribution: ZoneDistribution | null }) {
+  const buckets = distribution?.time_buckets.slice(-8) || []
+  return <Card>
+    <CardHeader><div><CardTitle>Time in zones by {distribution?.granularity || "week"}</CardTitle><p className="text-xs text-zinc-500">Stacked 5-zone duration buckets for recent periods.</p></div><Badge>{buckets.length} buckets</Badge></CardHeader>
+    <div className="grid gap-3 p-4">
+      {buckets.map((bucket) => <div key={bucket.period_label} className="grid gap-1 text-[11px]"><div className="flex items-center justify-between gap-2"><span className="text-zinc-400">{bucket.period_label}</span><span className="text-zinc-500">{formatDuration(bucket.total_duration_seconds)}</span></div><div className="flex h-2 overflow-hidden rounded bg-zinc-900">{bucket.items.map((item, index) => <div key={`${bucket.period_label}-${item.zone_key}`} className={cn("h-full", index % 2 === 0 ? "bg-orange-400" : "bg-orange-300/60")} style={{ width: `${item.percentage}%` }} title={`${item.label}: ${item.percentage}%`} />)}</div></div>)}
+      {!buckets.length ? <p className="text-xs text-zinc-500">Нет bucket данных за выбранный период.</p> : null}
+    </div>
+  </Card>
 }
 
 function LoadBarChart({ title, points, label, value, suffix }: { title: string; points: TrainingLoadDailyPoint[]; label: (point: TrainingLoadDailyPoint) => string; value: (point: TrainingLoadDailyPoint) => number; suffix: string }) {

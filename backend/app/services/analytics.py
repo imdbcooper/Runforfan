@@ -58,7 +58,7 @@ def load_activities(db: Session, user: User, from_date: date | None = None, to_d
     query = (
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments))
+        .options(selectinload(Activity.segments), selectinload(Activity.workout_blocks))
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
     )
     start, end = period_bounds(from_date, to_date, timezone)

@@ -501,6 +501,46 @@ class ZonesOut(BaseModel):
     metadata: dict
 
 
+class ZoneDistributionItemOut(BaseModel):
+    zone_key: str
+    label: str
+    duration_seconds: int
+    percentage: float
+    source_count: int
+
+
+class ZoneDistributionBucketOut(BaseModel):
+    period_start: Date
+    period_label: str
+    total_duration_seconds: int
+    items: list[ZoneDistributionItemOut] = Field(default_factory=list)
+
+
+class ZonePlannedActualOut(BaseModel):
+    zone_key: str
+    label: str
+    planned_duration_seconds: int
+    planned_percentage: float
+    actual_duration_seconds: int
+    actual_percentage: float
+    diff_percentage: float
+
+
+class ZoneDistributionOut(BaseModel):
+    period: AnalyticsPeriodOut
+    granularity: str
+    zones: ZonesOut
+    actual_hr: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    actual_pace: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    actual_rpe: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    actual_five_zone: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    seiler_three_zone: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    planned_five_zone: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    planned_vs_actual: list[ZonePlannedActualOut] = Field(default_factory=list)
+    time_buckets: list[ZoneDistributionBucketOut] = Field(default_factory=list)
+    metadata: dict
+
+
 class LlmProviderCreate(BaseModel):
     provider: str = Field(pattern="^(openai|anthropic)$")
     display_name: str = Field(min_length=1, max_length=255)

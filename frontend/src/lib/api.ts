@@ -591,6 +591,46 @@ export type TrainingLoadWarning = {
   threshold: number | null
 }
 
+export type ZoneDistributionItem = {
+  zone_key: string
+  label: string
+  duration_seconds: number
+  percentage: number
+  source_count: number
+}
+
+export type ZoneDistributionBucket = {
+  period_start: string
+  period_label: string
+  total_duration_seconds: number
+  items: ZoneDistributionItem[]
+}
+
+export type ZonePlannedActual = {
+  zone_key: string
+  label: string
+  planned_duration_seconds: number
+  planned_percentage: number
+  actual_duration_seconds: number
+  actual_percentage: number
+  diff_percentage: number
+}
+
+export type ZoneDistribution = {
+  period: AnalyticsPeriod
+  granularity: "week" | "month" | string
+  zones: Zones
+  actual_hr: ZoneDistributionItem[]
+  actual_pace: ZoneDistributionItem[]
+  actual_rpe: ZoneDistributionItem[]
+  actual_five_zone: ZoneDistributionItem[]
+  seiler_three_zone: ZoneDistributionItem[]
+  planned_five_zone: ZoneDistributionItem[]
+  planned_vs_actual: ZonePlannedActual[]
+  time_buckets: ZoneDistributionBucket[]
+  metadata: Record<string, unknown>
+}
+
 export type PerformanceResult = {
   id: number
   user_id: number
@@ -781,6 +821,7 @@ export const api = {
   trainingLoadWeekly: (params = "") => request<TrainingLoadWeekly>(`/analytics/load/weekly${params}`),
   trainingLoadFitnessFatigue: (params = "") => request<TrainingLoadFitnessFatigue>(`/analytics/load/fitness-fatigue${params}`),
   trainingLoadWarnings: (params = "") => request<TrainingLoadWarning[]>(`/analytics/load/warnings${params}`),
+  zoneDistribution: (params = "") => request<ZoneDistribution>(`/analytics/zones/distribution${params}`),
   performanceResults: (params = "") => request<PerformanceResult[]>(`/performance/results${params}`),
   createPerformanceResult: (payload: Record<string, unknown>) => request<PerformanceResult>("/performance/results", { method: "POST", body: JSON.stringify(payload) }),
   performanceVdot: () => request<PerformanceVdot>("/performance/vdot"),
@@ -798,6 +839,7 @@ export const api = {
   recalculateZones: () => request<Zones>("/zones/recalculate", { method: "POST", body: "{}" }),
   replaceHrZones: (payload: ZoneWrite[]) => request<Zones>("/zones/hr", { method: "PUT", body: JSON.stringify(payload) }),
   replacePaceZones: (payload: ZoneWrite[]) => request<Zones>("/zones/pace", { method: "PUT", body: JSON.stringify(payload) }),
+  replaceRpeZones: (payload: ZoneWrite[]) => request<Zones>("/zones/rpe", { method: "PUT", body: JSON.stringify(payload) }),
   plans: () => request<Plan[]>("/planning/plans"),
   currentWeek: () => request<CurrentWeek>("/planning/current-week"),
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),

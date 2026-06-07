@@ -7,8 +7,10 @@ from app.services.calculations import (
     calculate_hrr_zones,
     calculate_monotony_strain,
     calculate_pace_seconds_per_km,
+    calculate_rpe_zones,
     calculate_speed_kmh,
     calculate_srpe_load,
+    calculate_threshold_hr_zones,
     calculate_threshold_pace_zones,
     calculate_vdot,
     estimate_hrmax_tanaka,
@@ -36,6 +38,17 @@ class CalculationTests(unittest.TestCase):
         threshold = next(zone for zone in zones if zone["zone_key"] == "threshold")
         self.assertEqual(threshold["lower_value"], 319)
         self.assertEqual(threshold["upper_value"], 334)
+
+    def test_threshold_hr_and_rpe_zones(self):
+        hr_zones = calculate_threshold_hr_zones(170)
+        self.assertEqual(hr_zones[0]["method"], "threshold_hr")
+        self.assertIsNone(hr_zones[0]["lower_value"])
+        self.assertEqual(hr_zones[2]["lower_value"], 152)
+        self.assertEqual(hr_zones[-1]["lower_value"], 169)
+
+        rpe_zones = calculate_rpe_zones()
+        self.assertEqual(rpe_zones[0]["unit"], "rpe")
+        self.assertEqual(rpe_zones[-1]["upper_value"], 10)
 
     def test_vdot_and_riegel(self):
         vdot = calculate_vdot(5, 1200)

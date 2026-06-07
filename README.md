@@ -66,6 +66,7 @@ GET /health
 - `GET /api/analytics/load/weekly?from=&to=` — weekly load, monotony, strain, hard sessions, recovery days и long-run share.
 - `GET /api/analytics/load/fitness-fatigue?from=&to=` — CTL/ATL/TSB EWMA heuristics с объяснением.
 - `GET /api/analytics/load/warnings?from=&to=` — load/recovery alerts: monotony, fatigue balance, intensity share, hard-session spacing и recovery days.
+- `GET /api/analytics/zones/distribution?granularity=&from=&to=` — HR/pace/RPE zone distribution, Seiler 3-zone split, time-in-zones buckets и planned-vs-actual intensity split.
 - `GET /api/performance/results` — сохраненные race/time trial результаты текущего пользователя.
 - `POST /api/performance/results` — добавить race/time trial результат с условиями, noisy flag и optional activity link.
 - `GET /api/performance/vdot` — VDOT estimate из race/time trial source, threshold trend и pace zones.
@@ -77,10 +78,11 @@ GET /health
 - `POST /api/profile/safety-check` — safety warnings для планировщика.
 - `GET /api/profile/measurements` — история измерений спортсмена.
 - `POST /api/profile/measurements` — добавление измерения и обновление профиля.
-- `GET /api/zones` — расчетные и сохраненные зоны по пульсу/темпу.
+- `GET /api/zones` — расчетные и сохраненные зоны по пульсу, темпу и RPE с threshold/VDOT fallback metadata.
 - `POST /api/zones/recalculate` — пересчитать и сохранить расчетные зоны.
 - `PUT /api/zones/hr` — заменить ручные HR-зоны.
 - `PUT /api/zones/pace` — заменить ручные pace-зоны.
+- `PUT /api/zones/rpe` — заменить ручные RPE-зоны.
 - `POST /api/planning/preview` — безопасный Plan Builder preview без записи в БД: baseline, volume curve, intensity split и risk flags.
 - `POST /api/planning/generate` — генерация тренировочной программы.
 - `GET /api/planning/current-week` — текущая календарная неделя активного плана с today/next workout и adherence.
@@ -176,6 +178,7 @@ API настроек AI:
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
 - Training Load & Recovery показывает daily/weekly load, CTL/ATL/TSB, monotony/strain, hard-session spacing, recovery days и explainable load alerts.
+- Zones Analytics показывает HR/pace/RPE zones, 3-zone Seiler distribution, 5-zone detailed distribution, time-in-zones by week/month и planned-vs-actual intensity split.
 - Performance Analytics хранит race/time trial results, считает VDOT только из eligible hard sources, показывает Riegel predictions, PBs, threshold trend и pace zones derived from threshold/VDOT.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
@@ -227,6 +230,7 @@ npm run build
 - Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
 - Load & Recovery: daily/weekly load, CTL/ATL/TSB, monotony, strain, hard spacing и recovery alerts.
+- Zones Analytics: HR/pace/RPE distribution, Seiler 3-zone split, time-in-zones buckets и planned-vs-actual intensity split.
 - Performance: race/time trial results, VDOT, Riegel predictions, PBs, threshold trend и pace zones.
 - Profile & zones.
 - Планы: Plan Builder wizard preview/generate, create draft/create active, Plan Detail, список программ, actions и workout execution/matching.

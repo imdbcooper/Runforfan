@@ -13,6 +13,8 @@ DANIELS_REF = "Daniels/Gilbert oxygen power VDOT model"
 RIEGEL_REF = "Riegel 1981 race prediction power law"
 FOSTER_REF = "Foster et al. 2001 session RPE, PMID 11708692"
 BANISTER_REF = "Banister impulse-response fitness/fatigue model"
+LTHR_REF = "Lactate-threshold heart-rate zone model"
+RPE_SCALE_REF = "Modified Borg CR10 session-RPE scale"
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,33 @@ def calculate_hrmax_zones(max_hr: int) -> list[dict[str, object]]:
     ]
 
 
+def calculate_threshold_hr_zones(threshold_hr: int) -> list[dict[str, object]]:
+    ranges = [
+        ("z1", 0.84, "Recovery"),
+        ("z2", 0.89, "Aerobic"),
+        ("z3", 0.94, "Steady"),
+        ("z4", 0.99, "Threshold"),
+        ("z5", None, "Very hard"),
+    ]
+    zones: list[dict[str, object]] = []
+    previous_upper: int | None = None
+    for key, high, label in ranges:
+        upper = round(high * threshold_hr) if high is not None else None
+        lower = previous_upper + 1 if previous_upper is not None else None
+        zones.append({
+            "zone_key": key,
+            "label": label,
+            "lower_value": lower,
+            "upper_value": upper,
+            "unit": "bpm",
+            "method": "threshold_hr",
+            "confidence": "high",
+            "source_reference": LTHR_REF,
+        })
+        previous_upper = upper
+    return zones
+
+
 def calculate_threshold_pace_zones(threshold_pace_seconds_per_km: int) -> list[dict[str, object]]:
     ranges = [
         ("easy", threshold_pace_seconds_per_km + 45, threshold_pace_seconds_per_km + 95, "Easy"),
@@ -128,6 +157,29 @@ def calculate_threshold_pace_zones(threshold_pace_seconds_per_km: int) -> list[d
             "method": "threshold_pace",
             "confidence": "medium",
             "source_reference": DANIELS_REF,
+        }
+        for key, lower, upper, label in ranges
+    ]
+
+
+def calculate_rpe_zones() -> list[dict[str, object]]:
+    ranges = [
+        ("z1", 0, 2, "Recovery"),
+        ("z2", 3, 4, "Easy"),
+        ("z3", 5, 6, "Moderate"),
+        ("z4", 7, 8, "Hard"),
+        ("z5", 9, 10, "Very hard"),
+    ]
+    return [
+        {
+            "zone_key": key,
+            "label": label,
+            "lower_value": lower,
+            "upper_value": upper,
+            "unit": "rpe",
+            "method": "rpe_scale",
+            "confidence": "medium",
+            "source_reference": RPE_SCALE_REF,
         }
         for key, lower, upper, label in ranges
     ]

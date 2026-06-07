@@ -37,3 +37,9 @@ def replace_hr_zones(payload: list[ZoneWrite], user: User = Depends(get_current_
 def replace_pace_zones(payload: list[ZoneWrite], user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     validate_zone_units(payload, "seconds_per_km")
     return replace_manual_zones(db, user, "pace", [zone.model_dump() for zone in payload])
+
+
+@router.put("/rpe", response_model=ZonesOut)
+def replace_rpe_zones(payload: list[ZoneWrite], user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    validate_zone_units(payload, "rpe")
+    return replace_manual_zones(db, user, "rpe", [zone.model_dump() for zone in payload])
