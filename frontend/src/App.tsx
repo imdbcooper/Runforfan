@@ -11,6 +11,30 @@ import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; notes: string }
+type CalendarMatchState =
+  | { mode: "workout_to_activity"; candidates: PlanActivityMatchCandidate[] }
+  | { mode: "activity_to_workout"; candidates: PlanWorkoutMatchCandidate[] }
+
+type CalendarDayProps = {
+  day: string
+  events: CalendarEvent[]
+  load: number
+  maxLoad: number
+  busyEvent: string
+  loadingMatchEvent: string
+  matchesByEvent: Record<string, CalendarMatchState>
+  matchErrors: Record<string, string>
+  rescheduleDrafts: Record<string, string>
+  onFindMatches: (event: CalendarEvent) => Promise<void>
+  onLinkMatch: (event: CalendarEvent, workoutId: number, activityId: number) => Promise<void>
+  onReschedule: (event: CalendarEvent, scheduledDate: string) => Promise<void>
+  onRescheduleDraft: (eventId: string, value: string) => void
+  onUpdate: (event: CalendarEvent, status: string) => Promise<void>
+}
+
+type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" | "maxLoad"> & {
+  event: CalendarEvent
+}
 
 const nav = [
   ["overview", "Dashboard", Zap],
@@ -589,9 +613,15 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [busyEvent, setBusyEvent] = useState("")
+  const [loadingMatchEvent, setLoadingMatchEvent] = useState("")
+  const [calendarMatches, setCalendarMatches] = useState<Record<string, CalendarMatchState>>({})
+  const [calendarMatchErrors, setCalendarMatchErrors] = useState<Record<string, string>>({})
+  const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({})
 
   async function loadRange(fromValue = fromDate, toValue = toDate) {
     setError("")
+    setCalendarMatches({})
+    setCalendarMatchErrors({})
     if (fromValue > toValue) {
       setError("Дата начала должна быть раньше или равна дате окончания")
       return
@@ -604,6 +634,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
     try {
       await devLogin()
       setCalendar(await api.calendar(fromValue, toValue))
+      setRescheduleDrafts({})
     } catch (loadError) {
       console.error(loadError)
       setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить календарь")
@@ -639,10 +670,67 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
     setError("")
     try {
       await api.updatePlanWorkout(event.planned_workout_id, { status })
-      await loadRange()
+      await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
     } catch (updateError) {
       console.error(updateError)
       setError("Не удалось обновить workout из календаря")
+    } finally {
+      setBusyEvent("")
+    }
+  }
+
+  async function rescheduleCalendarWorkout(event: CalendarEvent, scheduledDate: string) {
+    if (!event.planned_workout_id) return
+    setCalendarMatchErrors((current) => ({ ...current, [event.id]: "" }))
+    if (!scheduledDate) {
+      setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Выберите новую дату" }))
+      return
+    }
+    setBusyEvent(event.id)
+    try {
+      await api.updatePlanWorkout(event.planned_workout_id, { scheduled_date: scheduledDate })
+      await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
+    } catch (updateError) {
+      console.error(updateError)
+      setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Не удалось перенести workout" }))
+    } finally {
+      setBusyEvent("")
+    }
+  }
+
+  async function loadCalendarMatches(event: CalendarEvent) {
+    setLoadingMatchEvent(event.id)
+    setCalendarMatchErrors((current) => ({ ...current, [event.id]: "" }))
+    try {
+      if (event.kind === "planned_workout" && event.planned_workout_id) {
+        const candidates = await api.workoutMatchCandidates(event.planned_workout_id)
+        setCalendarMatches((current) => ({ ...current, [event.id]: { mode: "workout_to_activity", candidates } }))
+      } else if (event.linked_activity_id) {
+        const candidates = await api.activityMatchCandidates(event.linked_activity_id, true)
+        setCalendarMatches((current) => ({ ...current, [event.id]: { mode: "activity_to_workout", candidates } }))
+      }
+    } catch (matchError) {
+      console.error(matchError)
+      setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Не удалось загрузить кандидатов" }))
+    } finally {
+      setLoadingMatchEvent("")
+    }
+  }
+
+  async function linkCalendarMatch(event: CalendarEvent, workoutId: number, activityId: number) {
+    setBusyEvent(event.id)
+    setCalendarMatchErrors((current) => ({ ...current, [event.id]: "" }))
+    try {
+      await api.linkPlanWorkoutActivity(workoutId, activityId)
+      setCalendarMatches((current) => {
+        const next = { ...current }
+        delete next[event.id]
+        return next
+      })
+      await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
+    } catch (linkError) {
+      console.error(linkError)
+      setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Не удалось привязать активность" }))
     } finally {
       setBusyEvent("")
     }
@@ -696,32 +784,79 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
       {days.map((day, index) => {
         const events = eventsByDate.get(day) || []
         const load = dailyLoads[index] || 0
-        return <CalendarDay key={day} day={day} events={events} load={load} maxLoad={maxDailyLoad} busyEvent={busyEvent} onPlans={onPlans} onUpdate={updateCalendarWorkout} />
+        return <CalendarDay key={day} day={day} events={events} load={load} maxLoad={maxDailyLoad} busyEvent={busyEvent} loadingMatchEvent={loadingMatchEvent} matchesByEvent={calendarMatches} matchErrors={calendarMatchErrors} rescheduleDrafts={rescheduleDrafts} onFindMatches={loadCalendarMatches} onLinkMatch={linkCalendarMatch} onReschedule={rescheduleCalendarWorkout} onRescheduleDraft={(eventId, value) => setRescheduleDrafts((current) => ({ ...current, [eventId]: value }))} onUpdate={updateCalendarWorkout} />
       })}
     </div>
   </div>
 }
 
-function CalendarDay({ day, events, load, maxLoad, busyEvent, onPlans, onUpdate }: { day: string; events: CalendarEvent[]; load: number; maxLoad: number; busyEvent: string; onPlans: () => void; onUpdate: (event: CalendarEvent, status: string) => Promise<void> }) {
+function CalendarDay({ day, events, load, maxLoad, ...cardProps }: CalendarDayProps) {
   const today = toISODate(new Date())
   const width = Math.max(6, Math.round(load / maxLoad * 100))
   return <div className={cn("min-h-48 rounded-lg border bg-zinc-950/60 p-3 text-xs", day === today ? "border-orange-400/40" : "border-zinc-800")}>
     <div className="flex items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day)}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{dateFromISO(day).toLocaleDateString("ru-RU", { weekday: "short" })}</p></div>{events.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{events.length}</Badge> : null}</div>
     <div className="mt-3 h-1.5 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${width}%` }} /></div>
-    <div className="mt-3 grid gap-2">{events.length ? events.map((event) => <CalendarEventCard key={event.id} event={event} busy={busyEvent === event.id} onPlans={onPlans} onUpdate={onUpdate} />) : <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-2 text-zinc-600">No plan or activity.</p>}</div>
+    <div className="mt-3 grid gap-2">{events.length ? events.map((event) => <CalendarEventCard key={event.id} event={event} {...cardProps} />) : <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-2 text-zinc-600">No plan or activity.</p>}</div>
   </div>
 }
 
-function CalendarEventCard({ event, busy, onPlans, onUpdate }: { event: CalendarEvent; busy: boolean; onPlans: () => void; onUpdate: (event: CalendarEvent, status: string) => Promise<void> }) {
+function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent, matchErrors, rescheduleDrafts, onFindMatches, onLinkMatch, onReschedule, onRescheduleDraft, onUpdate }: CalendarEventCardProps) {
   const isWorkout = event.kind === "planned_workout"
   const isLinked = Boolean(event.planned_workout_id && event.linked_activity_id)
   const score = event.execution_score?.score
+  const busy = busyEvent === event.id
+  const matchState = matchesByEvent[event.id]
+  const matchError = matchErrors[event.id]
+  const loadingMatches = loadingMatchEvent === event.id
+  const canFindWorkoutActivity = isWorkout && Boolean(event.planned_workout_id) && !event.linked_activity_id && ["planned", "rescheduled"].includes(event.status || "")
+  const canFindActivityWorkout = !isWorkout && Boolean(event.linked_activity_id) && !event.planned_workout_id
+  const canReschedule = isWorkout && Boolean(event.planned_workout_id) && !event.linked_activity_id && ["planned", "rescheduled"].includes(event.status || "")
+  const rescheduleDraft = rescheduleDrafts[event.id] ?? event.date
   return <div className={cn("rounded-md border p-2", isWorkout ? "border-zinc-800 bg-zinc-950" : isLinked ? "border-orange-400/20 bg-orange-400/10" : "border-zinc-800 bg-zinc-900/70")}>
     <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : "activity"} · {formatDistance(event.distance_km)} · {formatDuration(event.duration_seconds)}</p></div><Badge className={signalClass(event.status || undefined)}>{event.status || event.kind}</Badge></div>
     {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
     {event.linked_activity_id && isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Linked activity #{event.linked_activity_id}</p> : null}
     {event.planned_workout_id && !isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Matched to workout #{event.planned_workout_id}</p> : null}
-    {isWorkout ? <div className="mt-2 flex flex-wrap gap-1.5"><Button size="sm" variant="ghost" disabled={busy || event.status === "missed" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "missed")}>Missed</Button><Button size="sm" variant="ghost" disabled={busy || event.status === "skipped" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "skipped")}>Skipped</Button>{event.status !== "planned" && !event.linked_activity_id ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUpdate(event, "planned")}>Restore</Button> : null}<Button size="sm" variant="ghost" onClick={onPlans}>Attach</Button></div> : null}
+    {canReschedule ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Reschedule</p>
+      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(change) => onRescheduleDraft(event.id, change.target.value)} /><Button size="sm" variant="ghost" disabled={busy || !rescheduleDraft || rescheduleDraft === event.date} onClick={() => onReschedule(event, rescheduleDraft)}>Move</Button></div>
+    </div> : null}
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {isWorkout ? <>
+        <Button size="sm" variant="ghost" disabled={busy || event.status === "missed" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "missed")}>Missed</Button>
+        <Button size="sm" variant="ghost" disabled={busy || event.status === "skipped" || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "skipped")}>Skipped</Button>
+        {event.status !== "planned" && !event.linked_activity_id ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUpdate(event, "planned")}>Restore</Button> : null}
+      </> : null}
+      {canFindWorkoutActivity || canFindActivityWorkout ? <Button size="sm" variant="ghost" disabled={busy || loadingMatches} onClick={() => onFindMatches(event)}>{loadingMatches ? "Matching..." : canFindWorkoutActivity ? "Find activity" : "Find workout"}</Button> : null}
+    </div>
+    {matchError ? <p className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{matchError}</p> : null}
+    {matchState ? <CalendarMatchCandidates event={event} state={matchState} busy={busy} onLinkMatch={onLinkMatch} /> : null}
+  </div>
+}
+
+function CalendarMatchCandidates({ event, state, busy, onLinkMatch }: { event: CalendarEvent; state: CalendarMatchState; busy: boolean; onLinkMatch: (event: CalendarEvent, workoutId: number, activityId: number) => Promise<void> }) {
+  if (state.mode === "workout_to_activity") {
+    const workoutId = event.planned_workout_id
+    if (!workoutId) return null
+    if (!state.candidates.length) return <p className="mt-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-500">No activity candidates in the matching window.</p>
+    return <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Activity candidates</p>
+      {state.candidates.slice(0, 4).map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
+        <div><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? new Date(candidate.activity.started_at).toLocaleDateString("ru-RU") : "без даты"} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+        <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, workoutId, candidate.activity.id)}>Link</Button></div>
+      </div>)}
+    </div>
+  }
+
+  const activityId = event.linked_activity_id
+  if (!activityId) return null
+  if (!state.candidates.length) return <p className="mt-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-500">No active-plan workout candidates found.</p>
+  return <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Workout candidates</p>
+    {state.candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
+      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">{formatDate(candidate.workout.scheduled_date)} · {formatDistance(candidate.workout.distance_km)} · {candidate.workout.intensity || "--"}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, candidate.workout.id, activityId)}>Link</Button></div>
+    </div>)}
   </div>
 }
 
