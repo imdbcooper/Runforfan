@@ -419,6 +419,22 @@ class PlanWorkoutOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlanWeekSummaryOut(BaseModel):
+    week_index: int
+    planned_distance_km: float
+    planned_duration_seconds: int | None = None
+    completed_distance_km: float
+    completed_duration_seconds: int
+    completion_rate: float
+    distance_completion_rate: float
+    planned_time_label: str
+    hard_sessions: int
+    long_run_km: float | None = None
+    deload: bool = False
+    workouts: list[PlanWorkoutOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PlanActivityMatchCandidateOut(BaseModel):
     activity: ActivityOut
     score: float
@@ -511,12 +527,15 @@ class PlanOut(BaseModel):
     goal_type: str
     race_distance_km: float | None = None
     target_date: date | None = None
+    target_time_seconds: int | None = None
     available_days_per_week: int
     status: str
     explanation: str | None = None
     workouts: list[PlanWorkoutOut]
     adherence: PlanAdherenceOut | None = None
     weekly_adherence: list[PlanWeeklyAdherenceOut] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

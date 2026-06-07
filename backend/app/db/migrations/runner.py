@@ -139,6 +139,12 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_training_plan_workout_feedback_workout_id ON training_plan_workout_feedback (workout_id)",
         ),
     ),
+    (
+        "20260607_0006_plan_target_time",
+        (
+            "ALTER TABLE training_plans ADD COLUMN IF NOT EXISTS target_time_seconds INTEGER",
+        ),
+    ),
 )
 
 

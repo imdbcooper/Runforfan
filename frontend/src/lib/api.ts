@@ -279,12 +279,31 @@ export type Plan = {
   goal_type: string
   race_distance_km: number | null
   target_date: string | null
+  target_time_seconds: number | null
   available_days_per_week: number
   status: string
   explanation: string | null
   workouts: PlanWorkout[]
   adherence: PlanAdherence | null
   weekly_adherence: PlanWeeklyAdherence[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+export type PlanWeekSummary = {
+  week_index: number
+  planned_distance_km: number
+  planned_duration_seconds: number | null
+  completed_distance_km: number
+  completed_duration_seconds: number
+  completion_rate: number
+  distance_completion_rate: number
+  planned_time_label: string
+  hard_sessions: number
+  long_run_km: number | null
+  deload: boolean
+  workouts: PlanWorkout[]
+  warnings: string[]
 }
 
 export type PlanBuilderBaseline = {
@@ -510,6 +529,7 @@ export const api = {
   plans: () => request<Plan[]>("/planning/plans"),
   currentWeek: () => request<CurrentWeek>("/planning/current-week"),
   plan: (id: number) => request<Plan>(`/planning/plans/${id}`),
+  planWeeks: (id: number) => request<PlanWeekSummary[]>(`/planning/plans/${id}/weeks`),
   planAdherence: (id: number) => request<{ adherence: PlanAdherence; weekly_adherence: PlanWeeklyAdherence[] }>(`/planning/plans/${id}/adherence`),
   planRecommendations: (id: number) => request<PlanRecommendations>(`/planning/plans/${id}/recommendations`),
   previewPlanRecommendations: (id: number) => request<PlanRecommendationPreview>(`/planning/plans/${id}/recommendations/preview`, { method: "POST", body: "{}" }),

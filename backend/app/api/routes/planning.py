@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWeekSummaryOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -91,6 +91,23 @@ def get_training_plan(plan_id: int, user: User = Depends(get_current_user), db: 
 def get_training_plan_adherence(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = plan_to_dict(get_user_plan(db, user, plan_id))
     return {"adherence": plan["adherence"], "weekly_adherence": plan["weekly_adherence"]}
+
+
+@router.get("/plans/{plan_id}/weeks", response_model=list[PlanWeekSummaryOut])
+def get_training_plan_weeks(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return plan_week_summaries(get_user_plan(db, user, plan_id))
+
+
+@router.post("/plans/{plan_id}/adapt", response_model=PlanRecommendationApplyOut)
+def adapt_training_plan(plan_id: int, payload: PlanRecommendationApplyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not payload.changes:
+        raise HTTPException(status_code=409, detail="Recommendation preview is required before adapting")
+    try:
+        result = apply_plan_recommendations(db, user, get_user_plan(db, user, plan_id), payload.changes)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    result["plan"] = plan_to_dict(get_user_plan(db, user, plan_id))
+    return result
 
 
 @router.get("/plans/{plan_id}/recommendations", response_model=PlanRecommendationsOut)

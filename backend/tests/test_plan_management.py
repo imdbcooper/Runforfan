@@ -3,8 +3,8 @@ from datetime import date
 
 try:
     from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
-    from app.schemas.common import PlanUpdate
-    from app.services.planning import delete_plan, duplicate_plan, update_plan
+    from app.schemas.common import PlanUpdate, PlanWorkoutUpdate
+    from app.services.planning import delete_plan, duplicate_plan, update_plan, update_workout
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         raise unittest.SkipTest("Backend dependencies are required for plan management tests") from exc
@@ -43,6 +43,7 @@ def make_plan(*workouts: TrainingPlanWorkout, status: str = "draft") -> Training
         goal_type="race",
         race_distance_km=10.0,
         target_date=date(2026, 8, 1),
+        target_time_seconds=2700,
         available_days_per_week=3,
         status=status,
         explanation="Safety gates: no active safety gates",
@@ -97,6 +98,7 @@ class PlanManagementTests(unittest.TestCase):
         self.assertEqual(duplicate.status, "draft")
         self.assertEqual(duplicate.title, "Base plan copy")
         self.assertEqual(duplicate.user_id, 1)
+        self.assertEqual(duplicate.target_time_seconds, 2700)
         self.assertEqual(len(duplicate.workouts), 1)
         self.assertEqual(duplicate.workouts[0].status, "planned")
         self.assertIsNone(duplicate.workouts[0].completed_activity_id)
@@ -118,6 +120,31 @@ class PlanManagementTests(unittest.TestCase):
         self.assertEqual(deleted_id, 10)
         self.assertEqual(db.deleted, [plan])
         self.assertTrue(db.committed)
+
+    def test_rescheduling_missed_workout_marks_rescheduled(self):
+        workout = make_workout(1, status="missed")
+        db = FakeDb()
+
+        update_workout(db, make_user(), workout, PlanWorkoutUpdate(scheduled_date=date(2026, 6, 20)))
+
+        self.assertEqual(workout.scheduled_date, date(2026, 6, 20))
+        self.assertEqual(workout.status, "rescheduled")
+        self.assertTrue(db.committed)
+
+    def test_rescheduling_linked_done_workout_is_rejected(self):
+        workout = make_workout(1, status="done", linked=True)
+
+        with self.assertRaises(ValueError):
+            update_workout(FakeDb(), make_user(), workout, PlanWorkoutUpdate(scheduled_date=date(2026, 6, 20)))
+
+    def test_unlink_clears_loaded_activity_relationship(self):
+        workout = make_workout(1, status="done", linked=True)
+
+        update_workout(FakeDb(), make_user(), workout, PlanWorkoutUpdate(completed_activity_id=None))
+
+        self.assertIsNone(workout.completed_activity_id)
+        self.assertIsNone(workout.completed_activity)
+        self.assertEqual(workout.status, "planned")
 
 
 if __name__ == "__main__":

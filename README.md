@@ -149,6 +149,7 @@ API настроек AI:
 - Plan Builder preview перед созданием черновика показывает baseline за 6 недель, median текущего объема, recent long run, training age level, недельную volume curve, intensity split и safety/risk flags.
 - Wizard inputs учитывают target time/priority, preferred weekdays, time budget, HR/pace/RPE/mixed intensity mode, injury/no-hard constraints, max long run distance/duration, terrain и recent race context.
 - Confirm flow поддерживает создание draft-плана или создание сразу active-плана с архивированием предыдущего active.
+- Plan Detail показывает header с goal/status/current week/target time, недельные summary, planned vs actual volume chart, intensity split, structured workout blocks, purpose/safety notes, matching/reschedule/link controls и adaptation history.
 - API поддерживает активацию, переименование, архивирование, завершение, дублирование и удаление неактивных планов, обновление статусов planned workouts, ручную привязку фактических тренировок и динамический поиск match candidates.
 - Matching учитывает близость даты, сходство дистанции и тип тренировки: interval-структуру, long/easy/tempo/steady эвристики.
 - После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
@@ -208,7 +209,7 @@ npm run build
 - Calendar: week/month range view до 42 дней для плана и факта по дням.
 - Аналитика.
 - Profile & zones.
-- Планы: Plan Builder wizard preview/generate, create draft/create active, список программ, actions и workout execution/matching.
+- Планы: Plan Builder wizard preview/generate, create draft/create active, Plan Detail, список программ, actions и workout execution/matching.
 - AI настройки.
 
 Страница `AI настройки` позволяет пользователю добавить OpenAI-compatible или Anthropic provider, выбрать модель, указать base URL и сохранить API key.

@@ -312,6 +312,7 @@ class TrainingPlan(Base, TimestampMixin):
     goal_type: Mapped[str] = mapped_column(String(64))
     race_distance_km: Mapped[float | None] = mapped_column(Float)
     target_date: Mapped[date | None] = mapped_column(Date)
+    target_time_seconds: Mapped[int | None] = mapped_column(Integer)
     available_days_per_week: Mapped[int] = mapped_column(Integer, default=4)
     status: Mapped[str] = mapped_column(String(64), default="draft")
     explanation: Mapped[str | None] = mapped_column(Text)

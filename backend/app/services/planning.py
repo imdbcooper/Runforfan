@@ -507,6 +507,64 @@ def weekly_adherence_summary(workouts: list[TrainingPlanWorkout]) -> list[dict[s
     return summaries
 
 
+def plan_detail_pace_seconds_per_km(plan: TrainingPlan) -> float:
+    if plan.target_time_seconds and plan.race_distance_km and plan.race_distance_km > 0:
+        return max(300.0, plan.target_time_seconds / plan.race_distance_km * 1.25)
+    return 420.0
+
+
+def format_duration_label(seconds: int | None) -> str:
+    if not seconds:
+        return "--"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+
+
+def workout_is_hard(workout: TrainingPlanWorkout) -> bool:
+    return (workout.workout_type or "") in HARD_PLAN_WORKOUT_TYPES or (workout.intensity or "") in HARD_PLAN_INTENSITIES
+
+
+def plan_week_summaries(plan: TrainingPlan) -> list[dict[str, object]]:
+    pace_seconds_per_km = plan_detail_pace_seconds_per_km(plan)
+    summaries: list[dict[str, object]] = []
+    previous_planned_distance: float | None = None
+    workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
+    for week_index in sorted({workout.week_index for workout in workouts}):
+        week_workouts = [workout for workout in workouts if workout.week_index == week_index]
+        planned_distance = sum(workout.distance_km or 0 for workout in week_workouts)
+        completed = [workout for workout in week_workouts if workout.status == "done"]
+        linked = [workout for workout in completed if workout.completed_activity]
+        completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in linked)
+        completed_duration = sum(workout.completed_activity.duration_seconds or 0 for workout in linked)
+        planned_duration = sum(
+            workout.duration_seconds if workout.duration_seconds else int((workout.distance_km or 0) * pace_seconds_per_km)
+            for workout in week_workouts
+            if workout.duration_seconds or workout.distance_km
+        ) or None
+        long_candidates = [workout.distance_km or 0 for workout in week_workouts if workout.workout_type == "long"]
+        long_run = max(long_candidates or [workout.distance_km or 0 for workout in week_workouts] or [0])
+        adherence = adherence_summary(week_workouts)
+        summary = {
+            "week_index": week_index,
+            "planned_distance_km": round(planned_distance, 1),
+            "planned_duration_seconds": planned_duration,
+            "completed_distance_km": round(completed_distance, 1),
+            "completed_duration_seconds": completed_duration,
+            "completion_rate": round(len(completed) / len(week_workouts), 2) if week_workouts else 0,
+            "distance_completion_rate": round(completed_distance / planned_distance, 2) if planned_distance else 0,
+            "planned_time_label": format_duration_label(planned_duration),
+            "hard_sessions": sum(1 for workout in week_workouts if workout_is_hard(workout)),
+            "long_run_km": round(long_run, 1) if long_run else None,
+            "deload": previous_planned_distance is not None and planned_distance < previous_planned_distance * 0.9,
+            "workouts": [workout_to_dict(workout) for workout in week_workouts],
+            "warnings": adherence["warnings"],
+        }
+        summaries.append(summary)
+        previous_planned_distance = planned_distance
+    return summaries
+
+
 def recommendation_item(
     item_type: str,
     severity: str,
@@ -1187,12 +1245,15 @@ def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
         "goal_type": plan.goal_type,
         "race_distance_km": plan.race_distance_km,
         "target_date": plan.target_date,
+        "target_time_seconds": plan.target_time_seconds,
         "available_days_per_week": plan.available_days_per_week,
         "status": plan.status,
         "explanation": plan.explanation,
         "workouts": [workout_to_dict(workout) for workout in workouts],
         "adherence": adherence_summary(workouts),
         "weekly_adherence": weekly_adherence_summary(workouts),
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
     }
 
 
@@ -1516,6 +1577,7 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
         goal_type=str(preview["goal_type"]),
         race_distance_km=float(preview["race_distance_km"] or 0),
         target_date=preview["target_date"],
+        target_time_seconds=request.target_time_seconds,
         available_days_per_week=int(preview["available_days_per_week"]),
         status="draft",
         explanation=str(preview["explanation"]).replace("Plan Builder Preview", "Profile-aware MVP"),
@@ -1574,6 +1636,7 @@ def duplicate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
         goal_type=plan.goal_type,
         race_distance_km=plan.race_distance_km,
         target_date=plan.target_date,
+        target_time_seconds=plan.target_time_seconds,
         available_days_per_week=plan.available_days_per_week,
         status="draft",
         explanation=plan.explanation,
@@ -1617,6 +1680,7 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         activity_id = updates["completed_activity_id"]
         if activity_id is None:
             workout.completed_activity_id = None
+            workout.completed_activity = None
             next_completed_activity_id = None
             if "status" not in updates and workout.status == "done":
                 workout.status = "planned"
@@ -1637,8 +1701,10 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
             elif updates["status"] != "done":
                 raise ValueError("Linked workout status must be done")
     if "scheduled_date" in updates:
+        if next_completed_activity_id is not None or workout.status == "done":
+            raise ValueError("Linked or completed workout must be unlinked before rescheduling")
         workout.scheduled_date = updates["scheduled_date"]
-        if workout.status == "planned":
+        if workout.status in {"planned", "missed", "skipped"}:
             workout.status = "rescheduled"
     if "status" in updates and updates["status"] is not None:
         if updates["status"] == "done" and next_completed_activity_id is None:
