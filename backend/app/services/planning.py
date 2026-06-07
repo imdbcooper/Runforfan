@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, TrainingZone, User
-from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutFeedbackIn, PlanWorkoutUpdate
+from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import calculated_zones, zone_type_for_unit
 
@@ -374,6 +374,7 @@ def feedback_to_dict(feedback: TrainingPlanWorkoutFeedback | None) -> dict[str, 
         "pain": feedback.pain,
         "pain_level": feedback.pain_level,
         "sleep_quality": feedback.sleep_quality,
+        "weather_notes": feedback.weather_notes,
         "notes": feedback.notes,
         "created_at": feedback.created_at,
         "updated_at": feedback.updated_at,
@@ -385,7 +386,9 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
     feedback = workout.feedback
     flags: list[str] = []
     volume_score: float | None = None
+    intensity_score: float | None = None
     subjective_risk = "unknown"
+    adherence_status = "unknown"
     if feedback:
         subjective_risk = "low"
         if feedback.pain or (feedback.pain_level is not None and feedback.pain_level >= 4):
@@ -401,16 +404,40 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
             flags.append("poor sleep")
             if subjective_risk == "low":
                 subjective_risk = "moderate"
+        if feedback.rpe is not None:
+            if workout_is_hard(workout):
+                target_low, target_high = 6, 8
+            elif workout.workout_type in {"steady", "tempo"} or (workout.intensity or "") == "steady":
+                target_low, target_high = 3, 6
+            else:
+                target_low, target_high = 2, 4
+            if target_low <= feedback.rpe <= target_high:
+                intensity_score = 1.0
+            else:
+                miss = min(abs(feedback.rpe - target_low), abs(feedback.rpe - target_high))
+                intensity_score = 0.7 if miss == 1 else 0.4
+                flags.append("RPE outside target range")
     if workout.status in {"missed", "skipped"}:
         flags.append(f"workout {workout.status}")
-        return {"score": 0.0, "status": workout.status, "volume_score": 0.0, "subjective_risk": subjective_risk, "flags": flags}
+        return {"score": 0.0, "status": workout.status, "volume_score": 0.0, "intensity_score": intensity_score, "adherence_status": workout.status, "subjective_risk": subjective_risk, "flags": flags}
     if activity and workout.distance_km and activity.distance_km is not None:
         relative_delta = abs(activity.distance_km - workout.distance_km) / max(workout.distance_km, 1)
         volume_score = max(0.0, min(1.0, 1 - relative_delta / 0.5))
         if activity.distance_km >= workout.distance_km * 1.2:
             flags.append("actual volume above plan")
+            adherence_status = "overdone"
         elif activity.distance_km <= workout.distance_km * 0.75:
             flags.append("actual volume below plan")
+            adherence_status = "partial"
+    elif activity and workout.duration_seconds and activity.duration_seconds:
+        relative_delta = abs(activity.duration_seconds - workout.duration_seconds) / max(workout.duration_seconds, 1)
+        volume_score = max(0.0, min(1.0, 1 - relative_delta / 0.5))
+        if activity.duration_seconds >= workout.duration_seconds * 1.2:
+            flags.append("actual duration above plan")
+            adherence_status = "overdone"
+        elif activity.duration_seconds <= workout.duration_seconds * 0.75:
+            flags.append("actual duration below plan")
+            adherence_status = "partial"
     subjective_score: float | None = None
     if feedback:
         subjective_score = 1.0
@@ -427,15 +454,23 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
             if subjective_risk == "low":
                 subjective_risk = "moderate"
             subjective_score = min(subjective_score, 0.75)
-    components = [score for score in (volume_score, subjective_score) if score is not None]
+    components = [score for score in (volume_score, intensity_score, subjective_score) if score is not None]
     score = round(sum(components) / len(components), 2) if components else None
     status = "unknown"
+    if workout.status == "rescheduled":
+        adherence_status = "moved"
     if score is not None:
         status = "completed" if score >= 0.8 else "partial" if score >= 0.45 else "at_risk"
+        if adherence_status == "unknown":
+            adherence_status = status if status in {"completed", "partial"} else "partial"
+    if adherence_status == "overdone":
+        status = "overdone"
     return {
         "score": score,
         "status": status,
         "volume_score": round(volume_score, 2) if volume_score is not None else None,
+        "intensity_score": round(intensity_score, 2) if intensity_score is not None else None,
+        "adherence_status": adherence_status,
         "subjective_risk": subjective_risk,
         "flags": flags,
     }
@@ -1202,6 +1237,7 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
     if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
         raise ValueError("Activity already linked to another workout")
     workout.completed_activity_id = activity.id
+    workout.completed_activity = activity
     workout.status = "done"
     try:
         db.commit()
@@ -1695,6 +1731,7 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
             if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
                 raise ValueError("Activity already linked to another workout")
             workout.completed_activity_id = activity.id
+            workout.completed_activity = activity
             next_completed_activity_id = activity.id
             if "status" not in updates:
                 workout.status = "done"
@@ -1721,7 +1758,14 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
     return workout
 
 
-def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
+def normalize_feedback(feedback: TrainingPlanWorkoutFeedback) -> None:
+    if feedback.pain_level is not None and feedback.pain_level > 0:
+        feedback.pain = True
+    elif not feedback.pain:
+        feedback.pain_level = None
+
+
+def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, updates: dict[str, object]) -> TrainingPlanWorkoutFeedback:
     if workout.status not in {"done", "missed", "skipped"}:
         raise ValueError("Workout feedback requires completed, missed or skipped workout")
     if workout.plan.user_id != user.id:
@@ -1731,13 +1775,72 @@ def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout,
         feedback = TrainingPlanWorkoutFeedback(user_id=user.id, workout_id=workout.id)
         db.add(feedback)
         workout.feedback = feedback
-    updates = payload.model_dump()
     for field, value in updates.items():
         setattr(feedback, field, value)
-    if feedback.pain_level is not None and feedback.pain_level > 0:
-        feedback.pain = True
-    elif not feedback.pain:
-        feedback.pain_level = None
+    normalize_feedback(feedback)
+    return feedback
+
+
+def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
+    feedback = upsert_workout_feedback(db, user, workout, payload.model_dump())
     db.commit()
     db.refresh(feedback)
     return feedback
+
+
+def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackPatchIn) -> TrainingPlanWorkoutFeedback:
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise ValueError("Feedback patch is empty")
+    feedback = upsert_workout_feedback(db, user, workout, updates)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
+def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutCompleteIn) -> TrainingPlanWorkout:
+    if workout.plan.user_id != user.id:
+        raise ValueError("Workout not found")
+    if workout.completed_activity_id is not None:
+        raise ValueError("Workout already has a linked activity; unlink it before manual completion")
+    if workout.status == "done":
+        raise ValueError("Workout is already completed")
+    if workout.status not in {"planned", "rescheduled", "missed", "skipped"}:
+        raise ValueError("Workout status cannot be completed")
+    completed_at = payload.completed_at or datetime.now(UTC)
+    average_pace = None
+    if payload.actual_distance_km and payload.actual_distance_km > 0:
+        average_pace = round(payload.actual_duration_seconds / payload.actual_distance_km)
+    activity = Activity(
+        user_id=user.id,
+        activity_type="manual_workout",
+        title=f"Manual completion: {workout.title}",
+        started_at=completed_at,
+        distance_km=payload.actual_distance_km,
+        duration_seconds=payload.actual_duration_seconds,
+        average_pace_seconds_per_km=average_pace,
+        average_heart_rate_bpm=payload.average_heart_rate_bpm,
+        source_note="manual workout completion",
+    )
+    db.add(activity)
+    db.flush()
+    workout.completed_activity_id = activity.id
+    workout.completed_activity = activity
+    workout.status = "done"
+    feedback_updates = payload.model_dump(
+        include={"rpe", "fatigue", "pain", "pain_level", "sleep_quality", "weather_notes", "notes"},
+        exclude_none=True,
+    )
+    feedback_updates["pain"] = payload.pain
+    if not payload.pain and payload.pain_level is None:
+        feedback_updates["pain_level"] = None
+    if feedback_updates:
+        upsert_workout_feedback(db, user, workout, feedback_updates)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise ValueError("Manual completion could not be saved") from error
+    db.refresh(workout)
+    workout.completed_activity = activity
+    return workout

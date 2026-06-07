@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWeekSummaryOut, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, complete_workout, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, patch_workout_feedback, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -182,6 +182,21 @@ def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, us
     return workout_to_dict(updated)
 
 
+@router.get("/workouts/{workout_id}", response_model=PlanWorkoutOut)
+def get_training_plan_workout(workout_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return workout_to_dict(get_user_workout(db, user, workout_id))
+
+
+@router.post("/workouts/{workout_id}/complete", response_model=PlanWorkoutOut)
+def complete_training_plan_workout(workout_id: int, payload: PlanWorkoutCompleteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        completed = complete_workout(db, user, get_user_workout(db, user, workout_id), payload)
+    except ValueError as error:
+        status_code = 404 if "not found" in str(error).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+    return workout_to_dict(completed)
+
+
 @router.get("/workouts/{workout_id}/feedback", response_model=PlanWorkoutFeedbackOut | None)
 def get_training_plan_workout_feedback(workout_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return get_user_workout(db, user, workout_id).feedback
@@ -191,6 +206,15 @@ def get_training_plan_workout_feedback(workout_id: int, user: User = Depends(get
 def save_training_plan_workout_feedback(workout_id: int, payload: PlanWorkoutFeedbackIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         return save_workout_feedback(db, user, get_user_workout(db, user, workout_id), payload)
+    except ValueError as error:
+        status_code = 404 if "not found" in str(error).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+
+
+@router.patch("/workouts/{workout_id}/feedback", response_model=PlanWorkoutFeedbackOut)
+def patch_training_plan_workout_feedback(workout_id: int, payload: PlanWorkoutFeedbackPatchIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return patch_workout_feedback(db, user, get_user_workout(db, user, workout_id), payload)
     except ValueError as error:
         status_code = 404 if "not found" in str(error).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(error)) from error
@@ -211,6 +235,11 @@ def link_training_plan_workout_activity(workout_id: int, payload: PlanWorkoutLin
         status_code = 404 if "not found" in str(error).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(error)) from error
     return workout_to_dict(linked)
+
+
+@router.post("/workouts/{workout_id}/attach-activity", response_model=PlanWorkoutOut)
+def attach_training_plan_workout_activity(workout_id: int, payload: PlanWorkoutLinkActivityRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return link_training_plan_workout_activity(workout_id, payload, user, db)
 
 
 @router.get("/activities/{activity_id}/match-candidates", response_model=list[PlanWorkoutMatchCandidateOut])

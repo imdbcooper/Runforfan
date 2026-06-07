@@ -354,6 +354,7 @@ class TrainingPlanWorkoutFeedback(Base, TimestampMixin):
     pain: Mapped[bool] = mapped_column(Boolean, default=False)
     pain_level: Mapped[int | None] = mapped_column(Integer)
     sleep_quality: Mapped[int | None] = mapped_column(Integer)
+    weather_notes: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
     workout: Mapped[TrainingPlanWorkout] = relationship(back_populates="feedback")

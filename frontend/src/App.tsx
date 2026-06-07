@@ -10,7 +10,8 @@ import { api, type Activity as ActivityType, type AthleteMeasurement, type Athle
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
-type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; notes: string }
+type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
+type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
   | { mode: "workout_to_activity"; candidates: PlanActivityMatchCandidate[] }
   | { mode: "activity_to_workout"; candidates: PlanWorkoutMatchCandidate[] }
@@ -120,7 +121,18 @@ function feedbackDraftFromWorkout(workout: PlanWorkout): FeedbackDraft {
     pain: workout.feedback?.pain || false,
     pain_level: workout.feedback?.pain_level?.toString() || "",
     sleep_quality: workout.feedback?.sleep_quality?.toString() || "",
+    weather_notes: workout.feedback?.weather_notes || "",
     notes: workout.feedback?.notes || "",
+  }
+}
+
+function completionDraftFromWorkout(workout: PlanWorkout): CompletionDraft {
+  return {
+    ...feedbackDraftFromWorkout(workout),
+    actual_distance_km: workout.actual_distance_km?.toString() || workout.distance_km?.toString() || "",
+    actual_duration_minutes: workout.actual_duration_seconds ? String(Math.round(workout.actual_duration_seconds / 60)) : workout.duration_seconds ? String(Math.round(workout.duration_seconds / 60)) : "",
+    average_heart_rate_bpm: "",
+    completed_at: "",
   }
 }
 
@@ -146,7 +158,30 @@ function feedbackPayload(draft: FeedbackDraft) {
     pain: draft.pain,
     pain_level: feedbackNumber(draft.pain_level),
     sleep_quality: feedbackNumber(draft.sleep_quality),
+    weather_notes: draft.weather_notes || null,
     notes: draft.notes || null,
+  }
+}
+
+function completionValidationError(draft: CompletionDraft) {
+  const distance = feedbackNumber(draft.actual_distance_km)
+  const duration = feedbackNumber(draft.actual_duration_minutes)
+  if (distance !== null && (!Number.isFinite(distance) || distance < 0 || distance > 250)) return "Фактическая дистанция должна быть 0-250 км"
+  if (duration === null || !Number.isFinite(duration) || duration <= 0 || duration > 2880) return "Фактическое время должно быть 1-2880 минут"
+  const hr = feedbackNumber(draft.average_heart_rate_bpm)
+  if (hr !== null && (!Number.isFinite(hr) || !Number.isInteger(hr) || hr < 30 || hr > 240)) return "Средний HR должен быть целым числом 30-240"
+  return feedbackValidationError(draft)
+}
+
+function completionPayload(draft: CompletionDraft) {
+  const distance = feedbackNumber(draft.actual_distance_km)
+  const duration = feedbackNumber(draft.actual_duration_minutes)
+  return {
+    actual_distance_km: distance,
+    actual_duration_seconds: duration === null ? null : Math.round(duration * 60),
+    completed_at: draft.completed_at ? new Date(draft.completed_at).toISOString() : null,
+    average_heart_rate_bpm: feedbackNumber(draft.average_heart_rate_bpm),
+    ...feedbackPayload(draft),
   }
 }
 
@@ -1168,6 +1203,7 @@ function Planning() {
   const [candidatesByWorkout, setCandidatesByWorkout] = useState<Record<number, PlanActivityMatchCandidate[]>>({})
   const [candidateErrors, setCandidateErrors] = useState<Record<number, string>>({})
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<number, FeedbackDraft>>({})
+  const [completionDrafts, setCompletionDrafts] = useState<Record<number, CompletionDraft>>({})
   const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<number, string>>({})
   const [recommendations, setRecommendations] = useState<PlanRecommendations | null>(null)
   const [recommendationPreview, setRecommendationPreview] = useState<PlanRecommendationPreview | null>(null)
@@ -1382,7 +1418,7 @@ function Planning() {
   async function linkCandidate(workout: PlanWorkout, activityId: number) {
     setCandidateErrors((current) => ({ ...current, [workout.id]: "" }))
     try {
-      await api.linkPlanWorkoutActivity(workout.id, activityId)
+      await api.attachWorkoutActivity(workout.id, activityId)
       setCandidatesByWorkout((current) => ({ ...current, [workout.id]: [] }))
       if (result) await refreshPlanDetail(result.id)
     } catch (error) {
@@ -1396,6 +1432,32 @@ function Planning() {
       ...current,
       [workout.id]: { ...feedbackDraftFromWorkout(workout), ...(current[workout.id] || {}), ...patch },
     }))
+  }
+
+  function updateCompletionDraft(workout: PlanWorkout, patch: Partial<CompletionDraft>) {
+    setCompletionDrafts((current) => ({
+      ...current,
+      [workout.id]: { ...completionDraftFromWorkout(workout), ...(current[workout.id] || {}), ...patch },
+    }))
+  }
+
+  async function completeWorkoutManually(workout: PlanWorkout) {
+    const draft = completionDrafts[workout.id] || completionDraftFromWorkout(workout)
+    const validationError = completionValidationError(draft)
+    setCandidateErrors((current) => ({ ...current, [workout.id]: validationError }))
+    if (validationError) return
+    try {
+      await api.completeWorkout(workout.id, completionPayload(draft))
+      setCompletionDrafts((current) => {
+        const next = { ...current }
+        delete next[workout.id]
+        return next
+      })
+      if (result) await refreshPlanDetail(result.id)
+    } catch (error) {
+      console.error(error)
+      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось завершить тренировку вручную" }))
+    }
   }
 
   async function saveFeedback(workout: PlanWorkout) {
@@ -1560,7 +1622,7 @@ function Planning() {
           <PlanVolumeChart weeks={detailWeeks} />
           <PlanIntensitySplit split={intensitySplit} />
           {planWeeksError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planWeeksError}</p> : null}
-          <div className="grid gap-3">{detailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onSaveFeedback={saveFeedback} />)}</div>
+          <div className="grid gap-3">{detailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
       </div>
     </Card>
@@ -1688,7 +1750,7 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
   </div>
 }
 
-function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onSaveFeedback }: { summary: PlanWeekSummary; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
+function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDrafts, completionDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onCompletionDraft, onCompleteWorkout, onSaveFeedback }: { summary: PlanWeekSummary; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; completionDrafts: Record<number, CompletionDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onCompletionDraft: (workout: PlanWorkout, patch: Partial<CompletionDraft>) => void; onCompleteWorkout: (workout: PlanWorkout) => Promise<void>; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
     <div className="border-b border-zinc-800 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} км</Badge>{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
@@ -1704,8 +1766,10 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
     <div className="grid gap-2 p-3">{summary.workouts.map((workout) => {
       const candidates = candidatesByWorkout[workout.id] || []
       const draft = feedbackDrafts[workout.id] || feedbackDraftFromWorkout(workout)
+      const completionDraft = completionDrafts[workout.id] || completionDraftFromWorkout(workout)
       const rescheduleDraft = rescheduleDrafts[workout.id] || workout.scheduled_date || ""
       const canGiveFeedback = ["done", "missed", "skipped"].includes(workout.status)
+      const canCompleteManually = !workout.completed_activity_id && ["planned", "rescheduled", "missed", "skipped"].includes(workout.status)
       const canReschedule = !workout.completed_activity_id && ["planned", "rescheduled", "missed", "skipped"].includes(workout.status)
       return <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
         <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {workout.distance_km?.toFixed(1) || "--"} км · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div></div>
@@ -1717,7 +1781,23 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
         <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
         <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatDistance(workout.actual_distance_km)} · {formatDuration(workout.actual_duration_seconds)}</div> : null}
-        {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
+        {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div><div className="mt-1 flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
+        {canCompleteManually ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Manual completion</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Workout Detail</Badge></div>
+          <div className="grid gap-2 md:grid-cols-4">
+            <Input type="number" min="0" max="250" step="0.1" placeholder="actual km" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />
+            <Input type="number" min="1" max="2880" step="1" placeholder="minutes" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} />
+            <Input type="number" min="0" max="10" step="1" placeholder="RPE" value={completionDraft.rpe} onChange={(event) => onCompletionDraft(workout, { rpe: event.target.value })} />
+            <Input type="number" min="30" max="240" step="1" placeholder="avg HR" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} />
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-4">
+            <Input type="number" min="0" max="10" placeholder="fatigue" value={completionDraft.fatigue} onChange={(event) => onCompletionDraft(workout, { fatigue: event.target.value })} />
+            <Input type="number" min="0" max="10" placeholder="pain" value={completionDraft.pain_level} onChange={(event) => onCompletionDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} />
+            <Input type="number" min="0" max="10" placeholder="sleep" value={completionDraft.sleep_quality} onChange={(event) => onCompletionDraft(workout, { sleep_quality: event.target.value })} />
+            <Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} />
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]"><Input placeholder="weather" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="completion notes" value={completionDraft.notes} onChange={(event) => onCompletionDraft(workout, { notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Complete</Button></div>
+        </div> : null}
         {canGiveFeedback ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Workout feedback</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}</div>
           <div className="grid gap-2 md:grid-cols-5">
@@ -1727,7 +1807,7 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
             <Input type="number" min="0" max="10" placeholder="sleep" value={draft.sleep_quality} onChange={(event) => onFeedbackDraft(workout, { sleep_quality: event.target.value })} />
             <label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> pain</label>
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input placeholder="notes" value={draft.notes} onChange={(event) => onFeedbackDraft(workout, { notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]"><Input placeholder="weather" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="notes" value={draft.notes} onChange={(event) => onFeedbackDraft(workout, { notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
         </div> : null}
         {canReschedule ? <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
         <div className="mt-2 flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>

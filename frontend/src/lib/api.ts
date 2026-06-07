@@ -164,6 +164,7 @@ export type PlanWorkoutFeedback = {
   pain: boolean
   pain_level: number | null
   sleep_quality: number | null
+  weather_notes: string | null
   notes: string | null
   created_at: string
   updated_at: string
@@ -173,6 +174,8 @@ export type PlanWorkoutExecutionScore = {
   score: number | null
   status: string
   volume_score: number | null
+  intensity_score: number | null
+  adherence_status: string
   subjective_risk: string
   flags: string[]
 }
@@ -539,12 +542,16 @@ export const api = {
   updatePlan: (id: number, payload: Record<string, unknown>) => request<Plan>(`/planning/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   duplicatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/duplicate`, { method: "POST", body: "{}" }),
   deletePlan: (id: number) => request<{ deleted: boolean; id: number }>(`/planning/plans/${id}`, { method: "DELETE" }),
+  workout: (id: number) => request<PlanWorkout>(`/planning/workouts/${id}`),
+  completeWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutFeedback: (id: number) => request<PlanWorkoutFeedback | null>(`/planning/workouts/${id}/feedback`),
+  patchWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PATCH", body: JSON.stringify(payload) }),
   saveWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PUT", body: JSON.stringify(payload) }),
   workoutMatchCandidates: (id: number) => request<PlanActivityMatchCandidate[]>(`/planning/workouts/${id}/match-candidates`),
   activityMatchCandidates: (id: number, activeOnly = false) => request<PlanWorkoutMatchCandidate[]>(`/planning/activities/${id}/match-candidates?active_only=${activeOnly}`),
   linkPlanWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/link-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
+  attachWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/attach-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),

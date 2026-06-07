@@ -145,6 +145,12 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ALTER TABLE training_plans ADD COLUMN IF NOT EXISTS target_time_seconds INTEGER",
         ),
     ),
+    (
+        "20260607_0007_workout_feedback_weather",
+        (
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS weather_notes TEXT",
+        ),
+    ),
 )
 
 

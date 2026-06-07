@@ -357,6 +357,31 @@ class PlanWorkoutFeedbackIn(BaseModel):
     pain: bool = False
     pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
     sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    weather_notes: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PlanWorkoutFeedbackPatchIn(BaseModel):
+    rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain: bool | None = None
+    pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    weather_notes: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PlanWorkoutCompleteIn(BaseModel):
+    actual_distance_km: float | None = Field(default=None, ge=0, le=250)
+    actual_duration_seconds: StrictInt = Field(ge=1, le=172800)
+    completed_at: datetime | None = None
+    average_heart_rate_bpm: StrictInt | None = Field(default=None, ge=30, le=240)
+    rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain: bool = False
+    pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    weather_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=1000)
 
 
@@ -373,6 +398,8 @@ class PlanWorkoutExecutionScoreOut(BaseModel):
     score: float | None = None
     status: str
     volume_score: float | None = None
+    intensity_score: float | None = None
+    adherence_status: str = "unknown"
     subjective_risk: str = "unknown"
     flags: list[str] = Field(default_factory=list)
 

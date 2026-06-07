@@ -84,11 +84,15 @@ GET /health
 - `POST /api/planning/plans/{id}/recommendations/apply` — применить preview/apply корректировки к будущим незавершенным workouts и записать audit.
 - `GET /api/planning/plans/{id}/recommendations/audit` — история примененных coach adjustments для плана.
 - `POST /api/planning/plans/{id}/activate` — сделать программу активной.
+- `GET /api/planning/workouts/{id}` — детальная planned workout card со структурой, feedback и execution score.
 - `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку.
+- `POST /api/planning/workouts/{id}/complete` — вручную завершить workout, создать manual activity, сохранить фактические метрики и feedback.
 - `GET /api/planning/workouts/{id}/feedback` — получить субъективный feedback по planned workout.
-- `PUT /api/planning/workouts/{id}/feedback` — сохранить RPE/fatigue/pain/sleep/notes и обновить execution score в выдаче плана.
+- `PUT /api/planning/workouts/{id}/feedback` — заменить RPE/fatigue/pain/sleep/weather/notes и обновить execution score в выдаче плана.
+- `PATCH /api/planning/workouts/{id}/feedback` — частично обновить workout feedback без сброса незаданных полей.
 - `GET /api/planning/workouts/{id}/match-candidates` — кандидаты фактических тренировок для planned workout.
 - `POST /api/planning/workouts/{id}/link-activity` — привязать фактическую тренировку к planned workout и отметить `done`.
+- `POST /api/planning/workouts/{id}/attach-activity` — алиас привязки фактической тренировки для Workout Detail completion flow.
 - `GET /api/planning/activities/{id}/match-candidates` — planned workout candidates для активности.
 
 Авторизация:
@@ -149,13 +153,13 @@ API настроек AI:
 - Plan Builder preview перед созданием черновика показывает baseline за 6 недель, median текущего объема, recent long run, training age level, недельную volume curve, intensity split и safety/risk flags.
 - Wizard inputs учитывают target time/priority, preferred weekdays, time budget, HR/pace/RPE/mixed intensity mode, injury/no-hard constraints, max long run distance/duration, terrain и recent race context.
 - Confirm flow поддерживает создание draft-плана или создание сразу active-плана с архивированием предыдущего active.
-- Plan Detail показывает header с goal/status/current week/target time, недельные summary, planned vs actual volume chart, intensity split, structured workout blocks, purpose/safety notes, matching/reschedule/link controls и adaptation history.
+- Plan Detail показывает header с goal/status/current week/target time, недельные summary, planned vs actual volume chart, intensity split, structured workout blocks, purpose/safety notes, matching/reschedule/link controls, manual completion form и adaptation history.
 - API поддерживает активацию, переименование, архивирование, завершение, дублирование и удаление неактивных планов, обновление статусов planned workouts, ручную привязку фактических тренировок и динамический поиск match candidates.
 - Matching учитывает близость даты, сходство дистанции и тип тренировки: interval-структуру, long/easy/tempo/steady эвристики.
 - После импорта скриншотов новая активность автоматически связывается с активным планом только при высоком и однозначном score; спорные совпадения остаются кандидатами для ручного выбора.
 - Adherence analytics показывает completion rate, distance completion rate, linked/unlinked выполненные тренировки, предупреждения и недельный breakdown.
 - Coach recommendations дают подсказки и безопасный preview/apply: удержать объем, снизить следующую неделю, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate. Применение меняет будущие незавершенные workouts; исключение — missed/skipped key workout может быть переведен в `rescheduled` на новую дату. Каждое применение сохраняет audit history.
-- Workout feedback сохраняет RPE, fatigue, pain, sleep quality и notes для выполненных/пропущенных workouts; plan output показывает execution score и subjective risk рядом с workout card.
+- Workout feedback сохраняет RPE, fatigue, pain, sleep quality, weather и notes для выполненных/пропущенных workouts; plan output показывает volume score, intensity score, adherence status и subjective risk рядом с workout card.
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
