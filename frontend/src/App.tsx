@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type Zone, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "profile" | "planning" | "settings"
@@ -220,7 +220,7 @@ function App() {
   const [page, setPage] = useState<Page>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [activities, setActivities] = useState<ActivityType[]>([])
-  const [analytics, setAnalytics] = useState<Record<string, any>>({})
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [profile, setProfile] = useState<AthleteProfile | null>(null)
@@ -340,7 +340,7 @@ function Topbar({ status, onMenu }: { status: string; onMenu: () => void }) {
   </header>
 }
 
-function Overview({ activities, analytics, dashboard, providers, onImport, onPlans }: { activities: ActivityType[]; analytics: Record<string, any>; dashboard: DashboardSummary | null; providers: LlmProvider[]; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, analytics, dashboard, providers, onImport, onPlans }: { activities: ActivityType[]; analytics: AnalyticsSummary | null; dashboard: DashboardSummary | null; providers: LlmProvider[]; onImport: () => void; onPlans: () => void }) {
   const metrics = dashboard?.analytics || analytics
   const currentWeek = dashboard?.current_week
   const weekly = dashboard?.weekly_snapshot
@@ -365,8 +365,8 @@ function Overview({ activities, analytics, dashboard, providers, onImport, onPla
         <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={onImport}>+ Add screenshots</Button><Button size="sm" variant="secondary" onClick={onPlans}>Open plans</Button></div>
       </Card>
       <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
-        <Stat label="activities" value={metrics.activity_count ?? activities.length} />
-        <Stat label="distance" value={Number(metrics.total_distance_km || 0).toFixed(1)} suffix="km" />
+        <Stat label="activities" value={metrics?.activity_count ?? activities.length} />
+        <Stat label="distance" value={Number(metrics?.total_distance_km || 0).toFixed(1)} suffix="km" />
         <Stat label="week done" value={`${Math.round((weekly?.completion_rate || 0) * 100)}%`} />
         <Stat label="providers" value={providerCount} />
       </Card>
@@ -927,10 +927,136 @@ function CalendarMatchCandidates({ event, state, busy, onLinkMatch }: { event: C
   </div>
 }
 
-function Analytics({ analytics }: { analytics: Record<string, any> }) {
-  const months = analytics.months || []
-  const max = Math.max(1, ...months.map((month: any) => month.distance_km))
-  return <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{analytics.total_distance_km || 0} km total</Badge></CardHeader><div className="space-y-3 p-4">{months.map((month: any) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / max * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} км</strong></div>)}</div></Card>
+function isoDate(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function analyticsQuery(preset: string, customFrom: string, customTo: string) {
+  if (preset === "all") return ""
+  if (preset === "custom") {
+    const params = new URLSearchParams()
+    if (customFrom) params.set("from", customFrom)
+    if (customTo) params.set("to", customTo)
+    const value = params.toString()
+    return value ? `?${value}` : ""
+  }
+  const days = preset === "7d" ? 7 : preset === "90d" ? 90 : preset === "year" ? 365 : 28
+  const to = new Date()
+  const from = new Date(to)
+  from.setDate(to.getDate() - days + 1)
+  return `?from=${isoDate(from)}&to=${isoDate(to)}`
+}
+
+function TrendChart({ title, series, formatter, lowerIsBetter = false }: { title: string; series: AnalyticsTimeseries | null; formatter: (value: number | null) => string; lowerIsBetter?: boolean }) {
+  const points = series?.points || []
+  const values = points.map((point) => point.value).filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+  const max = Math.max(1, ...values)
+  const min = Math.max(1, Math.min(...values, max))
+  return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3">
+    <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-white">{title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{series?.granularity || "week"}</Badge></div>
+    <div className="mt-3 grid gap-2">{points.length ? points.slice(-10).map((point) => {
+      const numericValue = typeof point.value === "number" && Number.isFinite(point.value) ? point.value : 0
+      const width = lowerIsBetter && numericValue > 0 ? min / numericValue * 100 : numericValue / max * 100
+      return <div key={`${title}-${point.period_label}`} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{point.period_label}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, width)}%` }} /></div><strong className="text-right text-zinc-300">{formatter(point.value)}</strong></div>
+    }) : <p className="text-xs text-zinc-500">Нет точек для выбранного периода.</p>}</div>
+  </div>
+}
+
+function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
+  const [preset, setPreset] = useState("28d")
+  const [customFrom, setCustomFrom] = useState("")
+  const [customTo, setCustomTo] = useState("")
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(analytics)
+  const [volumeTrend, setVolumeTrend] = useState<AnalyticsTimeseries | null>(null)
+  const [paceTrend, setPaceTrend] = useState<AnalyticsTimeseries | null>(null)
+  const [hrTrend, setHrTrend] = useState<AnalyticsTimeseries | null>(null)
+  const [insights, setInsights] = useState<AnalyticsInsight[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const query = analyticsQuery(preset, customFrom, customTo)
+    let cancelled = false
+    async function loadAnalytics() {
+      setLoading(true)
+      setError("")
+      try {
+        await devLogin()
+        const [nextSummary, distanceSeries, paceSeries, hrSeries, nextInsights] = await Promise.all([
+          api.analytics(query),
+          api.analyticsTimeseries(`${query}${query ? "&" : "?"}metric=distance&granularity=week`),
+          api.analyticsTimeseries(`${query}${query ? "&" : "?"}metric=pace&granularity=week`),
+          api.analyticsTimeseries(`${query}${query ? "&" : "?"}metric=hr&granularity=week`),
+          api.analyticsInsights(query),
+        ])
+        if (!cancelled) {
+          setSummary(nextSummary)
+          setVolumeTrend(distanceSeries)
+          setPaceTrend(paceSeries)
+          setHrTrend(hrSeries)
+          setInsights(nextInsights)
+        }
+      } catch (caught) {
+        console.error(caught)
+        if (!cancelled) setError("Analytics API недоступен")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void loadAnalytics()
+    return () => { cancelled = true }
+  }, [preset, customFrom, customTo])
+
+  const months = summary?.months || []
+  const maxMonth = Math.max(1, ...months.map((month) => month.distance_km))
+  const vdot = summary?.estimated_vdot || null
+  const vo2 = summary?.manual_vo2max || null
+  return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Analytics Overview</p><h2 className="mt-2 text-lg font-semibold text-white">Training signal center</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Периодная аналитика: объем, темп, пульс, adherence, best efforts и VO2max/VDOT estimate с источником.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{summary?.period.label || "loading"}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
+        <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
+        <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
+        <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
+      </div>
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+    </Card>
+
+    <div className="grid gap-3 md:grid-cols-4">
+      <Card className="p-3"><Stat label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix="km" /></Card>
+      <Card className="p-3"><Stat label="time" value={formatDuration(summary?.total_duration_seconds)} /></Card>
+      <Card className="p-3"><Stat label="workouts" value={summary?.activity_count || 0} /></Card>
+      <Card className="p-3"><Stat label="adherence" value={`${Math.round((summary?.adherence?.completion_rate || 0) * 100)}%`} /></Card>
+      <Card className="p-3"><Stat label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}/км`} /></Card>
+      <Card className="p-3"><Stat label="avg HR" value={summary?.average_heart_rate_bpm || "--"} /></Card>
+      <Card className="p-3"><Stat label="load" value={summary?.training_load ?? "--"} /></Card>
+      <Card className="p-3"><Stat label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} /></Card>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} km total</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} км</strong></div>) : <p className="p-4 text-xs text-zinc-500">Нет месячных данных.</p>}</div></Card>
+      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p></div></div></Card>
+    </div>
+
+    <div className="grid gap-3 xl:grid-cols-3">
+      <TrendChart title="Weekly volume" series={volumeTrend} formatter={(value) => `${Number(value || 0).toFixed(1)} км`} />
+      <TrendChart title="Pace trend" series={paceTrend} formatter={(value) => `${formatPace(value)}/км`} lowerIsBetter />
+      <TrendChart title="HR trend" series={hrTrend} formatter={(value) => value ? `${Math.round(value)} bpm` : "--"} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{effort.target_distance_km} км</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
+      <Card><CardHeader><CardTitle>Insights</CardTitle><Badge>{insights.length} notes</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insight.title}</p><Badge className={insight.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{insight.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{insight.message}</p>{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div></Card>
+    </div>
+
+    <Card className="p-4"><div className="grid gap-3 text-xs md:grid-cols-3"><Stat label="training days" value={summary?.consistency.training_days || 0} /><Stat label="days / week" value={summary?.consistency.training_days_per_week || 0} /><Stat label="missed planned" value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
+  </div>
 }
 
 function ProfileZones({ profile, completeness, safety, zones, measurements, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onChanged: () => Promise<void> }) {
@@ -1036,11 +1162,11 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
       <Card>
         <CardHeader><div><CardTitle>Measurements</CardTitle><p className="text-xs text-zinc-500">История ручных и device-derived измерений.</p></div><Badge>{measurements.length} rows</Badge></CardHeader>
         <form onSubmit={submitMeasurement} className="grid gap-3 border-b border-zinc-800 p-4 text-xs md:grid-cols-2">
-          <Field label="Тип"><Select name="measurement_type"><option value="weight">Вес</option><option value="resting_hr">Пульс покоя</option><option value="max_hr">HRmax</option><option value="lactate_threshold">Lactate threshold</option><option value="note">Note</option></Select></Field>
+          <Field label="Тип"><Select name="measurement_type"><option value="weight">Вес</option><option value="resting_hr">Пульс покоя</option><option value="max_hr">HRmax</option><option value="lactate_threshold">Lactate threshold</option><option value="vo2max">VO2max</option><option value="note">Note</option></Select></Field>
           <Field label="Значение"><Input name="value_numeric" type="number" step="0.1" placeholder="число" /></Field>
           <Field label="Пороговый темп, сек/км"><Input name="threshold_pace_seconds_per_km" type="number" min="120" max="1200" placeholder="для LT" /></Field>
           <Field label="Дата"><Input name="measured_at" type="datetime-local" /></Field>
-          <Field label="Источник"><Select name="source"><option value="manual">Manual</option><option value="device">Device</option><option value="screenshot">Screenshot</option></Select></Field>
+          <Field label="Источник"><Select name="source"><option value="manual">Manual</option><option value="device">Device</option><option value="lab">Lab</option><option value="screenshot">Screenshot</option></Select></Field>
           <Field label="Заметка"><Input name="notes" placeholder="опционально" /></Field>
           <div className="md:col-span-2"><Button type="submit" size="sm">Add measurement</Button></div>
         </form>

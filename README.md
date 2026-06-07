@@ -59,7 +59,9 @@ GET /health
 - `GET /api/goals` — цели пользователя.
 - `POST /api/goals` — создание цели.
 - `DELETE /api/goals/{id}` — удаление цели.
-- `GET /api/analytics/summary` — аналитика пользователя.
+- `GET /api/analytics/summary?from=&to=` — обзорная аналитика пользователя за период: KPI, weighted pace, HR, adherence, consistency, best efforts и VO2max/VDOT estimate.
+- `GET /api/analytics/timeseries?metric=&granularity=&from=&to=` — недельные/месячные ряды для distance, duration, workouts, pace, HR и load.
+- `GET /api/analytics/insights?from=&to=` — 3-5 explainable analytics notes для выбранного периода.
 - `GET /api/profile` — профиль спортсмена текущего пользователя.
 - `PUT /api/profile` — обновление физиологических параметров, порогов и safety-настроек.
 - `GET /api/profile/completeness` — оценка полноты данных для расчетов.
@@ -163,6 +165,7 @@ API настроек AI:
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
+- Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
 - LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 

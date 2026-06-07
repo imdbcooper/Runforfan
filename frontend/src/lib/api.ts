@@ -85,7 +85,7 @@ export type AthleteMeasurement = {
   measured_at: string | null
   value_numeric: number | null
   value_json: Record<string, unknown> | null
-  source: "manual" | "screenshot" | "device" | "calculated"
+  source: "manual" | "screenshot" | "device" | "calculated" | "lab"
   confidence: number | null
   notes: string | null
   created_at: string
@@ -421,10 +421,109 @@ export type DashboardRecommendationSummary = {
   recommendations: PlanRecommendation[]
 }
 
+export type CalculationResult = {
+  value: number | null
+  unit: string
+  method: string
+  confidence: string
+  source_reference: string
+}
+
+export type AnalyticsPeriod = {
+  from_date: string | null
+  to_date: string | null
+  label: string
+}
+
+export type AnalyticsActivityHighlight = {
+  id: number
+  title: string
+  started_at: string | null
+  distance_km: number | null
+  duration_seconds: number | null
+  average_pace_seconds_per_km: number | null
+  average_heart_rate_bpm: number | null
+}
+
+export type AnalyticsBestEffort = {
+  target_distance_km: number
+  activity_id: number
+  title: string
+  started_at: string | null
+  source: string
+  confidence: string
+  distance_km: number
+  duration_seconds: number
+  pace_seconds_per_km: number
+  estimated_vdot: CalculationResult | null
+}
+
+export type AnalyticsConsistency = {
+  training_days: number
+  training_days_per_week: number
+  missed_planned_sessions: number
+}
+
+export type AnalyticsMonth = {
+  month: string
+  distance_km: number
+  duration_seconds: number
+  count: number
+}
+
+export type AnalyticsSummary = {
+  period: AnalyticsPeriod
+  activity_count: number
+  total_distance_km: number
+  total_duration_seconds: number
+  weighted_average_pace_seconds_per_km: number | null
+  average_heart_rate_bpm: number | null
+  training_load: number | null
+  load_method: string
+  longest_activity_id: number | null
+  longest_distance_km: number | null
+  fastest_activity_id: number | null
+  fastest_average_pace_seconds_per_km: number | null
+  longest_activity: AnalyticsActivityHighlight | null
+  fastest_activity: AnalyticsActivityHighlight | null
+  adherence: PlanAdherence | null
+  consistency: AnalyticsConsistency
+  best_efforts: AnalyticsBestEffort[]
+  estimated_vdot: CalculationResult | null
+  estimated_vdot_activity_id: number | null
+  manual_vo2max: CalculationResult | null
+  months: AnalyticsMonth[]
+}
+
+export type AnalyticsTimeseriesPoint = {
+  period_start: string
+  period_label: string
+  value: number | null
+  distance_km: number
+  duration_seconds: number
+  count: number
+  weighted_average_pace_seconds_per_km: number | null
+  average_heart_rate_bpm: number | null
+  training_load: number | null
+}
+
+export type AnalyticsTimeseries = {
+  metric: string
+  granularity: string
+  points: AnalyticsTimeseriesPoint[]
+}
+
+export type AnalyticsInsight = {
+  severity: "info" | "warning" | "critical" | string
+  title: string
+  message: string
+  reasons: string[]
+}
+
 export type DashboardSummary = {
   generated_at: string
   today: string
-  analytics: Record<string, any>
+  analytics: AnalyticsSummary
   active_plan: DashboardPlanSummary | null
   current_week: CurrentWeek
   weekly_snapshot: PlanAdherence | null
@@ -516,7 +615,9 @@ export const api = {
     files.forEach((file) => data.append("screenshots", file))
     return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
   },
-  analytics: () => request<Record<string, any>>("/analytics/summary"),
+  analytics: (params = "") => request<AnalyticsSummary>(`/analytics/summary${params}`),
+  analyticsTimeseries: (params = "") => request<AnalyticsTimeseries>(`/analytics/timeseries${params}`),
+  analyticsInsights: (params = "") => request<AnalyticsInsight[]>(`/analytics/insights${params}`),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),

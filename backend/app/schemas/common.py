@@ -132,6 +132,111 @@ class CalculationOut(BaseModel):
     source_reference: str
 
 
+class AnalyticsPeriodOut(BaseModel):
+    from_date: date | None = None
+    to_date: date | None = None
+    label: str
+
+
+class AnalyticsActivityHighlightOut(BaseModel):
+    id: int
+    title: str
+    started_at: datetime | None = None
+    distance_km: float | None = None
+    duration_seconds: int | None = None
+    average_pace_seconds_per_km: int | None = None
+    average_heart_rate_bpm: int | None = None
+
+
+class AnalyticsMonthOut(BaseModel):
+    month: str
+    distance_km: float
+    duration_seconds: int
+    count: int
+
+
+class AnalyticsConsistencyOut(BaseModel):
+    training_days: int
+    training_days_per_week: float
+    missed_planned_sessions: int
+
+
+class AnalyticsAdherenceOut(BaseModel):
+    total_workouts: int
+    done_workouts: int
+    missed_workouts: int
+    skipped_workouts: int
+    linked_workouts: int
+    unlinked_done_workouts: int
+    planned_distance_km: float
+    completed_distance_km: float
+    completion_rate: float
+    distance_completion_rate: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AnalyticsBestEffortOut(BaseModel):
+    target_distance_km: float
+    activity_id: int
+    title: str
+    started_at: datetime | None = None
+    source: str
+    confidence: str
+    distance_km: float
+    duration_seconds: int
+    pace_seconds_per_km: int
+    estimated_vdot: CalculationOut | None = None
+
+
+class AnalyticsSummaryOut(BaseModel):
+    period: AnalyticsPeriodOut
+    activity_count: int
+    total_distance_km: float
+    total_duration_seconds: int
+    weighted_average_pace_seconds_per_km: int | None = None
+    average_heart_rate_bpm: int | None = None
+    training_load: float | None = None
+    load_method: str
+    longest_activity_id: int | None = None
+    longest_distance_km: float | None = None
+    fastest_activity_id: int | None = None
+    fastest_average_pace_seconds_per_km: int | None = None
+    longest_activity: AnalyticsActivityHighlightOut | None = None
+    fastest_activity: AnalyticsActivityHighlightOut | None = None
+    adherence: AnalyticsAdherenceOut | None = None
+    consistency: AnalyticsConsistencyOut
+    best_efforts: list[AnalyticsBestEffortOut] = Field(default_factory=list)
+    estimated_vdot: CalculationOut | None = None
+    estimated_vdot_activity_id: int | None = None
+    manual_vo2max: CalculationOut | None = None
+    months: list[AnalyticsMonthOut] = Field(default_factory=list)
+
+
+class AnalyticsTimeseriesPointOut(BaseModel):
+    period_start: date
+    period_label: str
+    value: float | int | None = None
+    distance_km: float
+    duration_seconds: int
+    count: int
+    weighted_average_pace_seconds_per_km: int | None = None
+    average_heart_rate_bpm: int | None = None
+    training_load: float | None = None
+
+
+class AnalyticsTimeseriesOut(BaseModel):
+    metric: str
+    granularity: str
+    points: list[AnalyticsTimeseriesPointOut] = Field(default_factory=list)
+
+
+class AnalyticsInsightOut(BaseModel):
+    severity: str
+    title: str
+    message: str
+    reasons: list[str] = Field(default_factory=list)
+
+
 class AthleteProfileOut(AthleteProfileUpdate):
     id: int
     user_id: int
@@ -166,7 +271,7 @@ class AthleteMeasurementCreate(BaseModel):
     measured_at: datetime | None = None
     value_numeric: float | None = None
     value_json: dict | None = None
-    source: str = Field(default="manual", pattern="^(manual|screenshot|device|calculated)$")
+    source: str = Field(default="manual", pattern="^(manual|screenshot|device|calculated|lab)$")
     confidence: float | None = Field(default=None, ge=0, le=1)
     notes: str | None = None
 
@@ -615,7 +720,7 @@ class DashboardRecommendationSummaryOut(BaseModel):
 class DashboardSummaryOut(BaseModel):
     generated_at: datetime
     today: date
-    analytics: dict
+    analytics: AnalyticsSummaryOut
     active_plan: DashboardPlanSummaryOut | None = None
     current_week: CurrentWeekOut
     weekly_snapshot: PlanAdherenceOut | None = None
