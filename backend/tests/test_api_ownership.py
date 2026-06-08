@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -23,6 +25,25 @@ except RuntimeError as exc:
 
 
 USER = SimpleNamespace(id=42)
+
+
+def valid_import_candidate_payload() -> dict:
+    return {
+        "activity": {
+            "title": "Morning run",
+            "started_at": "2026-06-08T07:00:00+00:00",
+            "distance_km": 5.0,
+            "duration_seconds": 1500,
+            "average_pace_seconds_per_km": 300,
+            "average_heart_rate_bpm": 145,
+        },
+        "segments": [],
+        "split_blocks": [],
+        "workout_blocks": [],
+        "confidence": "medium",
+        "uncertainty_notes": ["pace visible, calories hidden"],
+        "estimated_fields": ["activity.average_speed_kmh"],
+    }
 
 
 def compiled_query(query) -> str:
@@ -59,6 +80,46 @@ class CommitDb:
 
     def commit(self):
         pass
+
+
+class ImportRejectDb(CommitDb):
+    def __init__(self):
+        self.committed = False
+        self.batch = SimpleNamespace(
+            id=7,
+            user_id=42,
+            status="pending_confirmation",
+            source_app=None,
+            recognition_engine="llm:gpt-4o-mini",
+            recognition_message="Подтвердите импорт",
+            created_activity_id=None,
+            created_at=None,
+            sources=[],
+        )
+        self.scalar_queries = []
+
+    def scalar(self, query):
+        self.scalar_queries.append(query)
+        return self.batch
+
+    def commit(self):
+        self.committed = True
+
+
+class ImportUploadDb(CommitDb):
+    def __init__(self):
+        self.added = []
+        self.committed = False
+
+    def add(self, item):
+        if item.__class__.__name__ == "ImportBatch":
+            item.id = 7
+        elif item.__class__.__name__ == "ScreenshotSource":
+            item.id = 101
+        self.added.append(item)
+
+    def commit(self):
+        self.committed = True
 
 
 def app_with_router(router, current_user_dependency, db_dependency, db):
@@ -179,6 +240,70 @@ class ApiOwnershipTests(unittest.TestCase):
         query = compiled_query(db.execute_queries[0])
         self.assertIn("training_plans.user_id = 42", query)
         self.assertIn("training_plan_workouts.completed_activity_id IN (5, 6)", query)
+
+    def test_import_reject_keeps_candidate_and_does_not_create_activity(self):
+        db = ImportRejectDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        attempt = SimpleNamespace(parsed_payload=valid_import_candidate_payload())
+
+        with (
+            patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt),
+            patch.object(imports_routes, "matched_workout_id_for_activity", return_value=None),
+            patch.object(imports_routes, "create_activity_from_payload") as create_activity,
+            patch.object(imports_routes, "log_audit_event") as audit,
+        ):
+            response = TestClient(app).post("/api/imports/7/reject")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "rejected_by_user")
+        self.assertIsNone(body["created_activity_id"])
+        self.assertFalse(body["requires_confirmation"])
+        self.assertEqual(body["candidate"]["confidence"], "medium")
+        self.assertTrue(db.committed)
+        create_activity.assert_not_called()
+        audit.assert_called_once()
+        query = compiled_query(db.scalar_queries[0])
+        self.assertIn("import_batches.id = 7", query)
+        self.assertIn("import_batches.user_id = 42", query)
+
+    def test_llm_upload_pending_confirmation_does_not_create_activity(self):
+        db = ImportUploadDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        payload = valid_import_candidate_payload()
+        attempt = SimpleNamespace(parsed_payload=payload)
+        recognition = {
+            "status": "pending_confirmation",
+            "engine": "llm:gpt-4o-mini",
+            "message": "Подтвердите импорт",
+            "payload": payload,
+            "requires_confirmation": True,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            settings = SimpleNamespace(upload_dir=Path(tmp_dir), llm_timeout=10)
+            with (
+                patch.object(imports_routes, "get_settings", return_value=settings),
+                patch.object(imports_routes, "llm_or_template_recognize", return_value=recognition) as recognize,
+                patch.object(imports_routes, "create_activity_from_payload") as create_activity,
+                patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt),
+                patch.object(imports_routes, "log_audit_event") as audit,
+            ):
+                response = TestClient(app).post(
+                    "/api/imports/screenshots",
+                    files=[("screenshots", ("unknown.png", b"fake image bytes", "image/png"))],
+                )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "pending_confirmation")
+        self.assertIsNone(body["created_activity_id"])
+        self.assertTrue(body["requires_confirmation"])
+        self.assertEqual(body["candidate"]["confidence"], "medium")
+        self.assertTrue(db.committed)
+        recognize.assert_called_once()
+        create_activity.assert_not_called()
+        audit.assert_called_once()
 
     def test_account_delete_passes_current_user_to_deletion_service(self):
         db = CommitDb()

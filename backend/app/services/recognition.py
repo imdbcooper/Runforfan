@@ -110,6 +110,10 @@ def validate_activity_payload(payload: dict) -> None:
         errors.append("duration_seconds вне допустимого диапазона")
     if pace and not 120 <= int(pace) <= 1200:
         errors.append("average_pace_seconds_per_km вне допустимого диапазона")
+    if distance and duration and pace:
+        expected_pace = int(duration) / float(distance)
+        if abs(int(pace) - expected_pace) > max(30, expected_pace * 0.25):
+            errors.append("distance/time/pace не согласованы")
     if hr and not 40 <= int(hr) <= 230:
         errors.append("average_heart_rate_bpm вне допустимого диапазона")
     segments = payload.get("segments") or []
