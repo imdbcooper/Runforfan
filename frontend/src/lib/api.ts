@@ -486,6 +486,9 @@ export type PlanBuilderBaseline = {
 
 export type PlanBuilderWeeklyVolume = {
   week_index: number
+  phase: string
+  is_taper: boolean
+  taper_week_index: number | null
   planned_distance_km: number
   long_run_km: number
   hard_sessions: number
@@ -504,6 +507,7 @@ export type PlanBuilderPreviewWorkout = {
   week_index: number
   day_index: number
   scheduled_date: string
+  phase: string
   workout_type: string
   title: string
   distance_km: number | null

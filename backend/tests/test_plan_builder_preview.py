@@ -241,12 +241,13 @@ class PlanBuilderPreviewTests(unittest.TestCase):
             make_context(),
             start_date,
         )
-        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
-        hard = [workout for workout in first_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
+        build_week_index = next(week["week_index"] for week in preview["weekly_volume_curve"] if week["phase"] == "build")
+        build_week = [workout for workout in preview["workouts"] if workout["week_index"] == build_week_index and workout["distance_km"] is not None]
+        hard = [workout for workout in build_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
 
-        self.assertEqual(len(first_week), 4)
+        self.assertEqual(len(build_week), 4)
         self.assertEqual(len(hard), 1)
-        self.assertIn("recovery", {workout["workout_type"] for workout in first_week})
+        self.assertIn("recovery", {workout["workout_type"] for workout in build_week})
 
     def test_beginner_rpe_without_threshold_zones_avoids_hard_workouts(self):
         start_date = date(2026, 6, 8)
@@ -310,6 +311,79 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertEqual(len(first_week), 5)
         self.assertTrue(preview["constraints"]["running_days_capped_by_experience"])
         self.assertIn("running_days_capped_by_experience", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_10k_periodization_exposes_phases_and_one_week_taper(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            target_time_seconds=2400,
+            plan_length_weeks=8,
+            available_days_per_week=4,
+            current_weekly_distance_km=25.0,
+            longest_recent_run_km=10.0,
+            include_mobility=True,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+        phases = [week["phase"] for week in preview["weekly_volume_curve"]]
+        first_week_types = {workout["workout_type"] for workout in preview["workouts"] if workout["week_index"] == 1}
+        final_week = preview["weekly_volume_curve"][-1]
+        previous_week = preview["weekly_volume_curve"][-2]
+        taper_workouts = [workout for workout in preview["workouts"] if workout["week_index"] == final_week["week_index"]]
+
+        self.assertEqual(preview["constraints"]["taper_weeks"], 1)
+        self.assertEqual(phases[-1], "taper")
+        self.assertIn("base", phases)
+        self.assertIn("build", phases)
+        self.assertIn("specific", phases)
+        self.assertTrue(final_week["is_taper"])
+        self.assertLess(final_week["planned_distance_km"], previous_week["planned_distance_km"])
+        self.assertNotIn("interval", first_week_types)
+        self.assertNotIn("tempo", first_week_types)
+        self.assertIn("race_pace", {workout["workout_type"] for workout in taper_workouts})
+        self.assertTrue(all(workout["phase"] == "taper" for workout in taper_workouts))
+        self.assertTrue(any(workout["workout_type"] == "mobility" and workout["phase"] == "taper" for workout in taper_workouts))
+
+    def test_half_and_marathon_taper_defaults_are_distance_specific(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        half = build_plan_preview_blueprint(
+            PlanGenerateRequest(goal_type="half_marathon", race_distance_km=21.1, plan_length_weeks=12, available_days_per_week=4, current_weekly_distance_km=35.0, longest_recent_run_km=14.0),
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=35.0, recent_weekly_distance_km=35.0, recent_long_run_km=14.0),
+            start_date,
+        )
+        marathon = build_plan_preview_blueprint(
+            PlanGenerateRequest(goal_type="marathon", race_distance_km=42.2, plan_length_weeks=18, available_days_per_week=5, current_weekly_distance_km=60.0, longest_recent_run_km=24.0),
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=60.0, recent_weekly_distance_km=60.0, recent_long_run_km=24.0, consistent_weeks=18, quality_sessions_8w=3, training_age_level="advanced"),
+            start_date,
+        )
+
+        self.assertEqual(half["constraints"]["taper_weeks"], 2)
+        self.assertEqual([week["phase"] for week in half["weekly_volume_curve"][-2:]], ["taper", "taper"])
+        self.assertGreater(half["weekly_volume_curve"][-2]["planned_distance_km"], half["weekly_volume_curve"][-1]["planned_distance_km"])
+        self.assertNotIn("race_pace", {workout["workout_type"] for workout in half["workouts"]})
+        self.assertEqual(marathon["constraints"]["taper_weeks"], 3)
+        self.assertEqual([week["phase"] for week in marathon["weekly_volume_curve"][-3:]], ["taper", "taper", "taper"])
+        taper_distances = [week["planned_distance_km"] for week in marathon["weekly_volume_curve"][-3:]]
+        self.assertEqual(taper_distances, sorted(taper_distances, reverse=True))
 
     def test_beginner_weekly_growth_and_long_run_share_are_capped(self):
         start_date = date(2026, 6, 8)
@@ -638,9 +712,10 @@ class PlanBuilderPreviewTests(unittest.TestCase):
             start_date,
         )
 
-        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
-        workout_types = {workout["workout_type"] for workout in first_week}
-        hard = [workout for workout in first_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
+        build_week_index = next(week["week_index"] for week in preview["weekly_volume_curve"] if week["phase"] == "build")
+        build_week = [workout for workout in preview["workouts"] if workout["week_index"] == build_week_index and workout["distance_km"] is not None]
+        workout_types = {workout["workout_type"] for workout in build_week}
+        hard = [workout for workout in build_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
         self.assertIn("hill", workout_types)
         self.assertEqual(len(hard), 1)
         self.assertNotIn("missing_pace_zones", {flag["code"] for flag in preview["risk_flags"]})
@@ -740,6 +815,9 @@ class PlanBuilderPreviewTests(unittest.TestCase):
 
         self.assertEqual(preview["race_distance_km"], 10.0)
         self.assertNotIn("marathon_low_volume", {flag["code"] for flag in preview["risk_flags"]})
+        self.assertEqual(preview["constraints"]["taper_weeks"], 0)
+        self.assertNotIn("taper", {week["phase"] for week in preview["weekly_volume_curve"]})
+        self.assertNotIn("specific", {week["phase"] for week in preview["weekly_volume_curve"]})
 
     def test_duration_constraints_use_estimated_pace(self):
         start_date = date(2026, 6, 8)

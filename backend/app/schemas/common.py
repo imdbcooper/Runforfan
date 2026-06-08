@@ -751,6 +751,9 @@ class PlanBuilderBaselineOut(BaseModel):
 
 class PlanBuilderWeeklyVolumeOut(BaseModel):
     week_index: int
+    phase: str = "build"
+    is_taper: bool = False
+    taper_week_index: int | None = None
     planned_distance_km: float
     long_run_km: float
     hard_sessions: int
@@ -788,6 +791,7 @@ class PlanBuilderPreviewWorkoutOut(BaseModel):
     week_index: int
     day_index: int
     scheduled_date: Date
+    phase: str = "build"
     workout_type: str
     title: str
     distance_km: float | None = None

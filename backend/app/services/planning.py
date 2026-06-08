@@ -147,6 +147,58 @@ def max_running_days_for_level(training_age_level: str) -> int:
     return TRAINING_LEVEL_MAX_RUNNING_DAYS.get(training_age_level, TRAINING_LEVEL_MAX_RUNNING_DAYS["beginner"])
 
 
+def taper_weeks_for_goal(goal_distance_km: float | None, weeks: int) -> int:
+    if weeks <= 1 or not goal_distance_km:
+        return 0
+    if goal_distance_km and goal_distance_km >= 42:
+        desired = 3 if weeks >= 16 else 2
+    elif goal_distance_km and goal_distance_km >= 21:
+        desired = 2 if weeks >= 8 else 1
+    else:
+        desired = 1
+    return max(1, min(desired, max(1, weeks // 3)))
+
+
+def phase_for_week(week_index: int, weeks: int, goal_distance_km: float | None) -> str:
+    if not goal_distance_km:
+        base_end = max(1, round(weeks * 0.4))
+        return "base" if week_index <= base_end else "build"
+    taper_weeks = taper_weeks_for_goal(goal_distance_km, weeks)
+    taper_start = weeks - taper_weeks + 1 if taper_weeks else weeks + 1
+    if week_index >= taper_start:
+        return "taper"
+    pre_taper_weeks = max(1, taper_start - 1)
+    base_end = max(1, round(pre_taper_weeks * 0.35))
+    specific_start = max(base_end + 1, pre_taper_weeks - max(1, round(pre_taper_weeks * 0.25)) + 1)
+    if week_index <= base_end:
+        return "base"
+    if week_index >= specific_start:
+        return "specific"
+    return "build"
+
+
+def taper_week_index(week_index: int, weeks: int, goal_distance_km: float | None) -> int | None:
+    taper_weeks = taper_weeks_for_goal(goal_distance_km, weeks)
+    taper_start = weeks - taper_weeks + 1 if taper_weeks else weeks + 1
+    if week_index < taper_start:
+        return None
+    return week_index - taper_start + 1
+
+
+def taper_volume_multiplier(week_index: int, weeks: int, goal_distance_km: float | None) -> float:
+    index = taper_week_index(week_index, weeks, goal_distance_km)
+    if not index:
+        return 1.0
+    taper_weeks = taper_weeks_for_goal(goal_distance_km, weeks)
+    if taper_weeks >= 3:
+        multipliers = [0.85, 0.72, 0.60]
+    elif taper_weeks == 2:
+        multipliers = [0.80, 0.65]
+    else:
+        multipliers = [0.72]
+    return multipliers[min(index - 1, len(multipliers) - 1)]
+
+
 def hard_work_cap_seconds(workout_type: str, training_age_level: str) -> int:
     if workout_type == "interval":
         return INTERVAL_WORK_CAP_SECONDS.get(training_age_level, INTERVAL_WORK_CAP_SECONDS["beginner"])
@@ -505,21 +557,27 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
     }
 
 
-def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False) -> list[tuple[int, str, str, str]]:
+def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True) -> list[tuple[int, str, str, str]]:
     hard_allowed = (not conservative) and can_prescribe_hard
     quality_lite = (not conservative)
-    specific_phase = has_target_time and weeks >= 8 and week_index > weeks * 0.6
+    specific_phase = phase in {"specific", "taper"} and has_race_goal and has_target_time
 
     def primary_quality() -> tuple[str, str, str]:
+        if phase == "base":
+            return "strides" if quality_lite else "easy", "Страйды" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"
         if not hard_allowed:
             return "steady", "Аэробная работа", "steady-rpe"
         if specific_phase:
             return "race_pace", "Работа в целевом темпе", "race_pace"
+        if phase == "taper":
+            return "tempo" if has_pace_zones else "hill", "Контролируемая интенсивность", "threshold" if has_pace_zones else "hill"
         if has_pace_zones:
             return "interval", "Длинные интервалы", "interval"
         return "hill", "Силовая работа в горку", "hill"
 
     def secondary_quality() -> tuple[str, str, str]:
+        if phase in {"base", "taper"}:
+            return "easy", "Легкий бег", "easy"
         if not hard_allowed:
             return "strides" if quality_lite else "easy", "Страйды" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"
         if specific_phase:
@@ -537,7 +595,9 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
         template.append((3, "recovery", "Восстановительный бег", "recovery"))
     if days >= 5:
         second_type, second_title, second_intensity = secondary_quality()
-        if hard_allowed and training_age_level == "advanced" and days >= 6:
+        if phase == "taper":
+            template.append((4, "recovery", "Восстановительный бег", "recovery"))
+        elif hard_allowed and training_age_level == "advanced" and days >= 6:
             template.append((4, second_type, second_title, second_intensity))
         elif not hard_allowed:
             template.append((4, second_type, second_title, second_intensity))
@@ -552,8 +612,8 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
     return template[:days]
 
 
-def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False) -> list[tuple[int, str, str, str]]:
-    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time)
+def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True) -> list[tuple[int, str, str, str]]:
+    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time, phase, has_race_goal)
     if not long_run_day_index or long_run_day_index >= days:
         return template
     long_item = next((item for item in template if item[1] == "long"), None)
@@ -661,6 +721,7 @@ def support_workouts_for_week(
     week_workouts: list[dict[str, object]],
     settings: dict[str, int],
     request: PlanGenerateRequest,
+    phase: str = "build",
 ) -> list[dict[str, object]]:
     support: list[dict[str, object]] = []
     strength_dates = support_anchor_dates(week_workouts, settings["strength_sessions"], week_start)
@@ -669,6 +730,7 @@ def support_workouts_for_week(
             "week_index": week,
             "day_index": days + len(support) + 1,
             "scheduled_date": scheduled,
+            "phase": phase,
             "workout_type": "strength",
             "title": f"ОФП / силовая {'A' if index == 1 else 'B'}",
             "distance_km": None,
@@ -686,6 +748,7 @@ def support_workouts_for_week(
             "week_index": week,
             "day_index": days + len(support) + 1,
             "scheduled_date": scheduled,
+            "phase": phase,
             "workout_type": "mobility",
             "title": "Mobility / prehab",
             "distance_km": None,
@@ -2298,12 +2361,18 @@ def build_plan_preview_blueprint(
     intensity_volume = {"easy": 0.0, "steady": 0.0, "hard": 0.0, "strength": 0.0, "mobility": 0.0}
     running_floor_limited_by_budget = False
     last_build_week_volume = current_volume
+    has_race_goal = request.goal_type != "base_building"
+    periodization_goal_distance = goal_distance if has_race_goal else None
+    taper_weeks = taper_weeks_for_goal(periodization_goal_distance, weeks)
     for week in range(1, weeks + 1):
+        phase = phase_for_week(week, weeks, periodization_goal_distance)
         progression = week / weeks
         week_volume = current_volume + (peak_volume - current_volume) * min(1, progression * 1.15)
         week_volume = min(week_volume, last_build_week_volume * (1 + max_weekly_growth))
-        if week % 4 == 0:
+        if phase != "taper" and week % 4 == 0:
             week_volume *= 0.78
+        if phase == "taper":
+            week_volume *= taper_volume_multiplier(week, weeks, periodization_goal_distance)
         if request.time_budget_minutes_per_week:
             running_budget_seconds = max(0, request.time_budget_minutes_per_week * 60 - weekly_support_duration_seconds)
             budget_distance = running_budget_seconds / easy_pace_seconds_per_km
@@ -2327,6 +2396,8 @@ def build_plan_preview_blueprint(
             week_index=week,
             weeks=weeks,
             has_target_time=bool(request.target_time_seconds),
+            phase=phase,
+            has_race_goal=has_race_goal,
         )
         week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
@@ -2343,6 +2414,7 @@ def build_plan_preview_blueprint(
                 "description": wizard_workout_description(workout_description(workout_type, intensity, zones, conservative), request, goal_distance),
                 "training_age_level": training_age_level,
                 "target_race_pace_seconds_per_km": round(request.target_time_seconds / goal_distance) if request.target_time_seconds and goal_distance > 0 else None,
+                "phase": phase,
             }
             week_preview_workouts.append(workout)
         if request.time_budget_minutes_per_week:
@@ -2368,12 +2440,12 @@ def build_plan_preview_blueprint(
         week_distance = sum(float(workout.get("distance_km") or 0) for workout in week_preview_workouts)
         long_run = max((float(workout.get("distance_km") or 0) for workout in week_preview_workouts if workout.get("workout_type") == "long"), default=0.0)
         hard_sessions = sum(1 for workout in week_preview_workouts if preview_workout_is_hard(workout))
-        if week % 4 != 0:
+        if phase != "taper" and week % 4 != 0:
             last_build_week_volume = week_distance
         for workout in week_preview_workouts:
             intensity_volume[preview_intensity_category(workout)] += int(workout.get("duration_seconds") or 0)
         workouts.extend(week_preview_workouts)
-        support_workouts = support_workouts_for_week(week, days, week_start, week_preview_workouts, support_settings, request)
+        support_workouts = support_workouts_for_week(week, days, week_start, week_preview_workouts, support_settings, request, phase)
         workouts.extend(support_workouts)
         support_duration = sum(int(workout.get("duration_seconds") or 0) for workout in support_workouts)
         for support_workout in support_workouts:
@@ -2381,6 +2453,9 @@ def build_plan_preview_blueprint(
             intensity_volume[category] = intensity_volume.get(category, 0.0) + int(support_workout.get("duration_seconds") or 0)
         weekly_curve.append({
             "week_index": week,
+            "phase": phase,
+            "is_taper": phase == "taper",
+            "taper_week_index": taper_week_index(week, weeks, periodization_goal_distance),
             "planned_distance_km": round(week_distance, 1),
             "long_run_km": round(long_run, 1),
             "hard_sessions": hard_sessions,
@@ -2452,6 +2527,8 @@ def build_plan_preview_blueprint(
             "profile_max_run_duration_minutes": profile.max_run_duration_minutes,
             "max_weekly_growth": max_weekly_growth,
             "long_run_share": long_run_share,
+            "periodization_phases": ["base", "build", "specific", "taper"],
+            "taper_weeks": taper_weeks,
             "time_budget_minutes_per_week": request.time_budget_minutes_per_week,
             "include_strength": request.include_strength,
             "plan_length_weeks": request.plan_length_weeks,
