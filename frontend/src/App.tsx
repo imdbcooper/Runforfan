@@ -42,6 +42,24 @@ type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" |
 
 const SUPPORT_WORKOUT_TYPES = new Set(["strength", "ofp", "mobility", "prehab", "core", "cross_training"])
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+const ONBOARDING_DISMISSED_KEY = "runforfan_onboarding_dismissed"
+const ONBOARDING_READY_SCORE = 0.8
+
+function safeStorageGet(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeStorageSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Onboarding can still run when browser storage is blocked.
+  }
+}
 
 const nav = [
   ["overview", "Dashboard", Zap],
@@ -425,7 +443,13 @@ function App() {
   const [safety, setSafety] = useState<SafetyCheck | null>(null)
   const [zones, setZones] = useState<Zones | null>(null)
   const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeStorageGet(ONBOARDING_DISMISSED_KEY) === "true")
   const [status, setStatus] = useState("LOADING")
+
+  function dismissOnboarding() {
+    safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
+    setOnboardingDismissed(true)
+  }
 
   async function refreshGlobal() {
     try {
@@ -462,6 +486,7 @@ function App() {
       setSafety(nextSafety)
       setZones(nextZones)
       setMeasurements(nextMeasurements)
+      if (nextCompleteness.score >= ONBOARDING_READY_SCORE) dismissOnboarding()
       setStatus("DEMO USER")
     } catch (error) {
       setStatus("API ERROR")
@@ -469,10 +494,16 @@ function App() {
     }
   }
 
+  const effectiveCompleteness = completeness || dashboard?.profile_completeness || null
+  const onboardingRequired = Boolean(effectiveCompleteness && effectiveCompleteness.score < ONBOARDING_READY_SCORE && !onboardingDismissed)
+
   useEffect(() => { void refreshGlobal() }, [])
   useEffect(() => {
     if (page === "profile") void refreshProfileData()
   }, [page])
+  useEffect(() => {
+    if (onboardingRequired && page !== "profile") setPage("profile")
+  }, [onboardingRequired, page])
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -498,7 +529,7 @@ function App() {
             {page === "zones" && <ZonesAnalytics />}
             {page === "performance" && <PerformanceAnalytics />}
             {page === "goals" && <GoalsRaces />}
-            {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
+            {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onboardingMode={onboardingRequired} onDismissOnboarding={dismissOnboarding} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
             {page === "settings" && <SettingsPage providers={providers} onChanged={refreshGlobal} />}
           </main>
@@ -2377,7 +2408,7 @@ function GoalCard({ goal, busy, onStatus, onDelete }: { goal: RunningGoal; busy:
   </Card>
 }
 
-function ProfileZones({ profile, completeness, safety, zones, measurements, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onChanged: () => Promise<void> }) {
+function ProfileZones({ profile, completeness, safety, zones, measurements, onboardingMode, onDismissOnboarding, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onboardingMode?: boolean; onDismissOnboarding?: () => void; onChanged: () => Promise<void> }) {
   if (!profile) return <Card className="p-4 text-sm text-zinc-400">Loading profile...</Card>
 
   async function submitProfile(event: FormEvent<HTMLFormElement>) {
@@ -2409,6 +2440,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
       health_conditions: stringOrNull(data.get("health_conditions")),
       recovery_status: stringOrNull(data.get("recovery_status")) || "normal",
     })
+    await api.recalculateZones()
     await onChanged()
   }
 
@@ -2426,6 +2458,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
       confidence: 1,
       notes: stringOrNull(data.get("notes")),
     })
+    await api.recalculateZones()
     form.reset()
     await onChanged()
   }
@@ -2436,8 +2469,24 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
   }
 
   const completenessScore = Math.round((completeness?.score || 0) * 100)
+  const onboardingReady = Boolean(completeness && completeness.score >= ONBOARDING_READY_SCORE)
+  const zoneReadiness = completeness ? [
+    completeness.can_calculate_hr_zones ? "HR zones ready" : "HR zones need HRmax or birthdate",
+    completeness.can_calculate_hrr_zones ? "HRR zones ready" : "HRR zones need resting HR",
+    completeness.can_calculate_pace_zones ? "Pace zones ready" : "Pace zones need threshold pace",
+  ] : []
 
   return <div className="grid gap-4">
+    {onboardingMode ? <Card className="border-orange-400/30 bg-orange-400/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-100">First-run onboarding</p><h2 className="mt-1 text-lg font-semibold text-white">Complete athlete setup before planning</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-orange-100/80">Fill the highlighted physiology, training availability and threshold fields, then save. Runforfan will recalculate estimated zones immediately; manual overrides can be added from the zones section.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{completenessScore}% complete</Badge><Button type="button" size="sm" variant="secondary" onClick={onDismissOnboarding}>Skip for now</Button></div>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">Missing inputs</p><p className="mt-1 text-orange-100/80">{completeness?.missing.length ? completeness.missing.map(missingLabel).join(" · ") : "Required onboarding inputs are present."}</p></div>
+        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">Zone readiness</p><p className="mt-1 text-orange-100/80">{zoneReadiness.join(" · ") || "Loading zone readiness."}</p>{onboardingReady ? <p className="mt-1 text-orange-100">Ready: save/recalculate is complete.</p> : null}</div>
+      </div>
+    </Card> : null}
     <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
       <Card>
         <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge>{completeness?.confidence || "low"} confidence</Badge></CardHeader>

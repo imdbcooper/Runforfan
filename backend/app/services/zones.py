@@ -142,11 +142,18 @@ def invalidate_calculated_zones(db: Session, user_id: int, zone_types: set[str] 
 def recalculate_and_store_zones(db: Session, user: User) -> dict:
     profile = get_or_create_profile(db, user)
     pace, pace_confidence = vdot_threshold_pace(db, user)
+    manual_zone_types = set(db.scalars(
+        select(TrainingZone.zone_type)
+        .where(TrainingZone.user_id == user.id, TrainingZone.method == "manual", TrainingZone.is_active.is_(True))
+    ).all())
     db.execute(delete(TrainingZone).where(TrainingZone.user_id == user.id, TrainingZone.method != "manual"))
     for zone in calculated_zones(profile, pace, pace_confidence):
+        zone_type = zone_type_for_unit(str(zone["unit"]))
+        if zone_type in manual_zone_types:
+            continue
         db.add(TrainingZone(
             user_id=user.id,
-            zone_type=zone_type_for_unit(str(zone["unit"])),
+            zone_type=zone_type,
             method=str(zone["method"]),
             zone_key=str(zone["zone_key"]),
             label=str(zone.get("label") or zone["zone_key"]),

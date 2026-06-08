@@ -14,6 +14,7 @@ try:
 
     from app.api.routes.profile import apply_measurement_to_profile
     from app.models import AthleteProfile
+    from app.services import zones as zones_service
     from app.schemas.common import AthleteMeasurementCreate, AthleteProfileUpdate
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
@@ -120,6 +121,44 @@ class ProfileServiceTests(unittest.TestCase):
 
         self.assertEqual(profile.weight_kg, 72)
         refresh_metrics.assert_called_once_with(db, 42)
+
+    def test_zone_recalculation_preserves_manual_zone_types(self):
+        class ScalarResult:
+            def all(self):
+                return ["hr"]
+
+        class ZoneDb:
+            def __init__(self):
+                self.added = []
+                self.committed = False
+
+            def scalars(self, query):
+                return ScalarResult()
+
+            def execute(self, query):
+                return None
+
+            def add(self, item):
+                self.added.append(item)
+
+            def commit(self):
+                self.committed = True
+
+        profile = AthleteProfile(user_id=42, max_heart_rate_bpm=190, lactate_threshold_pace_seconds_per_km=300)
+        db = ZoneDb()
+
+        with (
+            patch.object(zones_service, "get_or_create_profile", return_value=profile),
+            patch.object(zones_service, "vdot_threshold_pace", return_value=(None, "low")),
+            patch.object(zones_service, "zones_response", return_value={"hr": [], "pace": [], "rpe": [], "metadata": {}}),
+        ):
+            zones_service.recalculate_and_store_zones(db, SimpleNamespace(id=42))
+
+        self.assertTrue(db.committed)
+        self.assertTrue(db.added)
+        self.assertTrue(all(zone.zone_type != "hr" for zone in db.added))
+        self.assertTrue(any(zone.zone_type == "pace" for zone in db.added))
+        self.assertTrue(any(zone.zone_type == "rpe" for zone in db.added))
 
 
 if __name__ == "__main__":
