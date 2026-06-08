@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runforfan Alpha Tester Guide</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080808'/%3E%3Cpath d='M9 22 15 8l3 9 4-6' fill='none' stroke='%23f97316' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080808;
+        --panel: #101010;
+        --panel-2: #151515;
+        --line: #27272a;
+        --line-2: #3f3f46;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --soft: #71717a;
+        --accent: #f97316;
+        --accent-2: #fb923c;
+        --danger: #fb7185;
+        --warn: #f59e0b;
+        --ok: #22c55e;
+        --radius: 14px;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 15% 0%, rgba(249, 115, 22, 0.16), transparent 34rem),
+          radial-gradient(circle at 90% 8%, rgba(251, 146, 60, 0.08), transparent 30rem),
+          linear-gradient(180deg, #0b0b0b 0%, var(--bg) 36rem, #050505 100%);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.55;
+      }
+
+      a {
+        color: var(--accent-2);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 18rem minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      aside {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(8, 8, 8, 0.88);
+        backdrop-filter: blur(18px);
+        padding: 1.25rem;
+      }
+
+      main {
+        min-width: 0;
+        padding: 1.5rem;
+      }
+
+      .brand {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        margin-bottom: 1.25rem;
+      }
+
+      .eyebrow {
+        color: var(--accent-2);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 1.05rem;
+        letter-spacing: -0.03em;
+      }
+
+      .nav {
+        display: grid;
+        gap: 0.35rem;
+      }
+
+      .nav a {
+        display: block;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: var(--muted);
+        font-size: 0.86rem;
+        padding: 0.46rem 0.6rem;
+      }
+
+      .nav a:hover {
+        border-color: var(--line);
+        background: #111;
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      .hero {
+        border: 1px solid rgba(249, 115, 22, 0.32);
+        border-radius: 22px;
+        background:
+          linear-gradient(135deg, rgba(249, 115, 22, 0.16), transparent 42%),
+          linear-gradient(180deg, rgba(24, 24, 27, 0.92), rgba(9, 9, 11, 0.96));
+        overflow: hidden;
+        padding: clamp(1.25rem, 3vw, 2.2rem);
+      }
+
+      .hero-grid {
+        align-items: end;
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 0.75fr);
+      }
+
+      .hero h2 {
+        font-size: clamp(2.2rem, 5vw, 4.8rem);
+        letter-spacing: -0.07em;
+        line-height: 0.94;
+        margin: 0.35rem 0 1rem;
+      }
+
+      .lead {
+        color: #d4d4d8;
+        font-size: 1.04rem;
+        max-width: 58rem;
+      }
+
+      .meta-grid,
+      .card-grid,
+      .formula-grid,
+      .scenario-grid,
+      .screenshot-grid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .meta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .formula-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .scenario-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .screenshot-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      section {
+        margin-top: 1.5rem;
+      }
+
+      .section-card,
+      .card,
+      .scenario,
+      .formula,
+      .shot,
+      .callout {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(16, 16, 16, 0.86);
+      }
+
+      .section-card {
+        padding: clamp(1rem, 2.2vw, 1.5rem);
+      }
+
+      .card,
+      .scenario,
+      .formula,
+      .callout {
+        padding: 1rem;
+      }
+
+      .card h4,
+      .scenario h4,
+      .formula h4 {
+        margin: 0 0 0.6rem;
+        font-size: 0.98rem;
+      }
+
+      h2.section-title {
+        font-size: clamp(1.45rem, 2.4vw, 2.1rem);
+        letter-spacing: -0.045em;
+        margin: 0 0 0.8rem;
+      }
+
+      h3 {
+        font-size: 1.15rem;
+        margin: 1.3rem 0 0.65rem;
+      }
+
+      p {
+        color: var(--muted);
+        margin: 0.45rem 0;
+      }
+
+      ul,
+      ol {
+        color: var(--muted);
+        margin: 0.65rem 0 0;
+        padding-left: 1.25rem;
+      }
+
+      li + li {
+        margin-top: 0.35rem;
+      }
+
+      .badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.85rem;
+      }
+
+      .badge {
+        align-items: center;
+        border: 1px solid var(--line-2);
+        border-radius: 999px;
+        color: #e4e4e7;
+        display: inline-flex;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        gap: 0.3rem;
+        letter-spacing: 0.08em;
+        padding: 0.25rem 0.5rem;
+        text-transform: uppercase;
+      }
+
+      .badge.orange {
+        border-color: rgba(249, 115, 22, 0.55);
+        color: #fed7aa;
+      }
+
+      .badge.green {
+        border-color: rgba(34, 197, 94, 0.45);
+        color: #bbf7d0;
+      }
+
+      .badge.rose {
+        border-color: rgba(251, 113, 133, 0.5);
+        color: #fecdd3;
+      }
+
+      .tiny {
+        color: var(--soft);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+      }
+
+      table {
+        border-collapse: collapse;
+        margin-top: 0.8rem;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 0.65rem 0.55rem;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #d4d4d8;
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+
+      code {
+        color: #fed7aa;
+      }
+
+      pre {
+        background: #09090b;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: #e4e4e7;
+        overflow: auto;
+        padding: 0.9rem;
+      }
+
+      figure {
+        margin: 0;
+      }
+
+      .shot {
+        overflow: hidden;
+      }
+
+      .shot img {
+        background: #050505;
+        display: block;
+        width: 100%;
+      }
+
+      .shot figcaption {
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.86rem;
+        padding: 0.7rem 0.8rem;
+      }
+
+      .callout {
+        border-color: rgba(249, 115, 22, 0.4);
+        background: rgba(249, 115, 22, 0.08);
+      }
+
+      .callout.danger {
+        border-color: rgba(251, 113, 133, 0.45);
+        background: rgba(251, 113, 133, 0.08);
+      }
+
+      .steps {
+        counter-reset: steps;
+        display: grid;
+        gap: 0.6rem;
+        margin-top: 0.8rem;
+      }
+
+      .step {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: var(--muted);
+        padding: 0.7rem 0.8rem 0.7rem 2.5rem;
+        position: relative;
+      }
+
+      .step::before {
+        background: var(--accent);
+        border-radius: 999px;
+        color: #111;
+        content: counter(steps);
+        counter-increment: steps;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 900;
+        height: 1.35rem;
+        left: 0.75rem;
+        line-height: 1.35rem;
+        position: absolute;
+        text-align: center;
+        top: 0.75rem;
+        width: 1.35rem;
+      }
+
+      .kbd {
+        border: 1px solid var(--line-2);
+        border-radius: 6px;
+        color: #e4e4e7;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        padding: 0.1rem 0.35rem;
+      }
+
+      .footer {
+        color: var(--soft);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        margin: 2rem 0 0;
+        padding: 1rem 0 0;
+      }
+
+      @media (max-width: 1080px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        aside {
+          height: auto;
+          position: static;
+        }
+
+        .nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .hero-grid,
+        .card-grid,
+        .formula-grid,
+        .scenario-grid,
+        .screenshot-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        main,
+        aside {
+          padding: 1rem;
+        }
+
+        .meta-grid,
+        .nav {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          border-radius: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <div class="brand">
+          <span class="eyebrow">Runforfan alpha</span>
+          <h1>Гайд альфа-тестера</h1>
+          <p class="tiny">Подготовлено: 2026-06-08</p>
+        </div>
+        <nav class="nav" aria-label="Оглавление">
+          <a href="#purpose">1. Что тестируем</a>
+          <a href="#before">2. Перед началом</a>
+          <a href="#screens">3. Скриншоты</a>
+          <a href="#scenarios">4. Сценарии</a>
+          <a href="#formulas">5. Формулы</a>
+          <a href="#quality">6. Критерии качества</a>
+          <a href="#bugs">7. Баг-репорт</a>
+          <a href="#glossary">8. Глоссарий</a>
+          <a href="#limits">9. Ограничения</a>
+        </nav>
+      </aside>
+
+      <main>
+        <header class="hero">
+          <div class="hero-grid">
+            <div>
+              <span class="eyebrow">Dark compact admin UI</span>
+              <h2>Runforfan: alpha testing guide</h2>
+              <p class="lead">
+                Этот документ помогает проверить приложение как продукт: первый вход, профиль спортсмена, зоны,
+                импорт тренировок, планы, календарь, analytics, load/recovery, performance, goals, LLM providers,
+                экспорт данных и safety-поведение.
+              </p>
+              <div class="badge-row">
+                <span class="badge orange">Alpha</span>
+                <span class="badge">RU/EN UI</span>
+                <span class="badge green">Local screenshots</span>
+                <span class="badge rose">No medical advice</span>
+              </div>
+            </div>
+            <div class="meta-grid">
+              <div class="card">
+                <span class="eyebrow">Frontend</span>
+                <p><code>http://127.0.0.1:5173/admin/</code></p>
+              </div>
+              <div class="card">
+                <span class="eyebrow">Backend</span>
+                <p><code>http://127.0.0.1:8080/api</code></p>
+              </div>
+              <div class="card">
+                <span class="eyebrow">Health</span>
+                <p><code>GET /health</code> должен вернуть <code>{"status":"ok"}</code></p>
+              </div>
+              <div class="card">
+                <span class="eyebrow">Login</span>
+                <p>Telegram Login или dev/demo user в development.</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section id="purpose" class="section-card">
+          <h2 class="section-title">1. Что тестируем</h2>
+          <p>
+            Runforfan в alpha должен быть проверен не только на отсутствие ошибок, но и на продуктовую понятность:
+            пользователь должен понимать, почему появилась метрика, предупреждение, кандидат импорта или рекомендация
+            по плану.
+          </p>
+          <div class="card-grid">
+            <div class="card">
+              <h4>Импорт и валидация</h4>
+              <p>Проверяем upload screenshots, CSV import, LLM/template recognition, candidate correction, confirm/reject и activity creation.</p>
+            </div>
+            <div class="card">
+              <h4>Профиль и зоны</h4>
+              <p>Проверяем completeness, safety warnings, HR/pace/RPE zones, manual HR overrides и measurements.</p>
+            </div>
+            <div class="card">
+              <h4>Планы и календарь</h4>
+              <p>Проверяем preview/generate, active plan, workout lifecycle, feedback, matching, reschedule и adherence.</p>
+            </div>
+            <div class="card">
+              <h4>Расчеты</h4>
+              <p>Проверяем pace, VDOT, Riegel predictions, TRIMP, CTL/ATL/TSB, monotony, strain и execution score.</p>
+            </div>
+            <div class="card">
+              <h4>Safety</h4>
+              <p>Проверяем conservative mode, injury/recovery flags, fatigue/load warnings и понятные ограничения продукта.</p>
+            </div>
+            <div class="card">
+              <h4>Данные</h4>
+              <p>Проверяем export, audit log, LLM provider secrets и удаление данных через подтверждение <code>DELETE</code>.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="before" class="section-card">
+          <h2 class="section-title">2. Перед началом</h2>
+          <div class="callout danger">
+            <h3>Safety disclaimer</h3>
+            <p>
+              Runforfan не является медицинским устройством. Предупреждения в интерфейсе являются спортивными эвристиками.
+              При боли, травме, необычной одышке, головокружении, обмороке или ухудшении самочувствия нужно прекратить
+              тренировку и обратиться к специалисту.
+            </p>
+          </div>
+          <h3>Минимальная подготовка</h3>
+          <div class="steps">
+            <div class="step">Убедитесь, что backend отвечает на <code>GET http://127.0.0.1:8080/health</code>.</div>
+            <div class="step">Откройте <code>http://127.0.0.1:5173/admin/</code> в desktop browser.</div>
+            <div class="step">Войдите через Telegram или dev/demo login.</div>
+            <div class="step">Переключите язык <span class="kbd">ru/en</span> и проверьте, что UI не ломается.</div>
+            <div class="step">Подготовьте несколько скриншотов тренировок и один CSV-файл, если тестируете import pipeline.</div>
+            <div class="step">Не используйте реальные production API keys в недоверенном alpha-окружении.</div>
+          </div>
+        </section>
+
+        <section id="screens" class="section-card">
+          <h2 class="section-title">3. Карта экранов со скриншотами</h2>
+          <p>Скриншоты сняты с живого admin UI и лежат локально в <code>Docs/assets/alpha-guide/</code>.</p>
+          <div class="screenshot-grid">
+            <figure class="shot">
+              <img src="assets/alpha-guide/dashboard.png" alt="Dashboard screen" />
+              <figcaption><strong>Dashboard.</strong> Сегодняшняя готовность, активный план, неделя, последние активности.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/activities.png" alt="Activities screen" />
+              <figcaption><strong>Activities.</strong> Таблица, manual activity, detail, validation, derived metrics.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/imports.png" alt="Imports screen" />
+              <figcaption><strong>Imports.</strong> Screenshot/CSV import, candidate review, history, match candidates.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/calendar.png" alt="Calendar screen" />
+              <figcaption><strong>Calendar.</strong> План и факт по дням, warnings, reschedule, matching.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/analytics.png" alt="Analytics screen" />
+              <figcaption><strong>Analytics.</strong> Summary, trends, best efforts, insights, VDOT/VO2max source.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/load-recovery.png" alt="Load and Recovery screen" />
+              <figcaption><strong>Load & Recovery.</strong> Daily/weekly load, CTL/ATL/TSB, warnings, materialization.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/zones-analytics.png" alt="Zones Analytics screen" />
+              <figcaption><strong>Zones Analytics.</strong> HR/pace/RPE distribution, Seiler split, planned vs actual.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/performance.png" alt="Performance screen" />
+              <figcaption><strong>Performance.</strong> Race/time trial results, VDOT, Riegel predictions, PBs.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/goals.png" alt="Goals screen" />
+              <figcaption><strong>Goals & races.</strong> Цели, race readiness, predicted ranges, milestones.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/profile-zones.png" alt="Profile and Zones screen" />
+              <figcaption><strong>Profile & zones.</strong> Athlete profile, safety, zones, manual HR override, measurements.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/plans.png" alt="Plans screen" />
+              <figcaption><strong>Plans.</strong> Program planner, preview, active/draft plans, workouts, recommendations.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/alpha-guide/settings-data.png" alt="Settings screen" />
+              <figcaption><strong>Settings & data.</strong> LLM providers, integrations, export, delete data, audit log.</figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section id="scenarios" class="section-card">
+          <h2 class="section-title">4. Сценарии тестирования</h2>
+          <div class="scenario-grid">
+            <article class="scenario">
+              <span class="badge orange">Must test</span>
+              <h4>A. Первый вход и профиль</h4>
+              <ol>
+                <li>Войдите в admin UI.</li>
+                <li>Откройте <strong>Profile & zones</strong>.</li>
+                <li>Заполните дату рождения или HRmax, resting HR, threshold pace или threshold HR, вес, preferred weekdays и max duration.</li>
+                <li>Добавьте injury/health/recovery данные, если тестируете safety warnings.</li>
+                <li>Сохраните профиль и проверьте zones.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> completeness растет, zones recalculated, safety warnings понятны, onboarding исчезает при достаточной готовности.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge orange">Must test</span>
+              <h4>B. Импорт скриншотов</h4>
+              <ol>
+                <li>Откройте <strong>Imports</strong>.</li>
+                <li>Загрузите 1-6 изображений PNG/JPEG/WEBP.</li>
+                <li>Проверьте recognition message и batch status.</li>
+                <li>Если появился candidate, исправьте поля и нажмите confirm.</li>
+                <li>Откройте созданную activity в <strong>Activities</strong>.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> batch виден в history, candidate требует подтверждения при uncertainty, created activity имеет validation и source metadata.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>C. CSV import</h4>
+              <ol>
+                <li>Откройте <strong>Imports</strong>.</li>
+                <li>Выберите CSV с title, started_at, duration, distance или HR.</li>
+                <li>Проверьте counters created, duplicates, matched, failed.</li>
+                <li>Повторно загрузите тот же CSV для проверки duplicate detection.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> дубликаты не создают новые активности, ошибки строк понятны, created rows появляются в Activities.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>D. Manual activity</h4>
+              <ol>
+                <li>Откройте <strong>Activities</strong>.</li>
+                <li>Заполните title, started, type, duration, distance и avg HR.</li>
+                <li>Создайте activity.</li>
+                <li>Откройте detail и измените duration/distance через quick edit.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> duration required, pace/speed пересчитываются backend-ом, derived metrics/load обновляются.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge orange">Must test</span>
+              <h4>E. Plan preview и создание плана</h4>
+              <ol>
+                <li>Откройте <strong>Plans</strong>.</li>
+                <li>Заполните goal, distance, target date, available days, current weekly volume, support sessions и constraints.</li>
+                <li>Нажмите Preview.</li>
+                <li>Проверьте baseline, risk flags, volume curve и first workouts.</li>
+                <li>Создайте draft или active plan.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> Preview не сохраняет план, Generate создает план, Dashboard/Calendar видят active plan.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>F. Workout lifecycle</h4>
+              <ol>
+                <li>В плане откройте тренировку.</li>
+                <li>Проверьте blocks, target, purpose и safety note.</li>
+                <li>Заполните manual completion или найдите activity candidate.</li>
+                <li>Сохраните feedback: RPE, soreness, pain, sleep, notes.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> workout получает status done, появляется execution score, adherence обновляется.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>G. Calendar matching</h4>
+              <ol>
+                <li>Откройте <strong>Calendar</strong>.</li>
+                <li>Проверьте This week, Next week, This month и custom range.</li>
+                <li>Перенесите workout, отметьте missed/skipped и восстановите planned.</li>
+                <li>Найдите activity/workout candidates и выполните link.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> range больше 42 дней отклоняется, hard-session warnings видны, matching score/reasons понятны.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge orange">Must test</span>
+              <h4>H. Analytics, load и zones</h4>
+              <ol>
+                <li>Откройте <strong>Analytics</strong> и переключите периоды.</li>
+                <li>Проверьте weighted pace, avg HR, adherence, best efforts и insights.</li>
+                <li>Откройте <strong>Load & Recovery</strong> и проверьте CTL/ATL/TSB.</li>
+                <li>Откройте <strong>Zones Analytics</strong> и проверьте coverage, Seiler split, planned vs actual.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> <code>Why?</code> объясняет расчет, custom range работает, empty states не выглядят как ошибка.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>I. Performance и race goal</h4>
+              <ol>
+                <li>Откройте <strong>Performance</strong>.</li>
+                <li>Добавьте race или time trial не короче 3 км.</li>
+                <li>Проверьте VDOT source, predictions, PBs, threshold trend и pace zones.</li>
+                <li>Создайте race goal в <strong>Goals & races</strong>.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> noisy source помечается, predictions имеют confidence/warnings, race goal показывает readiness и prediction range.</p>
+            </article>
+
+            <article class="scenario">
+              <span class="badge">Core</span>
+              <h4>J. Settings, LLM и export</h4>
+              <ol>
+                <li>Откройте <strong>Settings & data</strong>.</li>
+                <li>Добавьте OpenAI-compatible или Anthropic provider.</li>
+                <li>Проверьте Test provider и Set default.</li>
+                <li>Скачайте JSON export и activities CSV.</li>
+                <li>Проверьте audit log.</li>
+              </ol>
+              <p><strong>Ожидается:</strong> API key не возвращается в UI/export, provider test сообщает status/message, exports не содержат secrets.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="formulas" class="section-card">
+          <h2 class="section-title">5. Формулы и расчеты, которые нужно понимать</h2>
+          <p>
+            Формулы ниже нужны не для ручной перепроверки каждого значения, а для корректной оценки поведения продукта,
+            объяснений <code>Why?</code>, confidence и safety warnings.
+          </p>
+          <div class="formula-grid">
+            <article class="formula">
+              <h4>Pace, speed, weighted pace</h4>
+              <pre>pace = duration_seconds / distance_km
+speed_kmh = distance_km / (duration_seconds / 3600)
+weighted_pace = sum(duration) / sum(distance)</pre>
+              <p>Weighted pace используется в analytics и segment summaries, чтобы короткие тренировки не искажали средний темп.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Estimated HRmax, Tanaka</h4>
+              <pre>HRmax = round(208 - 0.7 * age)</pre>
+              <p>Fallback, если нет измеренного HRmax. Не равен лабораторному измерению и должен иметь lower confidence.</p>
+            </article>
+
+            <article class="formula">
+              <h4>HRR zones, Karvonen</h4>
+              <pre>HRR = max_hr - resting_hr
+zone_hr = resting_hr + percent * HRR</pre>
+              <p>Требует resting HR и max HR. Используется для персонализированных HR zones.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Pace zones</h4>
+              <pre>easy      = threshold +45..+95 sec/km
+steady    = threshold +20..+44 sec/km
+threshold = threshold -5..+10 sec/km
+interval  = threshold -35..-6 sec/km
+rep       = threshold -60..-36 sec/km</pre>
+              <p>Threshold pace берется из профиля или fallback из performance source.</p>
+            </article>
+
+            <article class="formula">
+              <h4>VDOT</h4>
+              <pre>velocity = distance_m / time_min
+vo2 = -4.60 + 0.182258*v + 0.000104*v^2
+percent = 0.8 + 0.1894393*e^(-0.012778*t)
+        + 0.2989558*e^(-0.1932605*t)
+VDOT = vo2 / percent</pre>
+              <p>Используется только для race-like или time trial sources. Easy run не должна становиться главным VDOT source.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Riegel prediction</h4>
+              <pre>predicted_time = source_time *
+  (target_distance / source_distance) ^ 1.06</pre>
+              <p>Экстраполяция за пределы отношения 0.25-4 снижает confidence и должна давать warning.</p>
+            </article>
+
+            <article class="formula">
+              <h4>TRIMP</h4>
+              <pre>hr_ratio = (avg_hr - resting_hr) / (max_hr - resting_hr)
+male:   load = min * ratio * 0.64 * exp(1.92 * ratio)
+female: load = min * ratio * 0.86 * exp(1.67 * ratio)</pre>
+              <p>Требует sex male/female и корректные HR inputs. Иначе используется другой load method.</p>
+            </article>
+
+            <article class="formula">
+              <h4>sRPE load</h4>
+              <pre>sRPE = duration_minutes * RPE_0_10</pre>
+              <p>Используется, если workout feedback содержит RPE. Это субъективная оценка нагрузки.</p>
+            </article>
+
+            <article class="formula">
+              <h4>CTL, ATL, TSB</h4>
+              <pre>alpha = 1 - exp(-1 / tau_days)
+EWMA = previous + alpha * (load_today - previous)
+CTL tau = 42 days
+ATL tau = 7 days
+TSB = CTL - ATL</pre>
+              <p>Это эвристики fitness/fatigue/form. При истории меньше 42 дней должен быть warmup warning.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Monotony and strain</h4>
+              <pre>monotony = mean(daily_loads) / stddev(daily_loads)
+strain = sum(daily_loads) * monotony</pre>
+              <p>Высокая monotony означает слишком однообразную нагрузку. При нулевой вариативности расчет может быть недоступен.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Adherence</h4>
+              <pre>completion_rate = done_workouts / planned_workouts</pre>
+              <p>Используется в Dashboard, Plans, Goals. Missed/skipped тренировки снижают completion rate.</p>
+            </article>
+
+            <article class="formula">
+              <h4>Execution score</h4>
+              <pre>volume_score = 1 - abs(actual/planned - 1) / 0.5
+final_score = average(volume, intensity, subjective)</pre>
+              <p>Pain, high fatigue, high RPE и плохой сон ограничивают subjective component.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="quality" class="section-card">
+          <h2 class="section-title">6. Критерии хорошего результата</h2>
+          <table>
+            <thead>
+              <tr><th>Область</th><th>Что считается хорошим</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>UI</td><td>Нет white screen, нет critical console errors, mobile menu работает, таблицы скроллятся внутри контейнеров.</td></tr>
+              <tr><td>Language</td><td>RU/EN toggle меняет навигацию, кнопки, dates/units и не переводит пользовательские/API-строки.</td></tr>
+              <tr><td>Imports</td><td>Candidate не становится activity без validation/confirmation, ошибки распознавания понятны.</td></tr>
+              <tr><td>Activities</td><td>Duration/distance/pace/HR согласованы, validation объясняет warnings, derived metrics имеют method/source.</td></tr>
+              <tr><td>Plans</td><td>Preview не сохраняет план, risk flags видны, hard sessions не ставятся небезопасно рядом без warning.</td></tr>
+              <tr><td>Analytics</td><td>Периоды работают, формулы объяснимы, missing data показывается как empty state, а не как ошибка.</td></tr>
+              <tr><td>Safety</td><td>Injury/recovery/conservative flags влияют на readiness и plan behavior, без медицинских обещаний.</td></tr>
+              <tr><td>Data</td><td>Secrets не возвращаются в UI/export, destructive delete требует подтверждение.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="bugs" class="section-card">
+          <h2 class="section-title">7. Как оформлять баг-репорт</h2>
+          <div class="callout">
+            <p>Хороший баг-репорт должен позволять воспроизвести проблему без догадок.</p>
+          </div>
+          <pre>Заголовок:
+  [Экран] Краткое описание проблемы
+
+Окружение:
+  Browser:
+  Device/viewport:
+  Frontend URL:
+  Backend URL:
+  Язык UI:
+  Время ошибки:
+
+Шаги воспроизведения:
+  1.
+  2.
+  3.
+
+Ожидаемый результат:
+
+Фактический результат:
+
+Данные для связи с сущностью:
+  activity_id:
+  import_batch_id:
+  plan_id:
+  workout_id:
+  goal_id:
+
+Скриншоты или видео:
+
+Console/network errors, если есть:
+
+Важность:
+  blocker / high / medium / low</pre>
+        </section>
+
+        <section id="glossary" class="section-card">
+          <h2 class="section-title">8. Глоссарий</h2>
+          <table>
+            <thead>
+              <tr><th>Термин</th><th>Объяснение</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Activity</td><td>Фактическая тренировка или активность.</td></tr>
+              <tr><td>Candidate</td><td>Предварительно распознанная тренировка до подтверждения.</td></tr>
+              <tr><td>Validation</td><td>Проверка согласованности distance, duration, pace, HR, segments и blocks.</td></tr>
+              <tr><td>RPE</td><td>Субъективная тяжесть тренировки по шкале 0-10.</td></tr>
+              <tr><td>VDOT</td><td>Оценка беговой формы по результату гонки или time trial.</td></tr>
+              <tr><td>TRIMP</td><td>Training impulse на основе пульса и длительности.</td></tr>
+              <tr><td>CTL</td><td>Chronic Training Load, долгосрочная EWMA нагрузки.</td></tr>
+              <tr><td>ATL</td><td>Acute Training Load, краткосрочная EWMA нагрузки.</td></tr>
+              <tr><td>TSB</td><td>Training Stress Balance, CTL минус ATL.</td></tr>
+              <tr><td>Monotony</td><td>Однообразие нагрузки, mean divided by standard deviation.</td></tr>
+              <tr><td>Strain</td><td>Суммарная нагрузка, усиленная monotony.</td></tr>
+              <tr><td>Seiler split</td><td>Трехзонное распределение интенсивности: low, moderate, high.</td></tr>
+              <tr><td>Adherence</td><td>Насколько фактическое выполнение совпадает с планом.</td></tr>
+              <tr><td>Execution score</td><td>Оценка выполнения workout по объему, интенсивности и субъективным данным.</td></tr>
+              <tr><td>Confidence</td><td>Доверие к расчету или source: low, medium, high.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="limits" class="section-card">
+          <h2 class="section-title">9. Known limitations</h2>
+          <div class="card-grid">
+            <div class="card">
+              <h4>Alpha status</h4>
+              <p>Функции, UX и формулы могут меняться. Нужны баг-репорты по продуктовой понятности, не только по crashes.</p>
+            </div>
+            <div class="card">
+              <h4>LLM recognition</h4>
+              <p>Качество зависит от provider, модели, screenshots и prompt. LLM может ошибаться, поэтому confirmation обязателен.</p>
+            </div>
+            <div class="card">
+              <h4>Training load</h4>
+              <p>CTL/ATL/TSB, monotony и strain являются эвристиками. Они не предсказывают здоровье или травмы.</p>
+            </div>
+            <div class="card">
+              <h4>Performance</h4>
+              <p>VDOT и Riegel predictions требуют качественного race/time trial source. Noisy, старые и короткие results снижают confidence.</p>
+            </div>
+            <div class="card">
+              <h4>Zones</h4>
+              <p>Зоны зависят от профиля. Без HRmax/resting HR/threshold pace часть расчетов будет недоступна.</p>
+            </div>
+            <div class="card">
+              <h4>Matching</h4>
+              <p>Auto-match отклоняет неоднозначные candidates. Это ожидаемо, пользователь должен выбрать link вручную.</p>
+            </div>
+          </div>
+        </section>
+
+        <p class="footer">
+          Runforfan alpha tester guide. Этот HTML можно открыть локально из репозитория. Для инженерных деталей см. <code>Docs/runforfan-professional-documentation.md</code>.
+        </p>
+      </main>
+    </div>
+  </body>
+</html>

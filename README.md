@@ -1,6 +1,13 @@
 # Runforfan
 
-Простая база для хранения данных, извлеченных со скриншотов тренировок. Сейчас это не приложение, а минимальный слой данных для будущего анализа тренировок, сравнения темпа, пульса, каденса и корректировки планов.
+Runforfan - персональная система для хранения беговых активностей, импорта тренировок из скриншотов и CSV, построения тренировочных планов, анализа нагрузки, зон, performance, goals и readiness. Проект находится в alpha-стадии: основной UI расположен в React/Vite admin frontend, backend построен на FastAPI/PostgreSQL, старый локальный прототип в `app/` сохранен как legacy.
+
+## Документация
+
+- `Docs/runforfan-professional-documentation.md` - полноценная профессиональная документация: архитектура, запуск, API, data model, product flows, safety, формулы, validation, troubleshooting и glossary.
+- `Docs/alpha-tester-guide.html` - отдельный автономный HTML-гайд для альфа-тестеров со скриншотами, сценариями проверки, формулами, criteria checklist и шаблоном баг-репорта.
+- `Docs/assets/alpha-guide/` - локальные скриншоты admin UI, используемые HTML-гайдом.
+- `Docs/runforfan-professional-specification.md` - продуктовая спецификация и acceptance criteria.
 
 ## Полноценный backend
 
