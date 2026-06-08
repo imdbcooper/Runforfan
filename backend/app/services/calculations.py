@@ -65,7 +65,7 @@ def estimate_hrmax_tanaka(age: int) -> CalculationResult:
     return CalculationResult(round(208 - 0.7 * age), "bpm", "tanaka", "low", TANAKA_REF)
 
 
-def calculate_hrr_zones(resting_hr: int, max_hr: int) -> list[dict[str, object]]:
+def calculate_hrr_zones(resting_hr: int, max_hr: int, confidence: str = "medium") -> list[dict[str, object]]:
     hrr = max_hr - resting_hr
     ranges = [
         ("z1", 0.30, 0.39, "Recovery"),
@@ -82,7 +82,7 @@ def calculate_hrr_zones(resting_hr: int, max_hr: int) -> list[dict[str, object]]
             "upper_value": round(resting_hr + high * hrr),
             "unit": "bpm",
             "method": "hrr",
-            "confidence": "medium",
+            "confidence": confidence,
             "source_reference": KARVONEN_REF,
         }
         for key, low, high, label in ranges

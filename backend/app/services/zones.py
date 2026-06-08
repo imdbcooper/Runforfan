@@ -43,7 +43,8 @@ def calculated_zones(profile: AthleteProfile, vdot_threshold_pace: int | None = 
     if profile.lactate_threshold_hr_bpm:
         zones.extend(calculate_threshold_hr_zones(profile.lactate_threshold_hr_bpm))
     elif max_hr and profile.resting_heart_rate_bpm:
-        zones.extend(calculate_hrr_zones(profile.resting_heart_rate_bpm, max_hr))
+        hrr_confidence = "low" if max_hr_source == "tanaka_estimated" else "medium"
+        zones.extend(calculate_hrr_zones(profile.resting_heart_rate_bpm, max_hr, confidence=hrr_confidence))
     elif max_hr:
         hrmax_zones = calculate_hrmax_zones(max_hr)
         if max_hr_source == "manual":

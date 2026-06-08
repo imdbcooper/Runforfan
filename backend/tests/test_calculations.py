@@ -32,6 +32,7 @@ class CalculationTests(unittest.TestCase):
         zones = calculate_hrr_zones(resting_hr=50, max_hr=190)
         self.assertEqual(zones[0]["zone_key"], "z1")
         self.assertEqual(zones[0]["lower_value"], 92)
+        self.assertEqual(zones[0]["confidence"], "medium")
         self.assertEqual(zones[-1]["upper_value"], 183)
 
     def test_threshold_pace_zones(self):

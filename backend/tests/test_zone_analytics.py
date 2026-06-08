@@ -79,6 +79,18 @@ class ZoneAnalyticsTests(unittest.TestCase):
         self.assertEqual(pace[0]["method"], "vdot_threshold_estimate")
         self.assertEqual(pace[0]["confidence"], "medium")
 
+    def test_hrr_zones_downgrade_confidence_when_hrmax_is_estimated(self):
+        estimated = AthleteProfile(user_id=1, date_of_birth=date(1990, 1, 1), resting_heart_rate_bpm=50)
+        measured = AthleteProfile(user_id=1, resting_heart_rate_bpm=50, max_heart_rate_bpm=190, max_hr_source="measured")
+
+        estimated_hr = [zone for zone in calculated_zones(estimated) if zone["unit"] == "bpm"]
+        measured_hr = [zone for zone in calculated_zones(measured) if zone["unit"] == "bpm"]
+
+        self.assertEqual(estimated_hr[0]["method"], "hrr")
+        self.assertTrue(all(zone["confidence"] == "low" for zone in estimated_hr))
+        self.assertEqual(measured_hr[0]["method"], "hrr")
+        self.assertTrue(all(zone["confidence"] == "medium" for zone in measured_hr))
+
     def test_zone_distribution_combines_hr_pace_rpe_and_planned_distribution(self):
         profile = AthleteProfile(user_id=1, lactate_threshold_hr_bpm=170, lactate_threshold_pace_seconds_per_km=300)
         zones = {
