@@ -33,6 +33,17 @@ export type Activity = {
     average_heart_rate_bpm: number | null
   }[]
   derived_metrics: DerivedActivityMetric[]
+  sources: ActivitySource[]
+}
+
+export type ActivitySource = {
+  source_id: number
+  file_name: string | null
+  screen_type: string | null
+  source_app: string | null
+  captured_at: string | null
+  uploaded_at: string | null
+  notes: string | null
 }
 
 export type ActivitySegment = {

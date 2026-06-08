@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import Activity, AthleteProfile, User
+from app.models import Activity, ActivityScreenshot, AthleteProfile, User
 from app.schemas.common import ActivityCreate, ActivityOut, ActivityUpdate, ActivityValidationOut
 from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.analytics import activity_local_date, profile_timezone
@@ -116,7 +116,13 @@ def activity_query(activity_id: int, user: User):
     return (
         select(Activity)
         .where(Activity.id == activity_id, Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
+        .options(
+            selectinload(Activity.segments),
+            selectinload(Activity.split_blocks),
+            selectinload(Activity.workout_blocks),
+            selectinload(Activity.derived_metrics),
+            selectinload(Activity.screenshots).selectinload(ActivityScreenshot.source),
+        )
     )
 
 
@@ -204,7 +210,13 @@ def list_activities(user: User = Depends(get_current_user), db: Session = Depend
     return list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
+        .options(
+            selectinload(Activity.segments),
+            selectinload(Activity.split_blocks),
+            selectinload(Activity.workout_blocks),
+            selectinload(Activity.derived_metrics),
+            selectinload(Activity.screenshots).selectinload(ActivityScreenshot.source),
+        )
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
     ))
 
@@ -234,7 +246,7 @@ def get_activity_validation(activity_id: int, user: User = Depends(get_current_u
     activity = db.scalar(
         select(Activity)
         .where(Activity.id == activity_id, Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics), selectinload(Activity.screenshots))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics), selectinload(Activity.screenshots).selectinload(ActivityScreenshot.source))
     )
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")

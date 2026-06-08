@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
@@ -158,6 +159,10 @@ class Activity(Base, TimestampMixin):
     derived_metrics: Mapped[list["DerivedActivityMetric"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     screenshots: Mapped[list["ActivityScreenshot"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
 
+    @property
+    def sources(self) -> list["ActivityScreenshot"]:
+        return self.screenshots
+
 
 class ActivitySegment(Base):
     __tablename__ = "activity_segments"
@@ -219,6 +224,30 @@ class ActivityScreenshot(Base):
 
     activity: Mapped[Activity] = relationship(back_populates="screenshots")
     source: Mapped[ScreenshotSource] = relationship()
+
+    @property
+    def file_name(self) -> str | None:
+        return Path(self.source.file_path).name if self.source and self.source.file_path else None
+
+    @property
+    def screen_type(self) -> str | None:
+        return self.source.screen_type if self.source else None
+
+    @property
+    def source_app(self) -> str | None:
+        return self.source.source_app if self.source else None
+
+    @property
+    def captured_at(self) -> datetime | None:
+        return self.source.captured_at if self.source else None
+
+    @property
+    def notes(self) -> str | None:
+        return self.source.notes if self.source else None
+
+    @property
+    def uploaded_at(self) -> datetime | None:
+        return self.source.created_at if self.source else None
 
 
 class DerivedActivityMetric(Base):

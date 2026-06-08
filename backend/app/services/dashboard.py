@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, ImportBatch, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, ActivityScreenshot, ImportBatch, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, User
 from app.services.analytics import user_analytics
 from app.services.planning import adherence_summary, plan_adjustment_recommendations, today_for_user, workout_to_dict
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
@@ -131,7 +131,13 @@ def recent_activities(db: Session, user: User, limit: int = 6) -> list[Activity]
     return list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
+        .options(
+            selectinload(Activity.segments),
+            selectinload(Activity.split_blocks),
+            selectinload(Activity.workout_blocks),
+            selectinload(Activity.derived_metrics),
+            selectinload(Activity.screenshots).selectinload(ActivityScreenshot.source),
+        )
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
         .limit(limit)
     ))

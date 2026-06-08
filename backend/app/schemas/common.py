@@ -83,6 +83,18 @@ class DerivedActivityMetricOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ActivitySourceOut(BaseModel):
+    source_id: int
+    file_name: str | None = None
+    screen_type: str | None = None
+    source_app: str | None = None
+    captured_at: datetime | None = None
+    uploaded_at: datetime | None = None
+    notes: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class ActivityOut(BaseModel):
     id: int
     activity_type: str
@@ -107,6 +119,7 @@ class ActivityOut(BaseModel):
     split_blocks: list[SplitBlockOut] = []
     workout_blocks: list[WorkoutBlockOut] = []
     derived_metrics: list[DerivedActivityMetricOut] = []
+    sources: list[ActivitySourceOut] = []
 
     model_config = {"from_attributes": True}
 

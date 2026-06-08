@@ -843,6 +843,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
   const derived = [...(activity.derived_metrics || [])].sort((left, right) => left.metric_key.localeCompare(right.metric_key))
   const segments = [...(activity.segments || [])].sort((left, right) => left.segment_index - right.segment_index)
   const workoutBlocks = [...(activity.workout_blocks || [])].sort((left, right) => left.block_index - right.block_index)
+  const sources = activity.sources || []
   const validationChecks = validation?.checks || []
   const warnings = validation?.issues || []
   const [editMessage, setEditMessage] = useState("")
@@ -887,7 +888,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <Stat label="avg hr" value={activity.average_heart_rate_bpm ? `${activity.average_heart_rate_bpm} bpm` : "--"} />
         <Stat label="cadence" value={activity.average_cadence_spm ? `${activity.average_cadence_spm} spm` : "--"} />
         <Stat label="elevation" value={activity.elevation_gain_m || activity.elevation_loss_m ? `+${activity.elevation_gain_m || 0} / -${activity.elevation_loss_m || 0} m` : "--"} />
-        <Stat label="sources" value={`${validation?.source_counts.screenshots ?? 0} screenshots`} />
+        <Stat label="sources" value={`${sources.length || validation?.source_counts.screenshots || 0} screenshots`} />
       </div>
 
       <form key={`${activity.id}-${activity.title}-${activity.activity_type}-${activity.started_at || ""}-${activity.distance_km || ""}-${activity.duration_seconds}-${activity.average_heart_rate_bpm || ""}-${activity.source_note || ""}`} onSubmit={submitEdit} className="grid gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 md:grid-cols-6">
@@ -911,6 +912,18 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
             <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{check.code} · expected {formatValidationValue(check.expected, check.unit)} · actual {formatValidationValue(check.actual, check.unit)}</p>
           </div>)}
         </div> : loading && !validation ? <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">Loading validation checks...</p> : !validation ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">Validation report is unavailable for this activity.</p> : <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">No validation issues detected for loaded data.</p>}
+      </div>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Recognition sources</p><p className="mt-1 text-zinc-500">Safe screenshot metadata linked to this activity; local file paths are not exposed.</p></div><Badge>{sources.length} sources</Badge></div>
+        {sources.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {sources.map((source) => <div key={source.source_id} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2">
+            <p className="font-medium text-white">{source.file_name || `source #${source.source_id}`}</p>
+            <p className="mt-1 text-[11px] text-zinc-500">#{source.source_id} · {source.source_app || "unknown app"} · {source.screen_type || "screenshot"}</p>
+            <p className="mt-1 text-[11px] text-zinc-500">captured {source.captured_at ? new Date(source.captured_at).toLocaleString("ru-RU") : "unknown"} · uploaded {source.uploaded_at ? new Date(source.uploaded_at).toLocaleString("ru-RU") : "unknown"}</p>
+            {source.notes ? <p className="mt-2 text-[11px] text-zinc-400">{source.notes}</p> : null}
+          </div>)}
+        </div> : <p className="text-zinc-500">No linked screenshot sources for this activity.</p>}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

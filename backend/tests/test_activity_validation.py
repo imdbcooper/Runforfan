@@ -7,7 +7,8 @@ DEPENDENCY_SKIP_REASON = None
 
 try:
     from app.api.routes.activities import activity_validation_report
-    from app.models import Activity, ActivitySegment, ActivityWorkoutBlock
+    from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivityWorkoutBlock, ScreenshotSource
+    from app.schemas.common import ActivityOut
 except ModuleNotFoundError as exc:
     if exc.name in {"fastapi", "pydantic", "sqlalchemy", "starlette"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for activity validation tests"
@@ -86,6 +87,24 @@ class ActivityValidationTests(unittest.TestCase):
 
         self.assertIn("workout_block_distance_mismatch", codes)
         self.assertIn("workout_block_duration_mismatch", codes)
+
+    def test_activity_detail_sources_expose_safe_screenshot_metadata(self):
+        activity = Activity(id=8, user_id=1, activity_type="outdoor_run", title="Screenshot run", distance_km=5.0, duration_seconds=1500)
+        source = ScreenshotSource(id=99, user_id=1, file_path="/private/uploads/user-1/run.png", screen_type="summary", source_app="Huawei Health", notes="Uploaded screenshot run.png")
+        activity.screenshots = [ActivityScreenshot(activity_id=8, source_id=99, source=source)]
+
+        dumped = ActivityOut.model_validate(activity).model_dump(mode="json")
+
+        self.assertEqual(dumped["sources"], [{
+            "source_id": 99,
+            "file_name": "run.png",
+            "screen_type": "summary",
+            "source_app": "Huawei Health",
+            "captured_at": None,
+            "uploaded_at": None,
+            "notes": "Uploaded screenshot run.png",
+        }])
+        self.assertNotIn("file_path", dumped["sources"][0])
 
 
 if __name__ == "__main__":
