@@ -147,8 +147,27 @@ class TrainingLoadTests(unittest.TestCase):
         point = result["daily"]["points"][0]
 
         self.assertEqual(point["load"], 300)
-        self.assertEqual(point["load_method"], "session_rpe")
+        self.assertEqual(point["load_method"], "srpe")
         self.assertEqual(point["srpe_count"], 1)
+
+    def test_training_load_warns_when_fitness_history_is_short(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), stress=40)
+
+        result = training_load_from_data([activity], [], None, date(2026, 6, 1), date(2026, 6, 7))
+        titles = {warning["title"] for warning in result["warnings"]}
+
+        self.assertIn("CTL/ATL/TSB warmup", titles)
+
+    def test_training_load_skips_warmup_warning_with_long_enough_history(self):
+        activities = [
+            make_activity(1, datetime(2026, 4, 15, 8, tzinfo=UTC), stress=20),
+            make_activity(2, datetime(2026, 6, 1, 8, tzinfo=UTC), stress=40),
+        ]
+
+        result = training_load_from_data(activities, [], None, date(2026, 6, 1), date(2026, 6, 7))
+        titles = {warning["title"] for warning in result["warnings"]}
+
+        self.assertNotIn("CTL/ATL/TSB warmup", titles)
 
     def test_training_load_buckets_activities_by_profile_timezone(self):
         timezone = ZoneInfo("Europe/Moscow")

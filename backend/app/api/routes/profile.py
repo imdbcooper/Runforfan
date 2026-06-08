@@ -14,6 +14,7 @@ from app.schemas.common import (
     ProfileCompletenessOut,
     SafetyCheckOut,
 )
+from app.services.activity_metrics import refresh_user_profile_dependent_activity_metrics
 from app.services.auth import get_current_user
 from app.services.profile import get_or_create_profile, profile_completeness, profile_estimated_hrmax, safety_check
 from app.services.zones import ZONE_INPUT_FIELDS, invalidate_calculated_zones
@@ -61,10 +62,13 @@ def get_profile(user: User = Depends(get_current_user), db: Session = Depends(ge
 def update_profile(payload: AthleteProfileUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = get_or_create_profile(db, user)
     updates = payload.model_dump(exclude_unset=True)
+    weight_changed = "weight_kg" in updates and updates["weight_kg"] != profile.weight_kg
     for key, value in updates.items():
         setattr(profile, key, value)
     if ZONE_INPUT_FIELDS.intersection(updates):
         invalidate_calculated_zones(db, user.id)
+    if weight_changed:
+        refresh_user_profile_dependent_activity_metrics(db, user.id)
     db.commit()
     db.refresh(profile)
     return profile_out(profile)
@@ -120,8 +124,11 @@ def create_measurement(payload: AthleteMeasurementCreate, user: User = Depends(g
     )
     db.add(measurement)
     profile = get_or_create_profile(db, user)
+    weight_changed = payload.measurement_type == "weight" and payload.value_numeric is not None and payload.value_numeric != profile.weight_kg
     if apply_measurement_to_profile(profile, payload):
         invalidate_calculated_zones(db, user.id)
+    if weight_changed:
+        refresh_user_profile_dependent_activity_metrics(db, user.id)
     db.commit()
     db.refresh(measurement)
     return measurement_to_timeline(measurement)

@@ -204,7 +204,19 @@ def predict_riegel_time(source_distance_km: float, source_time_seconds: int, tar
 
 
 def calculate_srpe_load(duration_minutes: float, rpe_0_10: float) -> CalculationResult:
-    return CalculationResult(round(duration_minutes * rpe_0_10, 1), "au", "session_rpe", "medium", FOSTER_REF)
+    return CalculationResult(round(duration_minutes * rpe_0_10, 1), "au", "srpe", "medium", FOSTER_REF)
+
+
+def calculate_acsm_running_energy_kcal(distance_km: float | None, duration_seconds: int | float | None, weight_kg: float | None, grade: float | None = None) -> CalculationResult:
+    if not distance_km or distance_km <= 0 or not duration_seconds or duration_seconds <= 0 or not weight_kg or weight_kg <= 0:
+        return CalculationResult(None, "kcal", "acsm_running_energy", "low", ACSM_REF)
+    duration_minutes = duration_seconds / 60
+    speed_m_min = distance_km * 1000 / duration_minutes
+    grade_value = min(max(float(grade or 0.0), 0.0), 0.2)
+    vo2_ml_kg_min = 0.2 * speed_m_min + 0.9 * speed_m_min * grade_value + 3.5
+    kcal = vo2_ml_kg_min * weight_kg / 1000 * 5 * duration_minutes
+    confidence = "medium" if grade_value > 0 else "low"
+    return CalculationResult(round(kcal, 1), "kcal", "acsm_running_energy", confidence, ACSM_REF)
 
 
 def calculate_hr_trimp(duration_minutes: float, average_hr_bpm: float, resting_hr_bpm: float, max_hr_bpm: float, sex: str | None) -> CalculationResult:

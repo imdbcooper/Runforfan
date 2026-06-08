@@ -3,6 +3,7 @@ from datetime import date
 
 from app.services.calculations import (
     age_from_birthdate,
+    calculate_acsm_running_energy_kcal,
     calculate_ctl_atl_tsb,
     calculate_hr_trimp,
     calculate_hrr_zones,
@@ -69,7 +70,7 @@ class CalculationTests(unittest.TestCase):
 
     def test_srpe_load_and_monotony_strain(self):
         self.assertEqual(calculate_srpe_load(60, 5).value, 300)
-        self.assertEqual(calculate_srpe_load(60, 5).method, "session_rpe")
+        self.assertEqual(calculate_srpe_load(60, 5).method, "srpe")
 
         result = calculate_monotony_strain([100, 80, 120, 90, 110, 0, 60])
         self.assertIsNotNone(result["monotony"].value)
@@ -78,6 +79,28 @@ class CalculationTests(unittest.TestCase):
         flat = calculate_monotony_strain([50, 50, 50])
         self.assertIsNone(flat["monotony"].value)
         self.assertIsNone(flat["strain"].value)
+
+    def test_acsm_running_energy_estimate(self):
+        flat = calculate_acsm_running_energy_kcal(distance_km=10, duration_seconds=3000, weight_kg=70)
+        uphill = calculate_acsm_running_energy_kcal(distance_km=10, duration_seconds=3000, weight_kg=70, grade=0.01)
+
+        self.assertEqual(flat.value, 761.2)
+        self.assertEqual(flat.unit, "kcal")
+        self.assertEqual(flat.method, "acsm_running_energy")
+        self.assertEqual(flat.confidence, "low")
+        self.assertEqual(uphill.value, 792.7)
+        self.assertEqual(uphill.confidence, "medium")
+
+    def test_acsm_running_energy_clamps_downhill_grade(self):
+        downhill = calculate_acsm_running_energy_kcal(distance_km=10, duration_seconds=3000, weight_kg=70, grade=-0.5)
+
+        self.assertEqual(downhill.value, 761.2)
+        self.assertEqual(downhill.confidence, "low")
+
+    def test_acsm_running_energy_requires_core_inputs(self):
+        self.assertIsNone(calculate_acsm_running_energy_kcal(distance_km=None, duration_seconds=3000, weight_kg=70).value)
+        self.assertIsNone(calculate_acsm_running_energy_kcal(distance_km=10, duration_seconds=0, weight_kg=70).value)
+        self.assertIsNone(calculate_acsm_running_energy_kcal(distance_km=10, duration_seconds=3000, weight_kg=None).value)
 
     def test_hr_trimp_uses_banister_sex_specific_formula(self):
         male = calculate_hr_trimp(60, average_hr_bpm=160, resting_hr_bpm=50, max_hr_bpm=190, sex="male")

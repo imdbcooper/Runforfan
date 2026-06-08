@@ -309,6 +309,7 @@ function activityMetricLabel(key: string) {
     average_pace_seconds_per_km: "pace",
     average_speed_kmh: "speed",
     duration_minutes: "minutes",
+    estimated_energy_kcal: "energy est.",
     pace_variability_seconds_per_km: "variability",
     training_load_proxy: "load",
     vertical_balance_m: "vertical",
@@ -323,6 +324,7 @@ function formatActivityMetric(metric: ActivityType["derived_metrics"][number]) {
   if (metric.unit === "seconds_per_km") return `${formatPace(metric.metric_value)}/км`
   if (metric.unit === "seconds") return formatDuration(metric.metric_value)
   if (metric.unit === "minutes") return `${metric.metric_value.toFixed(1)} min`
+  if (metric.unit === "kcal") return `${metric.metric_value.toFixed(0)} kcal`
   if (metric.unit === "kmh") return `${metric.metric_value.toFixed(2)} km/h`
   if (metric.unit === "km") return `${metric.metric_value.toFixed(2)} km`
   if (metric.unit === "count") return String(Math.round(metric.metric_value))
@@ -330,9 +332,22 @@ function formatActivityMetric(metric: ActivityType["derived_metrics"][number]) {
 }
 
 function primaryActivityMetrics(activity: ActivityType) {
-  const priority = ["average_pace_seconds_per_km", "average_speed_kmh", "training_load_proxy", "pace_variability_seconds_per_km"]
+  const priority = ["average_pace_seconds_per_km", "average_speed_kmh", "training_load_proxy", "estimated_energy_kcal", "pace_variability_seconds_per_km"]
   const metrics = activity.derived_metrics || []
   return priority.map((key) => metrics.find((metric) => metric.metric_key === key)).filter(Boolean) as ActivityType["derived_metrics"]
+}
+
+function loadMethodLabel(method: string) {
+  const labels: Record<string, string> = {
+    aerobic_training_stress: "ATS",
+    hr_trimp: "HR TRIMP",
+    mixed: "mixed",
+    pace_based_fallback: "pace fallback",
+    srpe: "sRPE",
+    support_duration_fallback: "support duration",
+    unavailable: "unavailable",
+  }
+  return labels[method] || method.replace(/_/g, " ")
 }
 
 function App() {
@@ -1288,6 +1303,7 @@ function TrainingLoadRecovery() {
   const recoveryDays = dailyPoints.filter((point) => point.recovery_day).slice(-7)
   const current = fitness?.current
   const method = fitness?.method || daily?.method || "unavailable"
+  const methodLabel = loadMethodLabel(method)
   const staleCount = (materialization?.missing_dates.length || 0) + (materialization?.stale_dates.length || 0)
   const materializationRangeLabel = preset === "all" ? "default 28-day window" : "selected range"
 
@@ -1312,7 +1328,7 @@ function TrainingLoadRecovery() {
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Training Load & Recovery</p><h2 className="mt-2 text-lg font-semibold text-white">Fitness, fatigue and recovery signals</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Daily/weekly load, CTL/ATL/TSB heuristics, monotony, strain, hard-session spacing and recovery-day alerts. These metrics are coaching signals, not medical predictions.</p></div>
-        <div className="flex flex-wrap gap-2"><Badge>{daily?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{method}</Badge>{materialization ? <Badge className={materialization.fresh ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-amber-400/40 bg-amber-400/10 text-amber-100"}>{materialization.fresh ? "materialized fresh" : `${staleCount} stale/missing`}</Badge> : materializationError ? <Badge className="border-amber-400/40 bg-amber-400/10 text-amber-100">materialization unavailable</Badge> : null}{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+        <div className="flex flex-wrap gap-2"><Badge>{daily?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{methodLabel}</Badge>{materialization ? <Badge className={materialization.fresh ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-amber-400/40 bg-amber-400/10 text-amber-100"}>{materialization.fresh ? "materialized fresh" : `${staleCount} stale/missing`}</Badge> : materializationError ? <Badge className="border-amber-400/40 bg-amber-400/10 text-amber-100">materialization unavailable</Badge> : null}{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
         <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
@@ -1330,7 +1346,7 @@ function TrainingLoadRecovery() {
       <Card className="p-3"><Stat label="CTL" value={current?.ctl.value ?? "--"} /></Card>
       <Card className="p-3"><Stat label="ATL" value={current?.atl.value ?? "--"} /></Card>
       <Card className="p-3"><Stat label="TSB" value={current?.tsb.value ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="method" value={method} /></Card>
+      <Card className="p-3"><Stat label="method" value={methodLabel} /></Card>
       <Card className="p-3"><Stat label="monotony" value={latestWeek?.monotony ?? "--"} /></Card>
       <Card className="p-3"><Stat label="strain" value={latestWeek?.strain ?? "--"} /></Card>
       <Card className="p-3"><Stat label="hard days" value={latestWeek?.hard_sessions ?? 0} /></Card>

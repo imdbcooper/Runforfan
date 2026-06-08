@@ -2423,7 +2423,8 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
     )
     db.add(activity)
     db.flush()
-    sync_derived_activity_metrics(db, activity)
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    sync_derived_activity_metrics(db, activity, profile)
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"

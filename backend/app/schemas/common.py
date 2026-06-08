@@ -543,6 +543,12 @@ class AthleteMeasurementCreate(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     notes: str | None = None
 
+    @model_validator(mode="after")
+    def validate_measurement_value(self):
+        if self.measurement_type == "weight" and self.value_numeric is not None and not 25 <= self.value_numeric <= 250:
+            raise ValueError("weight measurement must be between 25 and 250 kg")
+        return self
+
 
 class AthleteMeasurementTimelineOut(BaseModel):
     id: int

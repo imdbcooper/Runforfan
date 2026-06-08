@@ -13,6 +13,7 @@ from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_RE
 
 
 LOAD_LOOKBACK_DAYS = 84
+FITNESS_WARMUP_DAYS = 42
 DEFAULT_PERIOD_DAYS = 28
 MAX_DAILY_TRAINING_LOAD_BACKFILL_DAYS = 366
 RECOVERY_LOAD_THRESHOLD = 10.0
@@ -119,7 +120,7 @@ def activity_load(activity: Activity, workout: TrainingPlanWorkout | None, profi
         return round(float(activity.aerobic_training_stress), 1), "aerobic_training_stress", 0
     if workout and workout.feedback and workout.feedback.rpe is not None and activity.duration_seconds:
         load = calculate_srpe_load(activity.duration_seconds / 60, workout.feedback.rpe)
-        return float(load.value or 0), "session_rpe", 1
+        return float(load.value or 0), str(load.method), 1
     hr_load = hr_trimp_load(activity, profile)
     if hr_load is not None:
         return hr_load, "hr_trimp", 0
@@ -274,7 +275,26 @@ def warning(severity: str, title: str, message: str, reasons: list[str], metric:
     return {"severity": severity, "title": title, "message": message, "reasons": reasons, "metric": metric, "value": value, "threshold": threshold}
 
 
-def load_warnings(daily: list[dict[str, object]], weekly: list[dict[str, object]], fitness: list[dict[str, object]]) -> list[dict[str, object]]:
+def fitness_warmup_warning(all_daily: list[dict[str, object]], fitness: list[dict[str, object]]) -> dict[str, object] | None:
+    if not fitness:
+        return None
+    activity_dates = [point["date"] for point in all_daily if int(point["activity_count"]) > 0]
+    current_date = fitness[-1]["date"]
+    history_days = (current_date - min(activity_dates)).days + 1 if activity_dates else 0
+    if history_days >= FITNESS_WARMUP_DAYS:
+        return None
+    return warning(
+        "info",
+        "CTL/ATL/TSB warmup",
+        "Fitness/fatigue/form are still warming up because less than 42 days of load history are available.",
+        ["load history < 42 days"],
+        "ctl_atl_tsb_history_days",
+        float(history_days),
+        float(FITNESS_WARMUP_DAYS),
+    )
+
+
+def load_warnings(daily: list[dict[str, object]], weekly: list[dict[str, object]], fitness: list[dict[str, object]], warmup: dict[str, object] | None = None) -> list[dict[str, object]]:
     warnings: list[dict[str, object]] = []
     current = fitness[-1] if fitness else None
     if current:
@@ -307,6 +327,8 @@ def load_warnings(daily: list[dict[str, object]], weekly: list[dict[str, object]
     recovery_days = sum(1 for point in recent if point["recovery_day"])
     if recent and recovery_days < 2:
         warnings.append(warning("warning", "Few recovery days", "Recent week has fewer than two low-load recovery days.", ["recovery_days < 2"], "recovery_days", recovery_days, 2))
+    if warmup is not None:
+        warnings.append(warmup)
     if not warnings:
         warnings.append(warning("info", "No load alerts", "No high monotony, intensity concentration or fatigue-balance alerts for the selected period.", ["heuristics within current thresholds"]))
     return warnings[:6]
@@ -345,7 +367,7 @@ def training_load_from_data(activities: list[Activity], workouts: list[TrainingP
             },
             "points": fitness_points,
         },
-        "warnings": load_warnings(selected_daily, weekly, fitness_points),
+        "warnings": load_warnings(selected_daily, weekly, fitness_points, fitness_warmup_warning(all_daily, fitness_points)),
     }
 
 
@@ -378,6 +400,7 @@ def training_load_warning_list(db: Session, user: User, from_date: date | None =
 
 def persisted_load_method(load_method: str) -> str:
     mapping = {
+        "srpe": "srpe",
         "session_rpe": "srpe",
         "hr_trimp": "hr_trimp",
         "pace_based_fallback": "pace_fallback",

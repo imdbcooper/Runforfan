@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Activity, User
+from app.models import Activity, AthleteProfile, User
 from app.services.activity_metrics import sync_derived_activity_metrics
 
 
@@ -109,6 +109,7 @@ def activity_payload_from_csv_row(row: dict[str, Any], row_number: int, filename
 
 
 def create_activity_from_csv_payload(db: Session, user: User, payload: dict[str, Any]) -> tuple[Activity, bool]:
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     existing = None
     if payload.get("started_at") and payload.get("distance_km") and payload.get("duration_seconds"):
         existing = db.scalar(select(Activity).where(
@@ -118,12 +119,12 @@ def create_activity_from_csv_payload(db: Session, user: User, payload: dict[str,
             Activity.duration_seconds == payload["duration_seconds"],
         ))
     if existing:
-        sync_derived_activity_metrics(db, existing)
+        sync_derived_activity_metrics(db, existing, profile)
         return existing, False
     activity = Activity(user_id=user.id, **payload)
     db.add(activity)
     db.flush()
-    sync_derived_activity_metrics(db, activity)
+    sync_derived_activity_metrics(db, activity, profile)
     return activity, True
 
 

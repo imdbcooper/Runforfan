@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
-from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
 from app.schemas.common import CsvImportOut
 from app.services.audit import log_audit_event
 from app.services.activity_metrics import sync_derived_activity_metrics
@@ -33,6 +33,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     activity_payload = payload.get("activity") or {}
     if not activity_payload:
         return None
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     started_at = datetime.fromisoformat(activity_payload["started_at"]) if activity_payload.get("started_at") else None
     existing = None
     if started_at and activity_payload.get("distance_km") and activity_payload.get("duration_seconds"):
@@ -45,7 +46,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     if existing:
         for source_id in source_ids:
             db.add(ActivityScreenshot(activity_id=existing.id, source_id=source_id))
-        sync_derived_activity_metrics(db, existing)
+        sync_derived_activity_metrics(db, existing, profile)
         db.flush()
         return existing
     activity = Activity(
@@ -90,7 +91,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
             notes=block.get("notes"),
         ))
     db.flush()
-    sync_derived_activity_metrics(db, activity)
+    sync_derived_activity_metrics(db, activity, profile)
     return activity
 
 

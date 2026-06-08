@@ -6,20 +6,33 @@ from datetime import UTC, datetime
 from statistics import pstdev
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, DerivedActivityMetric
+from app.models import Activity, AthleteProfile, DerivedActivityMetric
+from app.services.calculations import calculate_acsm_running_energy_kcal
+
+
+def is_running_activity_type(activity_type: str | None) -> bool:
+    value = (activity_type or "outdoor_run").strip().lower().replace("-", "_").replace(" ", "_")
+    return value == "manual_workout" or "run" in value or "treadmill" in value
+
+
+def running_activity_type_filter():
+    value = func.replace(func.replace(func.lower(func.coalesce(Activity.activity_type, "outdoor_run")), "-", "_"), " ", "_")
+    return or_(value == "manual_workout", value.like("%run%"), value.like("%treadmill%"))
 
 
 def _round(value: float, digits: int = 1) -> float:
     return round(float(value), digits)
 
 
-def activity_metric_input_hash(activity: Activity) -> str:
+def activity_metric_input_hash(activity: Activity, weight_kg: float | None = None) -> str:
     payload = {
         "distance_km": activity.distance_km,
         "duration_seconds": activity.duration_seconds,
+        "calories_kcal": activity.calories_kcal,
+        "athlete_weight_kg": weight_kg,
         "average_heart_rate_bpm": activity.average_heart_rate_bpm,
         "elevation_gain_m": activity.elevation_gain_m,
         "elevation_loss_m": activity.elevation_loss_m,
@@ -56,12 +69,20 @@ def metric_row(metric_key: str, metric_value: float, unit: str, method: str, sou
     }
 
 
-def compute_derived_activity_metrics(activity: Activity) -> list[dict[str, Any]]:
-    input_hash = activity_metric_input_hash(activity)
+def activity_grade(activity: Activity, distance_km: float) -> float | None:
+    if activity.elevation_gain_m is None and activity.elevation_loss_m is None:
+        return None
+    net_elevation_m = float(activity.elevation_gain_m or 0) - float(activity.elevation_loss_m or 0)
+    return net_elevation_m / (distance_km * 1000)
+
+
+def compute_derived_activity_metrics(activity: Activity, profile: AthleteProfile | None = None) -> list[dict[str, Any]]:
     metrics: list[dict[str, Any]] = []
     distance = float(activity.distance_km or 0)
     duration = int(activity.duration_seconds or 0)
     duration_minutes = duration / 60 if duration > 0 else 0
+    weight_kg = profile.weight_kg if profile and is_running_activity_type(activity.activity_type) and activity.calories_kcal is None and distance > 0 and duration > 0 else None
+    input_hash = activity_metric_input_hash(activity, weight_kg)
 
     if duration > 0:
         metrics.append(metric_row("duration_minutes", _round(duration_minutes, 1), "minutes", "duration_seconds", "activities.duration_seconds", input_hash))
@@ -73,6 +94,11 @@ def compute_derived_activity_metrics(activity: Activity) -> list[dict[str, Any]]
         gain = float(activity.elevation_gain_m or 0)
         loss = float(activity.elevation_loss_m or 0)
         metrics.append(metric_row("vertical_balance_m", _round(gain - loss, 1), "m", "elevation_delta", "activities.elevation_gain_m,elevation_loss_m", input_hash))
+
+    if weight_kg:
+        energy = calculate_acsm_running_energy_kcal(distance, duration, weight_kg, activity_grade(activity, distance))
+        if energy.value is not None:
+            metrics.append(metric_row("estimated_energy_kcal", float(energy.value), energy.unit, energy.method, energy.source_reference, input_hash))
 
     segments = list(getattr(activity, "segments", []) or [])
     segment_paces = [float(segment.pace_seconds_per_km) for segment in segments if segment.pace_seconds_per_km]
@@ -98,11 +124,11 @@ def compute_derived_activity_metrics(activity: Activity) -> list[dict[str, Any]]
     return metrics
 
 
-def sync_derived_activity_metrics(db: Session, activity: Activity) -> list[DerivedActivityMetric]:
+def sync_derived_activity_metrics(db: Session, activity: Activity, profile: AthleteProfile | None = None) -> list[DerivedActivityMetric]:
     db.flush()
     if activity.id is None:
         return []
-    metric_dicts = compute_derived_activity_metrics(activity)
+    metric_dicts = compute_derived_activity_metrics(activity, profile)
     activity.derived_metrics.clear()
     db.flush()
     rows = [
@@ -159,26 +185,106 @@ def _load_backfill_candidates(db: Session, activity_ids: list[int]) -> list[Acti
     ))
 
 
-def backfill_derived_activity_metrics(db: Session, *, limit: int = 500, repair_existing: bool = False) -> int:
+def _profiles_by_user_id(db: Session, activities: list[Activity]) -> dict[int, AthleteProfile]:
+    user_ids = sorted({activity.user_id for activity in activities if activity.user_id is not None})
+    if not user_ids:
+        return {}
+    return {profile.user_id: profile for profile in db.scalars(select(AthleteProfile).where(AthleteProfile.user_id.in_(user_ids)))}
+
+
+def _activity_id_query(user_id: int | None = None):
+    query = select(Activity.id)
+    if user_id is not None:
+        query = query.where(Activity.user_id == user_id)
+    return query
+
+
+def _profile_metric_activity_id_query(user_id: int | None = None):
+    query = _activity_id_query(user_id).where(
+        Activity.calories_kcal.is_(None),
+        Activity.distance_km > 0,
+        Activity.duration_seconds > 0,
+        running_activity_type_filter(),
+    )
+    return query
+
+
+def _missing_profile_metric_activity_ids(db: Session, *, user_id: int | None, limit: int) -> list[int]:
     if limit <= 0:
-        return 0
+        return []
+    query = (
+        _profile_metric_activity_id_query(user_id)
+        .join(AthleteProfile, AthleteProfile.user_id == Activity.user_id)
+        .outerjoin(DerivedActivityMetric, (DerivedActivityMetric.activity_id == Activity.id) & (DerivedActivityMetric.metric_key == "estimated_energy_kcal"))
+        .where(
+            AthleteProfile.weight_kg > 0,
+            DerivedActivityMetric.metric_key.is_(None),
+        )
+        .order_by(Activity.id.asc())
+        .limit(limit)
+    )
+    return list(db.scalars(query))
+
+
+def _backfill_activity_ids(db: Session, *, limit: int, repair_existing: bool, include_profile_metrics: bool, user_id: int | None) -> list[int]:
     if repair_existing:
-        activity_ids = list(db.scalars(select(Activity.id).order_by(Activity.id.asc()).limit(limit)))
+        activity_ids = list(db.scalars(_activity_id_query(user_id).order_by(Activity.id.asc()).limit(limit)))
     else:
-        activity_ids = list(db.scalars(
-            select(Activity.id)
+        query = (
+            _activity_id_query(user_id)
             .outerjoin(DerivedActivityMetric, DerivedActivityMetric.activity_id == Activity.id)
             .group_by(Activity.id)
             .having(func.count(DerivedActivityMetric.metric_key) == 0)
             .order_by(Activity.id.asc())
             .limit(limit)
-        ))
+        )
+        activity_ids = list(db.scalars(query))
+    if include_profile_metrics and len(activity_ids) < limit:
+        activity_ids.extend(_missing_profile_metric_activity_ids(db, user_id=user_id, limit=limit - len(activity_ids)))
+    return list(dict.fromkeys(int(activity_id) for activity_id in activity_ids))[:limit]
+
+
+def backfill_derived_activity_metrics(db: Session, *, limit: int = 500, repair_existing: bool = False, include_profile_metrics: bool = True, user_id: int | None = None) -> int:
+    if limit <= 0:
+        return 0
+    activity_ids = _backfill_activity_ids(db, limit=limit, repair_existing=repair_existing, include_profile_metrics=include_profile_metrics, user_id=user_id)
     activities = _load_backfill_candidates(db, activity_ids)
+    profiles = _profiles_by_user_id(db, activities) if include_profile_metrics else {}
     synced_count = 0
     for activity in activities:
-        expected_metrics = compute_derived_activity_metrics(activity)
+        profile = profiles.get(activity.user_id)
+        expected_metrics = compute_derived_activity_metrics(activity, profile)
         if _metric_rows_are_current(activity, expected_metrics):
             continue
-        sync_derived_activity_metrics(db, activity)
+        sync_derived_activity_metrics(db, activity, profile)
         synced_count += 1
+    return synced_count
+
+
+def invalidate_user_profile_dependent_activity_metrics(db: Session, user_id: int) -> int:
+    result = db.execute(delete(DerivedActivityMetric).where(
+        DerivedActivityMetric.metric_key == "estimated_energy_kcal",
+        DerivedActivityMetric.activity_id.in_(_activity_id_query(user_id)),
+    ))
+    return int(result.rowcount or 0)
+
+
+def refresh_user_profile_dependent_activity_metrics(db: Session, user_id: int, *, batch_size: int = 500) -> int:
+    if batch_size <= 0:
+        batch_size = 500
+    invalidate_user_profile_dependent_activity_metrics(db, user_id)
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user_id))
+    if not profile or not profile.weight_kg or profile.weight_kg <= 0:
+        return 0
+    synced_count = 0
+    while True:
+        activity_ids = _missing_profile_metric_activity_ids(db, user_id=user_id, limit=batch_size)
+        if not activity_ids:
+            break
+        for activity in _load_backfill_candidates(db, activity_ids):
+            expected_metrics = compute_derived_activity_metrics(activity, profile)
+            if _metric_rows_are_current(activity, expected_metrics):
+                continue
+            sync_derived_activity_metrics(db, activity, profile)
+            synced_count += 1
     return synced_count

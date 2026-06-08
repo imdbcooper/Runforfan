@@ -1,9 +1,15 @@
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 DEPENDENCY_SKIP_REASON = None
 
 try:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.routes import profile as profile_routes
     from pydantic import ValidationError
 
     from app.api.routes.profile import apply_measurement_to_profile
@@ -11,7 +17,7 @@ try:
     from app.schemas.common import AthleteMeasurementCreate, AthleteProfileUpdate
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
-    if exc.name in {"pydantic", "sqlalchemy"}:
+    if exc.name in {"fastapi", "httpx", "pydantic", "pydantic_core", "sqlalchemy", "starlette"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for profile tests"
     else:
         raise
@@ -70,6 +76,50 @@ class ProfileServiceTests(unittest.TestCase):
 
         self.assertFalse(changed_zones)
         self.assertEqual(profile.vo2max, 52.4)
+
+    def test_weight_measurement_validates_profile_range(self):
+        with self.assertRaises(ValidationError):
+            AthleteMeasurementCreate(measurement_type="weight", value_numeric=-1, source="manual")
+
+        with self.assertRaises(ValidationError):
+            AthleteMeasurementCreate(measurement_type="weight", value_numeric=251, source="manual")
+
+    def test_profile_weight_update_repairs_profile_dependent_metrics(self):
+        profile = AthleteProfile(id=10, user_id=42, weight_kg=70, sex="unspecified", conservative_mode=False)
+        profile.created_at = datetime(2026, 6, 8, tzinfo=UTC)
+        profile.updated_at = datetime(2026, 6, 8, tzinfo=UTC)
+        db = SimpleNamespace(commit=Mock(), refresh=Mock())
+        app = FastAPI()
+        app.include_router(profile_routes.router, prefix="/api")
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[profile_routes.get_current_user] = lambda: SimpleNamespace(id=42)
+        app.dependency_overrides[profile_routes.get_db] = override_db
+
+        with (
+            patch.object(profile_routes, "get_or_create_profile", return_value=profile),
+            patch.object(profile_routes, "refresh_user_profile_dependent_activity_metrics") as refresh_metrics,
+        ):
+            response = TestClient(app).put("/api/profile", json={"weight_kg": 72})
+
+        self.assertEqual(response.status_code, 200)
+        refresh_metrics.assert_called_once_with(db, 42)
+
+    def test_weight_measurement_repairs_profile_dependent_metrics(self):
+        profile = AthleteProfile(id=10, user_id=42, weight_kg=70)
+        db = SimpleNamespace(add=Mock(), commit=Mock(), refresh=Mock())
+        payload = AthleteMeasurementCreate(measurement_type="weight", value_numeric=72, source="manual")
+
+        with (
+            patch.object(profile_routes, "get_or_create_profile", return_value=profile),
+            patch.object(profile_routes, "refresh_user_profile_dependent_activity_metrics") as refresh_metrics,
+        ):
+            profile_routes.create_measurement(payload, SimpleNamespace(id=42), db)
+
+        self.assertEqual(profile.weight_kg, 72)
+        refresh_metrics.assert_called_once_with(db, 42)
 
 
 if __name__ == "__main__":
