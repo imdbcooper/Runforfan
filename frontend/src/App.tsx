@@ -4,7 +4,10 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
+import { CalculationExplainer } from "@/components/ui/calculation-explainer"
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
+import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
 import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -645,6 +648,42 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
 }
 
 function Activities({ activities, compact = false, onImport }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void }) {
+  if (!compact) {
+    const activityColumns: DataTableColumn<ActivityType>[] = [
+      { key: "name", header: "Name", sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
+        const summary = workoutBlockSummary(activity)
+        return <div className="font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</div>
+      } },
+      { key: "distance", header: "Distance", sortValue: (activity) => activity.distance_km || 0, cell: (activity) => <>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></> },
+      { key: "pace", header: "Pace", sortValue: (activity) => activity.average_pace_seconds_per_km || 99999, cell: (activity) => {
+        const derived = primaryActivityMetrics(activity)
+        return <>{formatPace(activity.average_pace_seconds_per_km)}/км{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</>
+      } },
+      { key: "hr", header: "HR", sortValue: (activity) => activity.average_heart_rate_bpm || 0, cell: (activity) => activity.average_heart_rate_bpm || "--" },
+      { key: "structure", header: "Structure", sortValue: (activity) => activity.workout_blocks?.length || activity.segments.length || 0, cell: (activity) => {
+        const summary = workoutBlockSummary(activity)
+        return <>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{activity.derived_metrics.length} derived metrics</div> : null}</>
+      } },
+      { key: "id", header: "ID", sortValue: (activity) => activity.id, cell: (activity) => <span className="font-mono text-zinc-500">#{activity.id}</span> },
+    ]
+    return <Card>
+      <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total · sortable, filterable, paginated</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
+      <DataTable
+        rows={activities}
+        columns={activityColumns}
+        getRowKey={(activity) => activity.id}
+        getSearchText={(activity) => `${activity.title} ${activity.id} ${activity.started_at || ""}`}
+        filterPlaceholder="Filter by title, date, id"
+        emptyState={<div className="flex flex-wrap items-center gap-3"><span>No activities match this filter.</span><Button size="sm" variant="secondary" onClick={onImport}>Import activity</Button></div>}
+      />
+      {activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
+        {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+          <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+          <div className="grid gap-1">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}/км</span></div>)}</div>
+        </div>)}
+      </div>}
+    </Card>
+  }
   return <Card>
     <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
     <div className="overflow-x-auto">
@@ -1212,6 +1251,7 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
   const [insights, setInsights] = useState<AnalyticsInsight[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     const query = analyticsQuery(preset, customFrom, customTo)
@@ -1237,14 +1277,14 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
         }
       } catch (caught) {
         console.error(caught)
-        if (!cancelled) setError("Analytics API недоступен")
+        if (!cancelled) setError(apiErrorMessage(caught, "Analytics API недоступен"))
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     void loadAnalytics()
     return () => { cancelled = true }
-  }, [preset, customFrom, customTo])
+  }, [preset, customFrom, customTo, reloadToken])
 
   const months = summary?.months || []
   const maxMonth = Math.max(1, ...months.map((month) => month.distance_km))
@@ -1261,18 +1301,18 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
         <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
         <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
       </div>
-      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+      {error ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => setReloadToken((current) => current + 1)}>Retry</Button></div> : null}
     </Card>
 
     <div className="grid gap-3 md:grid-cols-4">
-      <Card className="p-3"><Stat label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix="km" /></Card>
-      <Card className="p-3"><Stat label="time" value={formatDuration(summary?.total_duration_seconds)} /></Card>
-      <Card className="p-3"><Stat label="workouts" value={summary?.activity_count || 0} /></Card>
-      <Card className="p-3"><Stat label="adherence" value={`${Math.round((summary?.adherence?.completion_rate || 0) * 100)}%`} /></Card>
-      <Card className="p-3"><Stat label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}/км`} /></Card>
-      <Card className="p-3"><Stat label="avg HR" value={summary?.average_heart_rate_bpm || "--"} /></Card>
-      <Card className="p-3"><Stat label="load" value={summary?.training_load ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} /></Card>
+      <MetricCard label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix="km" />
+      <MetricCard label="time" value={formatDuration(summary?.total_duration_seconds)} />
+      <MetricCard label="workouts" value={summary?.activity_count || 0} />
+      <MetricCard label="adherence" value={`${Math.round((summary?.adherence?.completion_rate || 0) * 100)}%`} hint="done workouts / planned workouts" explainer={<CalculationExplainer><p>Completion rate is calculated from active-plan workouts in the selected period. Missed and skipped workouts lower the value.</p></CalculationExplainer>} />
+      <MetricCard label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}/км`} hint="total duration / total distance" explainer={<CalculationExplainer><p>Weighted pace uses total moving duration divided by total distance, so short outlier runs do not distort the average like a simple mean would.</p></CalculationExplainer>} />
+      <MetricCard label="avg HR" value={summary?.average_heart_rate_bpm || "--"} hint="duration-weighted" explainer={<CalculationExplainer><p>Average HR is weighted by activity duration. Longer runs contribute more than short sessions.</p></CalculationExplainer>} />
+      <MetricCard label="load" value={summary?.training_load ?? "--"} hint={summary?.load_method || "unavailable"} explainer={<CalculationExplainer><p>Load sums aerobic training stress when available. If devices do not provide stress values, the card stays unavailable instead of guessing.</p></CalculationExplainer>} />
+      <MetricCard label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} hint={vdot ? `${vdot.confidence} · ${vdot.method}` : vo2 ? `${vo2.confidence} · ${vo2.method}` : "needs race/device data"} explainer={<CalculationExplainer><p>VDOT is derived from race-like best efforts. Manual or device VO2max is shown as fallback and keeps its own method and confidence.</p></CalculationExplainer>} />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -1395,14 +1435,14 @@ function TrainingLoadRecovery() {
     </Card>
 
     <div className="grid gap-3 md:grid-cols-4">
-      <Card className="p-3"><Stat label="CTL" value={current?.ctl.value ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="ATL" value={current?.atl.value ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="TSB" value={current?.tsb.value ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="method" value={methodLabel} /></Card>
-      <Card className="p-3"><Stat label="monotony" value={latestWeek?.monotony ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="strain" value={latestWeek?.strain ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="hard days" value={latestWeek?.hard_sessions ?? 0} /></Card>
-      <Card className="p-3"><Stat label="recovery days" value={latestWeek?.recovery_days ?? 0} /></Card>
+      <MetricCard label="CTL" value={current?.ctl.value ?? "--"} hint={current?.ctl.method || "42-day EWMA"} explainer={<CalculationExplainer><p>Chronic Training Load is a long-window EWMA of daily load. It approximates fitness trend, not readiness by itself.</p></CalculationExplainer>} />
+      <MetricCard label="ATL" value={current?.atl.value ?? "--"} hint={current?.atl.method || "7-day EWMA"} explainer={<CalculationExplainer><p>Acute Training Load reacts faster to recent sessions. A sharp ATL rise can indicate short-term fatigue.</p></CalculationExplainer>} />
+      <MetricCard label="TSB" value={current?.tsb.value ?? "--"} hint={current?.tsb.method || "CTL - ATL"} explainer={<CalculationExplainer><p>Training Stress Balance is CTL minus ATL. Negative values often mean higher recent fatigue; positive values often mean fresher legs.</p></CalculationExplainer>} />
+      <MetricCard label="method" value={methodLabel} hint="load source" />
+      <MetricCard label="monotony" value={latestWeek?.monotony ?? "--"} explainer={<CalculationExplainer><p>Monotony compares average daily load with day-to-day variation. Higher values can flag repetitive loading.</p></CalculationExplainer>} />
+      <MetricCard label="strain" value={latestWeek?.strain ?? "--"} explainer={<CalculationExplainer><p>Strain combines weekly load with monotony. It highlights weeks that are both heavy and repetitive.</p></CalculationExplainer>} />
+      <MetricCard label="hard days" value={latestWeek?.hard_sessions ?? 0} hint="quality sessions" />
+      <MetricCard label="recovery days" value={latestWeek?.recovery_days ?? 0} hint="easy or rest days" />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
