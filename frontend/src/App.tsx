@@ -735,7 +735,7 @@ function LanguageToggle({ language, onLanguageChange }: { language: Language; on
       aria-label={item === "ru" ? "Use Russian" : "Use English"}
       aria-pressed={language === item}
       onClick={() => onLanguageChange(item)}
-      className={cn("h-6 rounded px-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors", language === item ? "bg-orange-500 text-black" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200")}
+      className={cn("h-8 rounded px-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors md:h-6 md:px-2", language === item ? "bg-orange-500 text-black" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200")}
     >{item}</button>)}
   </div>
 }
@@ -905,7 +905,14 @@ function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSumma
       <Stat label="planned" value={formatDistance(adherence?.planned_distance_km)} />
       <Stat label="actual" value={formatDistance(adherence?.completed_distance_km)} />
     </div>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {currentWeek.workouts.map((workout) => <div key={`mobile-${workout.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{workout.title}</p><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workout.workout_type} · {workout.intensity || "--"}</p></div><Badge className={signalClass(workout.status)}>{workout.status}</Badge></div>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="plan" value={formatWorkoutTarget(workout)} /><Stat label="actual" value={formatWorkoutActual(workout)} /><Stat label="score" value={workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`} /></div>
+      </div>)}
+      {!currentWeek.workouts.length && <p className="text-xs text-zinc-500">No workouts in the current calendar week.</p>}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[760px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Workout</th><th>Date</th><th>Type</th><th>Plan</th><th>Actual</th><th>Score</th><th>Status</th></tr></thead>
         <tbody>{currentWeek.workouts.map((workout) => <tr key={workout.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">#{workout.id} · week {workout.week_index}</div></td><td>{formatDate(workout.scheduled_date)}</td><td>{workout.workout_type}<div className="text-[11px] text-zinc-500">{workout.intensity || "--"}</div></td><td>{formatWorkoutTarget(workout)}</td><td>{formatWorkoutActual(workout)}</td><td>{workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`}<div className="text-[11px] text-zinc-500">{workout.execution_score?.subjective_risk || "--"}</div></td><td><Badge className={signalClass(workout.status)}>{workout.status}</Badge></td></tr>)}</tbody>
@@ -917,6 +924,27 @@ function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSumma
 
 function Stat({ label, value, suffix }: { label: string; value: string | number; suffix?: string }) {
   return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white" translate="no">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500" data-i18n-ui>{label}</span></div>
+}
+
+function CollapsibleSection({ title, summary, defaultOpen = false, children, className }: { title: string; summary?: ReactNode; defaultOpen?: boolean; children: ReactNode; className?: string }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+
+  return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className={cn("group rounded-md border border-zinc-800 bg-zinc-950/70", className)}>
+    <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-white [&::-webkit-details-marker]:hidden">
+      <span>{title}</span>
+      <span className="flex items-center gap-2 text-[10px] font-normal uppercase tracking-[0.14em] text-zinc-500">{summary}<span className="text-orange-300 group-open:hidden">open</span><span className="hidden text-zinc-500 group-open:inline">close</span></span>
+    </summary>
+    <div className="border-t border-zinc-800 p-3">{children}</div>
+  </details>
+}
+
+function ResponsiveDetailPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return <div className="fixed inset-0 z-50 bg-black/80 p-2 md:static md:bg-transparent md:p-0">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-orange-400/30 bg-zinc-950 md:block md:h-auto md:overflow-visible md:rounded-none md:border-0 md:bg-transparent">
+      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 md:hidden"><p className="text-sm font-semibold text-white">{title}</p><Button size="sm" variant="ghost" onClick={onClose}>Close</Button></div>
+      <div className="min-h-0 overflow-y-auto p-2 md:overflow-visible md:p-0">{children}</div>
+    </div>
+  </div>
 }
 
 function Activities({ activities, compact = false, onImport, onChanged }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void; onChanged?: () => Promise<void> }) {
@@ -1023,7 +1051,8 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
     ]
     return <Card>
       <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total · sortable, filterable, paginated</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
-      <form onSubmit={createManualActivity} className="grid gap-3 border-t border-zinc-800 bg-zinc-950/50 p-4 text-xs md:grid-cols-6">
+      <CollapsibleSection title="Manual activity" summary={<Badge>manual</Badge>} className="mx-4 mt-4 md:mx-0 md:mt-0 md:rounded-none md:border-x-0 md:border-b-0">
+      <form onSubmit={createManualActivity} className="grid gap-3 text-xs md:grid-cols-6">
         <Field label="Title"><Input name="title" placeholder="Manual run" /></Field>
         <Field label="Started"><Input name="started_at" type="datetime-local" /></Field>
         <Field label="Type"><Select name="activity_type"><option value="manual_workout">manual workout</option><option value="outdoor_run">outdoor run</option><option value="treadmill_run">treadmill run</option><option value="manual_strength">strength</option></Select></Field>
@@ -1034,6 +1063,7 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
         <div className="flex items-end"><Button type="submit" size="sm" disabled={manualBusy}>+ Manual</Button></div>
         {manualMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300" translate="no">{manualMessage}</p> : null}
       </form>
+      </CollapsibleSection>
       <DataTable
         rows={activities}
         columns={activityColumns}
@@ -1041,19 +1071,41 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
         getSearchText={(activity) => `${activity.title} ${activity.id} ${activity.started_at || ""}`}
         filterPlaceholder="Filter by title, date, id"
         emptyState={<div className="flex flex-wrap items-center gap-3"><span>No activities match this filter.</span><Button size="sm" variant="secondary" onClick={onImport}>Import activity</Button></div>}
+        mobileCard={(activity) => {
+          const summary = workoutBlockSummary(activity)
+          const derived = primaryActivityMetrics(activity)
+          return <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+            <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{activity.title}</p><p className="mt-1 text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</p></div><Badge className="font-mono text-zinc-400">#{activity.id}</Badge></div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="distance" value={formatDistance(activity.distance_km)} /><Stat label="pace" value={`${formatPace(activity.average_pace_seconds_per_km)}${perKmUnit()}`} /><Stat label="hr" value={activity.average_heart_rate_bpm || "--"} /></div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">{summary ? <Badge>interval</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{summary || splitCountLabel(activity.segments.length)}</Badge>{derived.slice(0, 1).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div>
+            <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>Inspect</Button>
+          </div>
+        }}
       />
-      {detail ? <ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /> : null}
-      {activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
+      {detail ? <ResponsiveDetailPanel title="Activity detail" onClose={closeActivityDetail}><ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /></ResponsiveDetailPanel> : null}
+      {activities.some((activity) => activity.workout_blocks?.length) && <CollapsibleSection title="Interval structures" summary={<Badge>{activities.filter((activity) => activity.workout_blocks?.length).length}</Badge>} className="mx-4 mb-4"><div className="grid gap-3 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
           <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
           <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
         </div>)}
-      </div>}
+      </div></CollapsibleSection>}
     </Card>
   }
   return <Card>
     <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {activities.slice(0, compact ? 6 : undefined).map((activity) => {
+        const summary = workoutBlockSummary(activity)
+        const derived = primaryActivityMetrics(activity)
+        return <div key={`compact-mobile-${activity.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+          <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{activity.title}</p><p className="mt-1 text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</p></div><Badge className="font-mono text-zinc-400" translate="no">#{activity.id}</Badge></div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="distance" value={formatDistance(activity.distance_km)} /><Stat label="pace" value={`${formatPace(activity.average_pace_seconds_per_km)}${perKmUnit()}`} /><Stat label="hr" value={activity.average_heart_rate_bpm || "--"} /></div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">{summary ? <Badge>interval</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{summary || splitCountLabel(activity.segments.length)}</Badge>{derived.slice(0, 1).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div>
+        </div>
+      })}
+      {!activities.length ? <p className="text-xs text-zinc-500">No recent activities.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Name</th><th>Distance</th><th>Pace</th><th>HR</th><th>Structure</th><th>ID</th></tr></thead>
         <tbody>{activities.slice(0, compact ? 6 : undefined).map((activity) => {
@@ -1124,7 +1176,8 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <Stat label="sources" value={`${sources.length || validation?.source_counts.screenshots || 0} screenshots`} />
       </div>
 
-      <form key={`${activity.id}-${activity.title}-${activity.activity_type}-${activity.started_at || ""}-${activity.distance_km || ""}-${activity.duration_seconds}-${activity.average_heart_rate_bpm || ""}-${activity.source_note || ""}`} onSubmit={submitEdit} className="grid gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 md:grid-cols-6">
+      <CollapsibleSection title="Quick edit" summary={<Badge>manual correction</Badge>}>
+      <form key={`${activity.id}-${activity.title}-${activity.activity_type}-${activity.started_at || ""}-${activity.distance_km || ""}-${activity.duration_seconds}-${activity.average_heart_rate_bpm || ""}-${activity.source_note || ""}`} onSubmit={submitEdit} className="grid gap-3 text-xs md:grid-cols-6">
         <div className="md:col-span-6 flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Quick edit</p><p className="mt-1 text-zinc-500">Manual corrections recalculate pace, speed, derived metrics and daily load.</p></div><Badge>manual correction</Badge></div>
         <Field label="Title"><Input name="title" defaultValue={activity.title} /></Field>
         <Field label="Started"><Input name="started_at" type="datetime-local" step="1" defaultValue={datetimeLocalValue(activity.started_at)} /></Field>
@@ -1136,6 +1189,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <div className="flex items-end"><Button type="submit" size="sm" variant="secondary" disabled={loading}>Save edit</Button></div>
         {editMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300" translate="no">{editMessage}</p> : null}
       </form>
+      </CollapsibleSection>
 
       <div className="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Validation report</p><p className="mt-1 text-zinc-500">Data quality checks for pace, segments, blocks and physiological ranges.</p></div><Badge className={signalClass(validation?.status)}>{warnings.length} warnings</Badge></div>
@@ -1147,7 +1201,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         </div> : loading && !validation ? <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">Loading validation checks...</p> : !validation ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">Validation report is unavailable for this activity.</p> : <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">No validation issues detected for loaded data.</p>}
       </div>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+      <CollapsibleSection title="Recognition sources" summary={<Badge>{sources.length} sources</Badge>}>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Recognition sources</p><p className="mt-1 text-zinc-500">Safe screenshot metadata linked to this activity; local file paths are not exposed.</p></div><Badge>{sources.length} sources</Badge></div>
         {sources.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {sources.map((source) => <div key={source.source_id} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2" translate="no">
@@ -1157,8 +1211,9 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
             {source.notes ? <p className="mt-2 text-[11px] text-zinc-400">{source.notes}</p> : null}
           </div>)}
         </div> : <p className="text-zinc-500">No linked screenshot sources for this activity.</p>}
-      </div>
+      </CollapsibleSection>
 
+      <CollapsibleSection title="Splits and workout blocks" summary={<Badge>{segments.length + workoutBlocks.length} rows</Badge>}>
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
           <table className="w-full min-w-[560px] text-left text-xs">
@@ -1175,13 +1230,14 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
           {!workoutBlocks.length ? <p className="p-3 text-zinc-500">No structured workout blocks.</p> : null}
         </div>
       </div>
+      </CollapsibleSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+      <CollapsibleSection title="Calculations and source metadata" summary={<Badge>{derived.length} metrics</Badge>}>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Calculations and source metadata</p><Badge>{derived.length} metrics</Badge></div>
         {derived.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2" translate="no"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p><p className="mt-1 font-mono text-[10px] text-zinc-600">computed {formatLocalDateTime(metric.computed_at)} · hash {metric.input_hash.slice(0, 8)}</p></div>)}
         </div> : <p className="text-zinc-500">No derived metrics yet.</p>}
-      </div>
+      </CollapsibleSection>
     </div>
   </Card>
 }
@@ -1370,8 +1426,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
           <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
         </div>
       </Card>
-      <Card>
-        <CardHeader><div><CardTitle>CSV import</CardTitle><p className="text-xs text-zinc-500">Import date, distance, duration, pace and HR columns.</p></div><Badge>6.18</Badge></CardHeader>
+      <CollapsibleSection title="CSV import" summary={<Badge>6.18</Badge>}>
         <form onSubmit={uploadCsv} className="grid gap-3 p-4 text-xs">
           <Field label="CSV file"><Input name="csv_file" type="file" accept=".csv,text/csv" required /></Field>
           <Field label="Source app"><Input name="source_app" defaultValue="csv" placeholder="garmin, strava, manual" /></Field>
@@ -1384,7 +1439,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
           <Stat label="failed" value={csvResult.failed_rows} />
           {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
         </div> : null}
-      </Card>
+      </CollapsibleSection>
     </div>
 
     <div className="grid gap-4">
@@ -1398,23 +1453,32 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
           </div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400" translate="no">{uploadResult.recognition_message || "No recognition message"}</div>
-          {uploadResult.requires_confirmation && uploadResult.candidate ? <ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /> : null}
+          {uploadResult.requires_confirmation && uploadResult.candidate ? <CollapsibleSection title="Technical candidate review" summary={<Badge>confirm needed</Badge>} defaultOpen><ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /></CollapsibleSection> : null}
           {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
           {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
         </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
       </Card>
 
-      <Card>
-        <CardHeader><div><CardTitle>Import history</CardTitle><p className="text-xs text-zinc-500">Recent recognition batches for current user.</p></div><Button size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></CardHeader>
-        {importHistoryError ? <p className="px-4 pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
-        <div className="overflow-x-auto">
+      <CollapsibleSection title="Import history" summary={<Badge>{imports.length} batches</Badge>}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><p className="text-zinc-500">Recent recognition batches and confirmation queue.</p><Button type="button" size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></div>
+        {importHistoryError ? <p className="pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
+        <div className="grid gap-2 md:hidden">
+          {imports.map((batch) => <div key={`import-mobile-${batch.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no">
+            <div className="flex items-start justify-between gap-2"><div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Batch #{batch.id}</p><p className="mt-1 text-zinc-500">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</p></div><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500"><span>Activity {batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</span><span>Match {batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</span><span className="col-span-full">Engine {batch.recognition_engine || "--"}</span></div>
+            <p className="mt-2 break-words text-zinc-500">{batch.recognition_message || "--"}</p>
+            {batch.requires_confirmation ? <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : null}
+          </div>)}
+          {!imports.length && <p className="text-xs text-zinc-500">История импортов пока пуста.</p>}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Action</th><th>Date</th></tr></thead>
-            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500" translate="no">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"} translate="no">{batch.status}</Badge></td><td translate="no">{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td translate="no">{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td translate="no">{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] break-words text-zinc-500" translate="no">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500" translate="no">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
           </table>
           {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
         </div>
-      </Card>
+      </CollapsibleSection>
     </div>
   </div>
 }
@@ -1676,7 +1740,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
 function CalendarDay({ day, events, load, maxLoad, ...cardProps }: CalendarDayProps) {
   const today = toISODate(new Date())
   const width = Math.max(6, Math.round(load / maxLoad * 100))
-  return <div className={cn("min-h-48 rounded-lg border bg-zinc-950/60 p-3 text-xs", day === today ? "border-orange-400/40" : "border-zinc-800")}>
+  return <div className={cn("min-h-0 rounded-lg border bg-zinc-950/60 p-3 text-xs md:min-h-48", day === today ? "border-orange-400/40" : "border-zinc-800")}>
     <div className="flex items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day)}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{dateFromISO(day).toLocaleDateString(languageLocale(), { weekday: "short" })}</p></div>{events.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{events.length}</Badge> : null}</div>
     <div className="mt-3 h-1.5 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${width}%` }} /></div>
     <div className="mt-3 grid gap-2">{events.length ? events.map((event) => <CalendarEventCard key={event.id} event={event} {...cardProps} />) : <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-2 text-zinc-600">No plan or activity.</p>}</div>
@@ -1700,7 +1764,8 @@ function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent
     {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500" translate="no">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
     {event.linked_activity_id && isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Linked activity #{event.linked_activity_id}</p> : null}
     {event.planned_workout_id && !isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Matched to workout #{event.planned_workout_id}</p> : null}
-    {canReschedule ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+    {(canReschedule || isWorkout || canFindWorkoutActivity || canFindActivityWorkout || matchError || matchState) ? <CollapsibleSection title="Actions" summary={<Badge>{busy || loadingMatches ? "busy" : "more"}</Badge>} className="mt-2">
+    {canReschedule ? <div className="grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
       <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Reschedule</p>
       <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(change) => onRescheduleDraft(event.id, change.target.value)} /><Button size="sm" variant="ghost" disabled={busy || !rescheduleDraft || rescheduleDraft === event.date} onClick={() => onReschedule(event, rescheduleDraft)}>Move</Button></div>
     </div> : null}
@@ -1714,6 +1779,7 @@ function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent
     </div>
     {matchError ? <p className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{matchError}</p> : null}
     {matchState ? <CalendarMatchCandidates event={event} state={matchState} busy={busy} onLinkMatch={onLinkMatch} /> : null}
+    </CollapsibleSection> : null}
   </div>
 }
 
@@ -2107,7 +2173,15 @@ function ZoneDistributionBars({ title, items, compact = false }: { title: string
 function PlannedActualZones({ rows }: { rows: ZonePlannedActual[] }) {
   return <Card>
     <CardHeader><div><CardTitle>Planned vs actual</CardTitle><p className="text-xs text-zinc-500">Zone distribution from active plan intensity compared with classified actual duration.</p></div><Badge>{rows.length} rows</Badge></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {rows.map((row) => <div key={`mobile-planned-actual-${row.zone_key}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{row.label}</p><p className="font-mono text-[10px] text-zinc-600">{row.zone_key}</p></div><Badge className={Math.abs(row.diff_percentage) >= 15 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{row.diff_percentage > 0 ? "+" : ""}{row.diff_percentage.toFixed(1)}%</Badge></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center"><Stat label="planned" value={formatDuration(row.planned_duration_seconds)} /><Stat label="actual" value={formatDuration(row.actual_duration_seconds)} /></div>
+        <p className="mt-2 text-[11px] text-zinc-500">planned {row.planned_percentage.toFixed(1)}% · actual {row.actual_percentage.toFixed(1)}%</p>
+      </div>)}
+      {!rows.length ? <p className="text-xs text-zinc-500">Нет planned-vs-actual rows.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[620px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Zone</th><th>Planned</th><th>Actual</th><th>Delta</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={row.zone_key} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{row.label}<div className="font-mono text-[10px] text-zinc-600">{row.zone_key}</div></td><td>{formatDuration(row.planned_duration_seconds)}<div className="text-[11px] text-zinc-500">{row.planned_percentage.toFixed(1)}%</div></td><td>{formatDuration(row.actual_duration_seconds)}<div className="text-[11px] text-zinc-500">{row.actual_percentage.toFixed(1)}%</div></td><td><Badge className={Math.abs(row.diff_percentage) >= 15 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{row.diff_percentage > 0 ? "+" : ""}{row.diff_percentage.toFixed(1)}%</Badge></td></tr>)}</tbody>
@@ -2155,7 +2229,14 @@ function FitnessFatigueChart({ fitness }: { fitness: TrainingLoadFitnessFatigue 
   const points = fitness?.points.slice(-10) || []
   return <Card>
     <CardHeader><div><CardTitle>CTL / ATL / TSB</CardTitle><p className="text-xs text-zinc-500">{fitness?.explanation || "EWMA load heuristics."}</p></div><Badge>{points.length} points</Badge></CardHeader>
-    <div className="overflow-x-auto p-4">
+    <div className="grid gap-2 p-4 md:hidden">
+      {points.map((point) => <div key={`mobile-fitness-${point.date}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+        <div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{formatDate(point.date)}</p><Badge className={point.tsb <= -10 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : point.tsb >= 5 ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-400"}>TSB {point.tsb.toFixed(1)}</Badge></div>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="load" value={point.load.toFixed(1)} /><Stat label="ctl" value={point.ctl.toFixed(1)} /><Stat label="atl" value={point.atl.toFixed(1)} /></div>
+      </div>)}
+      {!points.length ? <p className="text-xs text-zinc-500">Нет fitness/fatigue points.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto p-4 md:block">
       <table className="w-full min-w-[620px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Date</th><th>Load</th><th>CTL</th><th>ATL</th><th>TSB</th></tr></thead>
         <tbody>{points.map((point) => <tr key={point.date} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-medium text-white">{formatDate(point.date)}</td><td>{point.load.toFixed(1)}</td><td>{point.ctl.toFixed(1)}</td><td>{point.atl.toFixed(1)}</td><td><Badge className={point.tsb <= -10 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : point.tsb >= 5 ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-400"}>{point.tsb.toFixed(1)}</Badge></td></tr>)}</tbody>
@@ -2178,7 +2259,18 @@ function TrainingLoadWarnings({ warnings }: { warnings: TrainingLoadWarning[] })
 function HardSessionSpacing({ hardDays }: { hardDays: TrainingLoadDailyPoint[] }) {
   return <Card>
     <CardHeader><CardTitle>Hard sessions spacing</CardTitle><Badge>{hardDays.length} hard days</Badge></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {hardDays.map((day, index) => {
+        const previous = hardDays[index - 1]
+        const gap = previous ? Math.round((dateFromISO(day.date).getTime() - dateFromISO(previous.date).getTime()) / 86400000) : null
+        return <div key={`mobile-hard-${day.date}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no">
+          <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day.date)}</p><p className="mt-1 text-zinc-500">{day.load.toFixed(1)} au</p></div><Badge className={gap !== null && gap < 2 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{gap === null ? "first" : `${gap} d`}</Badge></div>
+          {day.hard_reasons.length ? <p className="mt-2 break-words text-[11px] text-zinc-500">{day.hard_reasons.join(" · ")}</p> : null}
+        </div>
+      })}
+      {!hardDays.length ? <p className="text-xs text-zinc-500">Hard sessions не обнаружены.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[560px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Date</th><th>Load</th><th>Gap</th><th>Reasons</th></tr></thead>
         <tbody>{hardDays.map((day, index) => {
@@ -2354,7 +2446,16 @@ function PerformanceAnalytics() {
 function PerformanceResultsTable({ title, results }: { title: string; results: PerformanceResult[] }) {
   return <Card>
     <CardHeader><CardTitle>{title}</CardTitle><Badge>{results.length} rows</Badge></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {results.map((result) => <div key={`mobile-result-${result.id}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0" translate="no"><p className="truncate font-medium text-white">{result.name}</p><p className="mt-1 text-zinc-500">#{result.id} · {formatDateTime(result.result_date)} · {result.terrain}</p></div><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge></div>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="distance" value={`${result.distance_km.toFixed(2)} ${kmUnit()}`} /><Stat label="time" value={formatDuration(result.duration_seconds)} /><Stat label="pace" value={`${formatPace(result.pace_seconds_per_km)}${perKmUnit()}`} /></div>
+        <p className="mt-2 break-words text-[11px] text-zinc-500" translate="no">VDOT {result.estimated_vdot?.value ?? "--"}{result.estimated_vdot ? ` · ${calculationMetadata(result.estimated_vdot)}` : ""}</p>
+        {result.noisy_reasons.length ? <p className="mt-1 break-words text-[11px] text-orange-200" translate="no">{result.noisy_reasons.join(" · ")}</p> : null}
+      </div>)}
+      {!results.length ? <p className="text-xs text-zinc-500">Нет сохраненных результатов этого типа.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Result</th><th>Date</th><th>Distance</th><th>Time</th><th>Pace</th><th>VDOT</th><th>Signal</th></tr></thead>
         <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} {kmUnit()}</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}{perKmUnit()}</td><td>{result.estimated_vdot?.value ?? "--"}{result.estimated_vdot ? <div className="mt-1 max-w-[13rem] text-[10px] text-zinc-600">{calculationMetadata(result.estimated_vdot)}</div> : null}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
@@ -2367,7 +2468,16 @@ function PerformanceResultsTable({ title, results }: { title: string; results: P
 function PerformancePredictions({ predictions }: { predictions: PerformancePrediction[] }) {
   return <Card>
     <CardHeader><div><CardTitle>Equivalent race predictions</CardTitle><p className="text-xs text-zinc-500">Riegel predictions show confidence and extrapolation warnings.</p></div><Badge>{predictions.length} targets</Badge></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {predictions.map((prediction) => <div key={`mobile-prediction-${prediction.label}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">{prediction.label}</p><p className="mt-1 text-zinc-500">{prediction.target_distance_km} {kmUnit()} · source {prediction.source_distance_km?.toFixed(2) ?? "--"} {kmUnit()}</p></div><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center"><Stat label="prediction" value={formatDuration(prediction.predicted_duration_seconds)} /><Stat label="pace" value={`${formatPace(prediction.predicted_pace_seconds_per_km)}${perKmUnit()}`} /></div>
+        <p className="mt-2 break-words text-[11px] text-zinc-500" translate="no">{prediction.source_result_name || "--"} · ratio {prediction.extrapolation_ratio ?? "--"}</p>
+        <p className="mt-1 break-words text-[11px] text-zinc-600" translate="no">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"} · {prediction.method} · {prediction.source_reference}</p>
+      </div>)}
+      {!predictions.length ? <p className="text-xs text-zinc-500">Нужен race/time trial результат &gt;= 3 км для прогнозов.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[680px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Target</th><th>Prediction</th><th>Pace</th><th>Source</th><th>Confidence</th><th>Notes</th></tr></thead>
         <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} {kmUnit()}</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}{perKmUnit()}</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div><div className="text-[10px] text-zinc-600">source {prediction.source_distance_km?.toFixed(2) ?? "--"} {kmUnit()} · {formatDuration(prediction.source_duration_seconds)}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}<div className="mt-1 text-[10px] text-zinc-600">{prediction.method} · {prediction.source_reference}</div></td></tr>)}</tbody>
@@ -2407,7 +2517,11 @@ function formatPerformanceZoneRange(zone: PerformancePaceZone) {
 function PerformancePaceZones({ zones }: { zones: PerformancePaceZone[] }) {
   return <Card>
     <CardHeader><div><CardTitle>Pace zones</CardTitle><p className="text-xs text-zinc-500">Derived from profile threshold pace or VDOT threshold estimate.</p></div><Badge>{zones.length} zones</Badge></CardHeader>
-    <div className="overflow-x-auto">
+    <div className="grid gap-2 p-4 md:hidden">
+      {zones.map((zone) => <div key={`mobile-pace-zone-${zone.zone_key}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{zone.label || zone.zone_key}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">{zone.zone_key}</p></div><Badge className={confidenceClass(zone.confidence)}>{zone.confidence}</Badge></div><p className="mt-2 text-zinc-300">{formatPerformanceZoneRange(zone)}</p><p className="mt-1 break-words text-[11px] text-zinc-600" translate="no">{zone.method} · {zone.source_reference}</p></div>)}
+      {!zones.length ? <p className="text-xs text-zinc-500">Нет данных для pace zones.</p> : null}
+    </div>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[560px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Zone</th><th>Range</th><th>Method</th><th>Confidence</th></tr></thead>
         <tbody>{zones.map((zone) => <tr key={zone.zone_key} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{zone.label || zone.zone_key}<div className="text-[11px] text-zinc-500">{zone.zone_key}</div></td><td>{formatPerformanceZoneRange(zone)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.method}</Badge><div className="mt-1 max-w-[16rem] text-[10px] text-zinc-600">{zone.source_reference}</div></td><td><Badge className={confidenceClass(zone.confidence)}>{zone.confidence}</Badge></td></tr>)}</tbody>
@@ -2531,8 +2645,7 @@ function GoalsRaces() {
     </Card>
 
     <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-      <Card>
-        <CardHeader><div><CardTitle>Create goal</CardTitle><p className="text-xs text-zinc-500">Race, consistency, monthly distance, long run or habit.</p></div><Badge>manual</Badge></CardHeader>
+      <CollapsibleSection title="Create goal" summary={<Badge>manual</Badge>}>
         <form onSubmit={submitGoal} className="grid gap-3 p-4 text-xs">
           <Field label="Title"><Input name="title" defaultValue="A race goal" /></Field>
           <Field label="Goal type"><Select name="goal_type" defaultValue="race"><option value="race">Race</option><option value="weekly_consistency">Weekly consistency</option><option value="monthly_distance">Monthly distance</option><option value="long_run">Long run</option><option value="custom_habit">Custom habit</option><option value="health">Health</option></Select></Field>
@@ -2548,7 +2661,7 @@ function GoalsRaces() {
           <Field label="Reason"><Input name="reason" placeholder="why this matters" /></Field>
           <Button type="submit" size="sm" disabled={saving}>{saving ? "Saving..." : "Save goal"}</Button>
         </form>
-      </Card>
+      </CollapsibleSection>
 
       <div className="grid gap-4">
         {activeRace ? <GoalFocus goal={activeRace} /> : <Card className="p-4 text-sm text-zinc-500">No active race goal yet. Create one to see readiness, predicted range and milestones.</Card>}
@@ -2587,7 +2700,7 @@ function GoalCard({ goal, busy, onStatus, onDelete }: { goal: RunningGoal; busy:
       <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Prediction: {goal.predicted_time_range ? `${formatDuration(goal.predicted_time_range.predicted_duration_seconds)} · ${goal.predicted_time_range.confidence}` : "--"}</p>
     </div>
     {goal.course_notes || goal.reason ? <p className="mt-2 leading-5 text-zinc-500" translate="no">{goal.course_notes || goal.reason}</p> : null}
-    <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus(goal.status === "paused" ? "active" : "paused")}>{goal.status === "paused" ? "Resume" : "Pause"}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("completed")}>Complete</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("missed")}>Missed</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("archived")}>Archive</Button><Button size="sm" variant="secondary" disabled={busy} onClick={onDelete}>Delete</Button></div>
+    <CollapsibleSection title="More actions" className="mt-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus(goal.status === "paused" ? "active" : "paused")}>{goal.status === "paused" ? "Resume" : "Pause"}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("completed")}>Complete</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("missed")}>Missed</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("archived")}>Archive</Button><Button size="sm" variant="secondary" disabled={busy} onClick={onDelete}>Delete</Button></div></CollapsibleSection>
   </Card>
 }
 
@@ -2750,7 +2863,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge translate="no">{completeness?.confidence || "low"} confidence</Badge></CardHeader>
         <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-4 p-4 text-xs">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            <CollapsibleSection title="Personal" defaultOpen>
               <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Personal</p>
               <div className="grid gap-3">
                 <Field label="Дата рождения"><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
@@ -2758,16 +2871,16 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
                 <Field label="Timezone"><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
                 <Field label="Locale"><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
               </div>
-            </div>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            </CollapsibleSection>
+            <CollapsibleSection title="Body">
               <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Body</p>
               <div className="grid gap-3">
                 <Field label="Вес, кг"><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder="например 72.5" /></Field>
                 <Field label="Рост, см"><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
                 <Field label="Unit system"><Select name="unit_system" defaultValue={profile.unit_system || "metric"}><option value="metric">Metric</option><option value="imperial">Imperial</option></Select></Field>
               </div>
-            </div>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            </CollapsibleSection>
+            <CollapsibleSection title="Physiology" defaultOpen>
               <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Physiology</p>
               <div className="grid gap-3">
                 <div className="grid gap-2 sm:grid-cols-2"><Field label="Пульс покоя"><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field><Field label="HRmax"><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field></div>
@@ -2775,16 +2888,16 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
                 <div className="grid gap-2 sm:grid-cols-2"><Field label="Пороговый пульс"><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field><Field label="Пороговый темп, сек/км"><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field></div>
                 <Field label="VO2max"><Input name="vo2max" type="number" min="10" max="100" step="0.1" defaultValue={profile.vo2max ?? ""} placeholder="если известен" /></Field>
               </div>
-            </div>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            </CollapsibleSection>
+            <CollapsibleSection title="Preferences">
               <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Preferences</p>
               <div className="grid gap-3">
                 <Field label="Training days"><Input name="preferred_weekdays" defaultValue={(profile.preferred_weekdays || []).join(",")} placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
                 <Field label="Long run day"><Select name="long_run_weekday" defaultValue={profile.long_run_weekday || ""}><option value="">Auto</option>{WEEKDAY_LABELS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</Select></Field>
                 <Field label="Max duration, мин"><Input name="max_run_duration_minutes" type="number" min="15" max="600" step="5" defaultValue={profile.max_run_duration_minutes ?? ""} placeholder="optional" /></Field>
               </div>
-            </div>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 md:col-span-2">
+            </CollapsibleSection>
+            <CollapsibleSection title="Safety" className="md:col-span-2">
               <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Safety</p>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Травмы / ограничения"><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder="травмы, ограничения" /></Field>
@@ -2792,7 +2905,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
                 <Field label="Recovery status"><Select name="recovery_status" defaultValue={profile.recovery_status || "normal"}><option value="fresh">Fresh</option><option value="normal">Normal</option><option value="tired">Tired</option><option value="strained">Strained</option><option value="injured">Injured</option><option value="unknown">Unknown</option></Select></Field>
                 <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> conservative mode</label>
               </div>
-            </div>
+            </CollapsibleSection>
           </div>
           <div className="flex flex-wrap items-center gap-2"><Button type="submit">Save profile</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">days {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">long {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)} translate="no">{profile.recovery_status || "normal"}</Badge></div>
         </form>
@@ -2823,7 +2936,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         <div className="grid gap-4 p-4">
           <ZoneTable title="Heart rate" zones={zones?.hr || []} />
           <ZoneTable title="Pace" zones={zones?.pace || []} />
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <CollapsibleSection title="Manual HR override" summary={<Badge className={hasManualHrZones ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{hasManualHrZones ? "manual active" : "calculated active"}</Badge>} defaultOpen={hasManualHrZones}>
             <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-semibold text-white">Manual HR override</p><p className="mt-1 text-[11px] text-zinc-500">Save manual bpm ranges when lab/device zones should override calculated HR zones.</p></div><Badge className={hasManualHrZones ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{hasManualHrZones ? "manual active" : "calculated active"}</Badge></div>
             <form key={hrZoneFormKey} onSubmit={submitManualHrZones} className="mt-3 grid gap-2 text-xs">
               {hrRows.map((row) => <div key={row.zone_key} className="grid gap-2 md:grid-cols-[5rem_1fr_6rem_6rem]"><span className="flex items-center font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{row.zone_key}</span><Input name={`${row.zone_key}_label`} defaultValue={row.label} placeholder="Label" /><Input name={`${row.zone_key}_lower`} type="number" min="30" max="240" defaultValue={row.lower_value ?? ""} placeholder="min bpm" /><Input name={`${row.zone_key}_upper`} type="number" min="30" max="240" defaultValue={row.upper_value ?? ""} placeholder="max bpm" /></div>)}
@@ -2831,13 +2944,14 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
               {zoneMessage ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{zoneMessage}</p> : null}
               {zoneError ? <p className="rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-[11px] text-rose-100">{zoneError}</p> : null}
             </form>
-          </div>
+          </CollapsibleSection>
         </div>
       </Card>
 
       <Card>
         <CardHeader><div><CardTitle>Measurements</CardTitle><p className="text-xs text-zinc-500">История ручных и device-derived измерений.</p></div><Badge>{measurements.length} rows</Badge></CardHeader>
-        <form onSubmit={submitMeasurement} className="grid gap-3 border-b border-zinc-800 p-4 text-xs md:grid-cols-2">
+        <CollapsibleSection title="Add measurement" className="m-4">
+        <form onSubmit={submitMeasurement} className="grid gap-3 text-xs md:grid-cols-2">
           <Field label="Тип"><Select name="measurement_type"><option value="weight">Вес</option><option value="resting_hr">Пульс покоя</option><option value="max_hr">HRmax</option><option value="lactate_threshold">Lactate threshold</option><option value="vo2max">VO2max</option><option value="note">Note</option></Select></Field>
           <Field label="Значение"><Input name="value_numeric" type="number" step="0.1" placeholder="число" /></Field>
           <Field label="Пороговый темп, сек/км"><Input name="threshold_pace_seconds_per_km" type="number" min="120" max="1200" placeholder="для LT" /></Field>
@@ -2846,7 +2960,12 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
           <Field label="Заметка"><Input name="notes" placeholder="опционально" /></Field>
           <div className="md:col-span-2"><Button type="submit" size="sm">Add measurement</Button></div>
         </form>
-        <div className="max-h-72 overflow-auto">
+        </CollapsibleSection>
+        <div className="grid gap-2 p-4 md:hidden">
+          {measurements.map((measurement) => <div key={`measurement-mobile-${measurement.source_model}-${measurement.id}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="font-medium text-white">{measurement.measurement_type}</p><p className="mt-1 break-words text-zinc-500">{measurement.notes || measurement.source_model}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{measurement.source}</Badge></div><div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="value" value={measurementValueLabel(measurement)} /><Stat label="date" value={measurement.measured_at ? formatLocalDateTime(measurement.measured_at) : "--"} /></div></div>)}
+          {!measurements.length && <p className="text-xs text-zinc-500">Измерений пока нет.</p>}
+        </div>
+        <div className="hidden max-h-72 overflow-auto md:block">
           <table className="w-full min-w-[540px] text-left text-xs">
             <thead className="sticky top-0 border-b border-zinc-800 bg-zinc-950 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Type</th><th>Value</th><th>Source</th><th>Date</th></tr></thead>
             <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurementValueLabel(measurement)}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? formatLocalDateTime(measurement.measured_at) : "--"}</td></tr>)}</tbody>
@@ -2863,12 +2982,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
-  return <div className="rounded-md border border-zinc-800">
-    <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">{title}</p><Badge>{zones.length} zones</Badge></div>
-    {zones.length ? <table className="w-full text-left text-xs">
+  return <div className="min-w-0 rounded-md border border-zinc-800">
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">{title}</p><Badge>{zones.length} zones</Badge></div>
+    {zones.length ? <><div className="grid gap-2 p-3 md:hidden">{zones.map((zone) => <div key={`mobile-zone-${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{zone.label || zone.zone_key}</p><p className="font-mono text-[10px] text-zinc-600">{zone.zone_key}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.confidence}</Badge></div><p className="mt-2 text-zinc-300">{formatZoneRange(zone)}</p><p className="mt-1 break-words text-[11px] text-zinc-600" translate="no">{zone.method} · {zone.source_reference}</p></div>)}</div><div className="hidden max-w-full overflow-x-auto md:block"><table className="w-full min-w-[520px] text-left text-xs">
       <thead className="text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Zone</th><th>Range</th><th>Method</th><th>Confidence</th></tr></thead>
       <tbody>{zones.map((zone) => <tr key={`${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="border-t border-zinc-900 align-top"><td className="px-3 py-2 font-medium text-white">{zone.label || zone.zone_key}<div className="font-mono text-[10px] text-zinc-600">{zone.zone_key}</div></td><td>{formatZoneRange(zone)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.method}</Badge><div className="mt-1 max-w-[16rem] text-[10px] text-zinc-600">{zone.source_reference}</div></td><td>{zone.confidence}</td></tr>)}</tbody>
-    </table> : <p className="p-3 text-xs text-zinc-500">Нет данных для расчета.</p>}
+    </table></div></> : <p className="p-3 text-xs text-zinc-500">Нет данных для расчета.</p>}
   </div>
 }
 
@@ -3433,23 +3552,31 @@ function Planning() {
         <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
         <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
         <Field label="Длина, недель"><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder="если без даты" /></Field>
+        <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
+        <CollapsibleSection title="Performance inputs">
         <Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field>
         <Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">A race</option><option value="b">B race</option><option value="c">C race</option></Select></Field>
         <Field label="Aggressiveness"><Select name="aggressiveness" defaultValue="auto"><option value="auto">Auto safety</option><option value="beginner">Beginner cap</option><option value="intermediate">Intermediate cap</option><option value="advanced">Advanced if detected</option></Select></Field>
-        <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
-        <Field label="Preferred days"><Input name="preferred_weekdays" placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
         <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
         <Field label="Longest recent run, км"><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder="optional" /></Field>
         <div className="grid gap-2 sm:grid-cols-2"><Field label="Recent race, км"><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Recent race time, мин"><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field></div>
         <div className="grid gap-2 sm:grid-cols-2"><Field label="Intensity"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">Mixed</option><option value="pace">Pace</option><option value="hr">HR</option><option value="rpe">RPE</option></Select></Field><Field label="Time budget, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="optional" /></Field></div>
+        </CollapsibleSection>
+        <CollapsibleSection title="Constraints">
+        <Field label="Preferred days"><Input name="preferred_weekdays" placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
         <div className="grid gap-2 sm:grid-cols-2"><Field label="Max long run, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Max long run, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="optional" /></Field></div>
         <Field label="Terrain"><Input name="terrain" placeholder="road, trail, treadmill" /></Field>
+        </CollapsibleSection>
+        <CollapsibleSection title="Support / OFP">
         <div className="rounded-md border border-zinc-800 bg-zinc-950 p-2">
           <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">ОФП / support</p>
           <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_strength" type="checkbox" defaultChecked /> strength/OFP</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_mobility" type="checkbox" defaultChecked /> mobility/prehab</label></div>
           <div className="mt-2 grid gap-2 sm:grid-cols-3"><Field label="Strength / week"><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label="Mobility / week"><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label="Equipment"><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">Bodyweight</option><option value="bands">Bands</option><option value="dumbbells">Dumbbells</option><option value="gym">Gym</option></Select></Field></div>
         </div>
+        </CollapsibleSection>
+        <CollapsibleSection title="Safety">
         <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="injury" type="checkbox" /> injury constraint</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="no_hard_workouts" type="checkbox" /> no hard workouts</label></div>
+        </CollapsibleSection>
         <div className="grid gap-2 sm:grid-cols-3"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview"}</Button><Button type="submit">Create draft</Button><Button type="button" onClick={() => createPlan(true)}>Create active</Button></div>
       </form>
       {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
@@ -3639,9 +3766,13 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
 }
 
 function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDrafts, completionDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onCompletionDraft, onCompleteWorkout, onSaveFeedback }: { summary: PlanWeekSummary; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; completionDrafts: Record<number, CompletionDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onCompletionDraft: (workout: PlanWorkout, patch: Partial<CompletionDraft>) => void; onCompleteWorkout: (workout: PlanWorkout) => Promise<void>; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
-  return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
-    <div className="border-b border-zinc-800 px-3 py-2">
+  const [isOpen, setIsOpen] = useState(summary.week_index === 1)
+
+  return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className="group rounded-md border border-zinc-800 bg-zinc-950/60">
+    <summary className="cursor-pointer list-none border-b border-transparent px-3 py-2 group-open:border-zinc-800 [&::-webkit-details-marker]:hidden">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
+    </summary>
+    <div className="border-b border-zinc-900 px-3 py-2">
       <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
@@ -3672,7 +3803,7 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
         <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100" translate="no">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
         {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div><div className="mt-1 flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
-        {canCompleteManually ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+        {canCompleteManually ? <CollapsibleSection title="Manual completion" className="mt-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Manual completion</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Workout Detail</Badge></div>
           <div className="grid gap-2 md:grid-cols-4">
             {supportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">duration-only</div> : <Input type="number" min="0" max="250" step="0.1" placeholder="actual km" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}
@@ -3687,8 +3818,8 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
             <Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} />
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Complete</Button></div>
-        </div> : null}
-        {canGiveFeedback ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
+        </CollapsibleSection> : null}
+        {canGiveFeedback ? <CollapsibleSection title="Workout feedback" className="mt-2" summary={workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Workout feedback</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}</div>
           <div className="grid gap-2 md:grid-cols-5">
             <Input type="number" min="0" max="10" placeholder="RPE" value={draft.rpe} onChange={(event) => onFeedbackDraft(workout, { rpe: event.target.value })} />
@@ -3698,9 +3829,11 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
             <label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> pain</label>
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
-        </div> : null}
-        {canReschedule ? <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
-        <div className="mt-2 flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
+        </CollapsibleSection> : null}
+        <CollapsibleSection title="Workout actions" className="mt-2">
+        {canReschedule ? <div className="mb-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
+        <div className="flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
+        </CollapsibleSection>
         {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200" translate="no">{candidateErrors[workout.id]}</p> : null}
         {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           {candidates.map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
@@ -3710,7 +3843,7 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
         </div> : null}
       </div>
     })}</div>
-  </div>
+  </details>
 }
 
 function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onChanged: () => Promise<void> }) {
@@ -3889,7 +4022,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
 
   return <div className="grid gap-4">
     <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <Card><CardHeader><div><CardTitle>Add LLM provider</CardTitle><p className="text-xs text-zinc-500">OpenAI-compatible and Anthropic providers for recognition and explanations. Keys are never returned to the frontend.</p></div><Badge>6.17</Badge></CardHeader><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
+    <CollapsibleSection title="Add LLM provider" summary={<Badge>6.17</Badge>}><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
       <Field label="Provider"><Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select></Field>
       <Field label="Display name"><Input name="display_name" placeholder="Display name" required /></Field>
       <Field label="Base URL"><Input name="base_url" placeholder="Full endpoint URL optional" /></Field>
@@ -3898,7 +4031,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
       <label className="flex items-center gap-2 text-xs text-zinc-400"><input name="is_default" type="checkbox" /> default provider</label>
       <Button type="submit">Save provider</Button>
       {message ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300" translate="no">{message}</p> : null}
-    </form></Card>
+    </form></CollapsibleSection>
     <Card><CardHeader><div><CardTitle>Providers</CardTitle><p className="text-xs text-zinc-500">Edit, test with a safe prompt, set default or disable providers.</p></div><Badge>{providers.length} total</Badge></CardHeader><div className="divide-y divide-zinc-800">{providers.map((provider) => {
       const result = testResults[provider.id]
       const busy = busyProvider === provider.id
@@ -3907,6 +4040,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
           <div translate="no"><p className="font-medium text-white">{provider.display_name}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{provider.id}</span></p><p className="mt-1 text-zinc-500">{provider.provider} · {provider.model}</p></div>
           <div className="flex flex-wrap gap-1">{provider.is_default && <Badge>default</Badge>}<Badge className={provider.has_api_key ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-orange-400/30 bg-orange-400/10 text-orange-200"}>key {provider.has_api_key ? "stored" : "missing"}</Badge><Badge className={provider.supports_vision ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-500"}>vision {provider.supports_vision ? "likely" : "unknown"}</Badge></div>
         </div>
+        <CollapsibleSection title="Edit provider" className="mt-2">
         <form onSubmit={(event) => updateExisting(event, provider)} className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Name"><Input name="display_name" defaultValue={provider.display_name} /></Field>
           <Field label="Base URL"><Input name="base_url" defaultValue={provider.base_url || ""} placeholder="default endpoint" /></Field>
@@ -3915,6 +4049,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
           <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="clear_api_key" type="checkbox" /> clear key</label>
           <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-3"><Button size="sm" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy || provider.is_default} onClick={() => setDefault(provider)}>Set default</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => testProvider(provider)}>{busy ? "Testing..." : "Test"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => deleteExisting(provider)}>Delete</Button></div>
         </form>
+        </CollapsibleSection>
         {result ? <div className={`rounded-md border px-2 py-1.5 text-xs ${result.ok ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/20 bg-orange-400/10 text-orange-100"}`} translate="no">{result.status} · {result.response_ms ?? "--"} ms · vision {result.supports_vision ? "likely" : "unknown"}<div className="mt-1 text-zinc-500">{result.message}</div></div> : null}
       </div>
     })}{!providers.length ? <p className="p-4 text-xs text-zinc-500">No active providers yet.</p> : null}</div></Card>
@@ -3932,19 +4067,19 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         <div className="grid gap-3 p-4 text-xs">
           <div className="flex flex-wrap gap-2"><Button type="button" disabled={dataBusy} onClick={downloadExport}>{dataBusy ? "Working..." : "Download JSON export"}</Button><Button type="button" variant="secondary" disabled={dataBusy} onClick={downloadActivitiesCsv}>{dataBusy ? "Working..." : "Download activities CSV"}</Button></div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">Export omits API keys and local screenshot file paths. It includes user-scoped activities, plans, goals, profile, providers without secrets, imports and audit log.</div>
-          <div className="grid gap-2 rounded-md border border-orange-400/20 bg-orange-400/10 p-3">
+          <CollapsibleSection title="Danger zone" className="border-orange-400/25 bg-orange-400/10">
             <p className="font-medium text-orange-100">Danger zone: delete account data</p>
             <p className="text-orange-100/80">This keeps the user/session but deletes activities, plans, goals, profile, zones, imports, provider settings and prior audit rows.</p>
             <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} placeholder="Type DELETE to confirm" />
             <Button type="button" variant="secondary" disabled={dataBusy || deleteConfirm !== "DELETE"} onClick={deleteAccountData}>Delete user data</Button>
-          </div>
+          </CollapsibleSection>
           {dataMessage ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300" translate="no">{dataMessage}</p> : null}
         </div>
       </Card>
     </div>
     <Card>
       <CardHeader><div><CardTitle>Audit log</CardTitle><p className="text-xs text-zinc-500">Recent user-scoped import, provider, export and delete events.</p></div><Badge>{auditLog.length} events</Badge></CardHeader>
-      <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500">{formatLocalDateTime(event.created_at)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></td><td className="text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
+      <div className="grid min-w-0 gap-2 p-4 md:hidden">{auditLog.map((event) => <div key={`audit-mobile-${event.id}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words text-zinc-500">{formatLocalDateTime(event.created_at)}</p><p className="mt-1 break-words text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</p></div><Badge className="max-w-full border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></div><p className="mt-2 max-w-full overflow-hidden break-all text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</p></div>)}{!auditLog.length ? <p className="text-xs text-zinc-500">Audit log is empty.</p> : null}</div><div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500" translate="no">{formatLocalDateTime(event.created_at)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{event.action}</Badge></td><td className="text-zinc-400" translate="no">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] break-words text-zinc-500" translate="no">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
     </Card>
   </div>
 }

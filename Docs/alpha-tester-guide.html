@@ -60,6 +60,10 @@
         min-height: 100vh;
       }
 
+      .mobile-toc {
+        display: none;
+      }
+
       aside {
         position: sticky;
         top: 0;
@@ -322,7 +326,24 @@
         border-radius: 12px;
         color: #e4e4e7;
         overflow: auto;
+        overflow-wrap: anywhere;
         padding: 0.9rem;
+        white-space: pre-wrap;
+      }
+
+      .table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+      }
+
+      .formula summary {
+        cursor: pointer;
+        font-weight: 700;
+        list-style: none;
+      }
+
+      .formula summary::-webkit-details-marker {
+        display: none;
       }
 
       figure {
@@ -412,8 +433,28 @@
         }
 
         aside {
-          height: auto;
-          position: static;
+          display: none;
+        }
+
+        .mobile-toc {
+          background: rgba(8, 8, 8, 0.94);
+          border-bottom: 1px solid var(--line);
+          display: block;
+          padding: 0.75rem 1rem;
+          position: sticky;
+          top: 0;
+          z-index: 20;
+        }
+
+        .mobile-toc summary {
+          color: var(--text);
+          cursor: pointer;
+          font-family: var(--mono);
+          font-size: 0.72rem;
+          font-weight: 800;
+          letter-spacing: 0.14em;
+          list-style: none;
+          text-transform: uppercase;
         }
 
         .nav {
@@ -443,6 +484,10 @@
         .hero {
           border-radius: 16px;
         }
+
+        .hero h2 {
+          font-size: clamp(2rem, 14vw, 3.35rem);
+        }
       }
     </style>
   </head>
@@ -468,13 +513,26 @@
       </aside>
 
       <main>
+        <details class="mobile-toc">
+          <summary>Оглавление и быстрый переход</summary>
+          <nav class="nav" aria-label="Мобильное оглавление">
+            <a href="#purpose">1. Что тестируем</a>
+            <a href="#before">2. Перед началом</a>
+            <a href="#mobile-checklist">Mobile checklist</a>
+            <a href="#screens">3. Скриншоты</a>
+            <a href="#scenarios">4. Сценарии</a>
+            <a href="#formulas">5. Формулы</a>
+            <a href="#quality">6. Критерии качества</a>
+            <a href="#bugs">7. Баг-репорт</a>
+          </nav>
+        </details>
         <header class="hero">
           <div class="hero-grid">
             <div>
-              <span class="eyebrow">Dark compact admin UI</span>
-              <h2>Runforfan: alpha testing guide</h2>
+              <span class="eyebrow">Smartphone-first alpha</span>
+              <h2>Runforfan: mobile alpha testing guide</h2>
               <p class="lead">
-                Этот документ помогает проверить приложение как продукт: первый вход, профиль спортсмена, зоны,
+                Этот документ помогает проверить приложение прежде всего на смартфоне: первый вход, профиль спортсмена, зоны,
                 импорт тренировок, планы, календарь, analytics, load/recovery, performance, goals, LLM providers,
                 экспорт данных и safety-поведение.
               </p>
@@ -505,6 +563,18 @@
             </div>
           </div>
         </header>
+
+        <section id="mobile-checklist" class="section-card">
+          <h2 class="section-title">Mobile quick checklist</h2>
+          <div class="card-grid">
+            <div class="card"><h4>Viewport</h4><p>Основной проход делайте на смартфоне или mobile viewport 360-430px в portrait. Дополнительно проверьте landscape.</p></div>
+            <div class="card"><h4>Touch and keyboard</h4><p>Кнопки должны нажиматься большим пальцем, поля не должны перекрываться клавиатурой, date/time/file inputs открывают нативные picker.</p></div>
+            <div class="card"><h4>Overflow</h4><p>Проверяйте отсутствие горизонтального скролла страницы. Таблицы, код, графики и длинные API-сообщения должны скроллиться внутри блока.</p></div>
+            <div class="card"><h4>Upload</h4><p>Screenshot import должен работать через gallery/file picker, включая несколько PNG/JPEG/WEBP за один batch.</p></div>
+            <div class="card"><h4>Density</h4><p>Вторичные формы, опасные действия, формулы и технические блоки должны быть свернуты или явно отделены.</p></div>
+            <div class="card"><h4>Downloads</h4><p>Проверьте JSON/CSV downloads в mobile browser/webview и понятный fallback, если браузер блокирует загрузку.</p></div>
+          </div>
+        </section>
 
         <section id="purpose" class="section-card">
           <h2 class="section-title">1. Что тестируем</h2>
@@ -554,7 +624,7 @@
           <h3>Минимальная подготовка</h3>
           <div class="steps">
             <div class="step">Убедитесь, что backend отвечает на <code>GET http://127.0.0.1:8080/health</code>.</div>
-            <div class="step">Откройте <code>http://127.0.0.1:5173/admin/</code> в desktop browser.</div>
+            <div class="step">Откройте <code>http://127.0.0.1:5173/admin/</code> на смартфоне или в mobile viewport 360-430px.</div>
             <div class="step">Войдите через Telegram или dev/demo login.</div>
             <div class="step">Переключите язык <span class="kbd">ru/en</span> и проверьте, что UI не ломается.</div>
             <div class="step">Подготовьте несколько скриншотов тренировок и один CSV-файл, если тестируете import pipeline.</div>
@@ -567,58 +637,61 @@
           <p>Скриншоты сняты с живого admin UI и лежат локально в <code>Docs/assets/alpha-guide/</code>.</p>
           <div class="screenshot-grid">
             <figure class="shot">
-              <img src="assets/alpha-guide/dashboard.png" alt="Dashboard screen" />
-              <figcaption><strong>Dashboard.</strong> Сегодняшняя готовность, активный план, неделя, последние активности.</figcaption>
+              <a href="assets/alpha-guide/dashboard.png"><img src="assets/alpha-guide/dashboard.png" alt="Dashboard screen" loading="lazy" /></a>
+              <figcaption><strong>Dashboard.</strong> На смартфоне проверьте summary cards, mobile menu, current week cards и отсутствие горизонтального скролла.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/activities.png" alt="Activities screen" />
-              <figcaption><strong>Activities.</strong> Таблица, manual activity, detail, validation, derived metrics.</figcaption>
+              <a href="assets/alpha-guide/activities.png"><img src="assets/alpha-guide/activities.png" alt="Activities screen" loading="lazy" /></a>
+              <figcaption><strong>Activities.</strong> Проверьте mobile cards, свернутую manual form, drawer detail, validation и derived metrics.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/imports.png" alt="Imports screen" />
-              <figcaption><strong>Imports.</strong> Screenshot/CSV import, candidate review, history, match candidates.</figcaption>
+              <a href="assets/alpha-guide/imports.png"><img src="assets/alpha-guide/imports.png" alt="Imports screen" loading="lazy" /></a>
+              <figcaption><strong>Imports.</strong> Проверьте gallery/file picker, CSV accordion, candidate review и history без перегруза экрана.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/calendar.png" alt="Calendar screen" />
-              <figcaption><strong>Calendar.</strong> План и факт по дням, warnings, reschedule, matching.</figcaption>
+              <a href="assets/alpha-guide/calendar.png"><img src="assets/alpha-guide/calendar.png" alt="Calendar screen" loading="lazy" /></a>
+              <figcaption><strong>Calendar.</strong> Проверьте day cards, видимые title/status/score и свернутые actions/reschedule/matching.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/analytics.png" alt="Analytics screen" />
-              <figcaption><strong>Analytics.</strong> Summary, trends, best efforts, insights, VDOT/VO2max source.</figcaption>
+              <a href="assets/alpha-guide/analytics.png"><img src="assets/alpha-guide/analytics.png" alt="Analytics screen" loading="lazy" /></a>
+              <figcaption><strong>Analytics.</strong> Проверьте readability charts, Why? popovers, date controls и custom range на узком экране.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/load-recovery.png" alt="Load and Recovery screen" />
-              <figcaption><strong>Load & Recovery.</strong> Daily/weekly load, CTL/ATL/TSB, warnings, materialization.</figcaption>
+              <a href="assets/alpha-guide/load-recovery.png"><img src="assets/alpha-guide/load-recovery.png" alt="Load and Recovery screen" loading="lazy" /></a>
+              <figcaption><strong>Load & Recovery.</strong> Проверьте charts readability, CTL/ATL/TSB table scroll и materialization actions.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/zones-analytics.png" alt="Zones Analytics screen" />
-              <figcaption><strong>Zones Analytics.</strong> HR/pace/RPE distribution, Seiler split, planned vs actual.</figcaption>
+              <a href="assets/alpha-guide/zones-analytics.png"><img src="assets/alpha-guide/zones-analytics.png" alt="Zones Analytics screen" loading="lazy" /></a>
+              <figcaption><strong>Zones Analytics.</strong> Проверьте bars, configured zones, table scroll и длинные source references.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/performance.png" alt="Performance screen" />
-              <figcaption><strong>Performance.</strong> Race/time trial results, VDOT, Riegel predictions, PBs.</figcaption>
+              <a href="assets/alpha-guide/performance.png"><img src="assets/alpha-guide/performance.png" alt="Performance screen" loading="lazy" /></a>
+              <figcaption><strong>Performance.</strong> Проверьте Add result accordion, result cards/tables, VDOT source и prediction readability.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/goals.png" alt="Goals screen" />
-              <figcaption><strong>Goals & races.</strong> Цели, race readiness, predicted ranges, milestones.</figcaption>
+              <a href="assets/alpha-guide/goals.png"><img src="assets/alpha-guide/goals.png" alt="Goals screen" loading="lazy" /></a>
+              <figcaption><strong>Goals & races.</strong> Проверьте Create goal accordion, readiness badges и More actions без случайных taps.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/profile-zones.png" alt="Profile and Zones screen" />
-              <figcaption><strong>Profile & zones.</strong> Athlete profile, safety, zones, manual HR override, measurements.</figcaption>
+              <a href="assets/alpha-guide/profile-zones.png"><img src="assets/alpha-guide/profile-zones.png" alt="Profile and Zones screen" loading="eager" /></a>
+              <figcaption><strong>Profile & zones.</strong> Проверьте Personal/Physiology open, остальные группы collapsed, zones table scroll и keyboard behavior.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/plans.png" alt="Plans screen" />
-              <figcaption><strong>Plans.</strong> Program planner, preview, active/draft plans, workouts, recommendations.</figcaption>
+              <a href="assets/alpha-guide/plans.png"><img src="assets/alpha-guide/plans.png" alt="Plans screen" loading="lazy" /></a>
+              <figcaption><strong>Plans.</strong> Проверьте advanced fields accordions, week accordions, workout actions and feedback blocks.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="assets/alpha-guide/settings-data.png" alt="Settings screen" />
-              <figcaption><strong>Settings & data.</strong> LLM providers, integrations, export, delete data, audit log.</figcaption>
+              <a href="assets/alpha-guide/settings-data.png"><img src="assets/alpha-guide/settings-data.png" alt="Settings screen" loading="lazy" /></a>
+              <figcaption><strong>Settings & data.</strong> Проверьте provider edit accordion, danger zone collapse, exports/downloads и audit mobile cards.</figcaption>
             </figure>
           </div>
         </section>
 
         <section id="scenarios" class="section-card">
           <h2 class="section-title">4. Сценарии тестирования</h2>
+          <div class="callout">
+            <p><strong>Mobile pass for every scenario:</strong> проверьте tap targets, keyboard overlap, file picker/gallery upload where relevant, portrait/landscape, horizontal scroll, chart readability, downloads and browser back/refresh behavior.</p>
+          </div>
           <div class="scenario-grid">
             <article class="scenario">
               <span class="badge orange">Must test</span>
@@ -753,103 +826,103 @@
             объяснений <code>Why?</code>, confidence и safety warnings.
           </p>
           <div class="formula-grid">
-            <article class="formula">
-              <h4>Pace, speed, weighted pace</h4>
+            <details class="formula">
+              <summary>Pace, speed, weighted pace</summary>
               <pre>pace = duration_seconds / distance_km
 speed_kmh = distance_km / (duration_seconds / 3600)
 weighted_pace = sum(duration) / sum(distance)</pre>
               <p>Weighted pace используется в analytics и segment summaries, чтобы короткие тренировки не искажали средний темп.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Estimated HRmax, Tanaka</h4>
+            <details class="formula">
+              <summary>Estimated HRmax, Tanaka</summary>
               <pre>HRmax = round(208 - 0.7 * age)</pre>
               <p>Fallback, если нет измеренного HRmax. Не равен лабораторному измерению и должен иметь lower confidence.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>HRR zones, Karvonen</h4>
+            <details class="formula">
+              <summary>HRR zones, Karvonen</summary>
               <pre>HRR = max_hr - resting_hr
 zone_hr = resting_hr + percent * HRR</pre>
               <p>Требует resting HR и max HR. Используется для персонализированных HR zones.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Pace zones</h4>
+            <details class="formula">
+              <summary>Pace zones</summary>
               <pre>easy      = threshold +45..+95 sec/km
 steady    = threshold +20..+44 sec/km
 threshold = threshold -5..+10 sec/km
 interval  = threshold -35..-6 sec/km
 rep       = threshold -60..-36 sec/km</pre>
               <p>Threshold pace берется из профиля или fallback из performance source.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>VDOT</h4>
+            <details class="formula">
+              <summary>VDOT</summary>
               <pre>velocity = distance_m / time_min
 vo2 = -4.60 + 0.182258*v + 0.000104*v^2
 percent = 0.8 + 0.1894393*e^(-0.012778*t)
         + 0.2989558*e^(-0.1932605*t)
 VDOT = vo2 / percent</pre>
               <p>Используется только для race-like или time trial sources. Easy run не должна становиться главным VDOT source.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Riegel prediction</h4>
+            <details class="formula">
+              <summary>Riegel prediction</summary>
               <pre>predicted_time = source_time *
   (target_distance / source_distance) ^ 1.06</pre>
               <p>Экстраполяция за пределы отношения 0.25-4 снижает confidence и должна давать warning.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>TRIMP</h4>
+            <details class="formula">
+              <summary>TRIMP</summary>
               <pre>hr_ratio = (avg_hr - resting_hr) / (max_hr - resting_hr)
 male:   load = min * ratio * 0.64 * exp(1.92 * ratio)
 female: load = min * ratio * 0.86 * exp(1.67 * ratio)</pre>
               <p>Требует sex male/female и корректные HR inputs. Иначе используется другой load method.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>sRPE load</h4>
+            <details class="formula">
+              <summary>sRPE load</summary>
               <pre>sRPE = duration_minutes * RPE_0_10</pre>
               <p>Используется, если workout feedback содержит RPE. Это субъективная оценка нагрузки.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>CTL, ATL, TSB</h4>
+            <details class="formula">
+              <summary>CTL, ATL, TSB</summary>
               <pre>alpha = 1 - exp(-1 / tau_days)
 EWMA = previous + alpha * (load_today - previous)
 CTL tau = 42 days
 ATL tau = 7 days
 TSB = CTL - ATL</pre>
               <p>Это эвристики fitness/fatigue/form. При истории меньше 42 дней должен быть warmup warning.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Monotony and strain</h4>
+            <details class="formula">
+              <summary>Monotony and strain</summary>
               <pre>monotony = mean(daily_loads) / stddev(daily_loads)
 strain = sum(daily_loads) * monotony</pre>
               <p>Высокая monotony означает слишком однообразную нагрузку. При нулевой вариативности расчет может быть недоступен.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Adherence</h4>
+            <details class="formula">
+              <summary>Adherence</summary>
               <pre>completion_rate = done_workouts / planned_workouts</pre>
               <p>Используется в Dashboard, Plans, Goals. Missed/skipped тренировки снижают completion rate.</p>
-            </article>
+            </details>
 
-            <article class="formula">
-              <h4>Execution score</h4>
+            <details class="formula">
+              <summary>Execution score</summary>
               <pre>volume_score = 1 - abs(actual/planned - 1) / 0.5
 final_score = average(volume, intensity, subjective)</pre>
               <p>Pain, high fatigue, high RPE и плохой сон ограничивают subjective component.</p>
-            </article>
+            </details>
           </div>
         </section>
 
         <section id="quality" class="section-card">
           <h2 class="section-title">6. Критерии хорошего результата</h2>
-          <table>
+          <div class="table-wrap"><table>
             <thead>
               <tr><th>Область</th><th>Что считается хорошим</th></tr>
             </thead>
@@ -863,7 +936,7 @@ final_score = average(volume, intensity, subjective)</pre>
               <tr><td>Safety</td><td>Injury/recovery/conservative flags влияют на readiness и plan behavior, без медицинских обещаний.</td></tr>
               <tr><td>Data</td><td>Secrets не возвращаются в UI/export, destructive delete требует подтверждение.</td></tr>
             </tbody>
-          </table>
+          </table></div>
         </section>
 
         <section id="bugs" class="section-card">
@@ -875,8 +948,12 @@ final_score = average(volume, intensity, subjective)</pre>
   [Экран] Краткое описание проблемы
 
 Окружение:
-  Browser:
-  Device/viewport:
+  Device model:
+  OS version:
+  Browser/webview:
+  Viewport width:
+  Orientation:
+  Keyboard/file picker context:
   Frontend URL:
   Backend URL:
   Язык UI:
@@ -908,7 +985,7 @@ Console/network errors, если есть:
 
         <section id="glossary" class="section-card">
           <h2 class="section-title">8. Глоссарий</h2>
-          <table>
+          <div class="table-wrap"><table>
             <thead>
               <tr><th>Термин</th><th>Объяснение</th></tr>
             </thead>
@@ -929,7 +1006,7 @@ Console/network errors, если есть:
               <tr><td>Execution score</td><td>Оценка выполнения workout по объему, интенсивности и субъективным данным.</td></tr>
               <tr><td>Confidence</td><td>Доверие к расчету или source: low, medium, high.</td></tr>
             </tbody>
-          </table>
+          </table></div>
         </section>
 
         <section id="limits" class="section-card">
