@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramLogin, type TelegramLoginPayload, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -154,6 +154,10 @@ function apiErrorMessage(caught: unknown, fallback: string) {
     return caught.message || fallback
   }
   return caught.message || fallback
+}
+
+function isUnauthorized(caught: unknown) {
+  return caught instanceof Error && caught.message.startsWith("401:")
 }
 
 function csvNumbers(value: FormDataEntryValue | null) {
@@ -444,11 +448,22 @@ function App() {
   const [zones, setZones] = useState<Zones | null>(null)
   const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeStorageGet(ONBOARDING_DISMISSED_KEY) === "true")
+  const [authReady, setAuthReady] = useState(() => authConfig.devLoginEnabled || hasAuthToken())
   const [status, setStatus] = useState("LOADING")
 
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
     setOnboardingDismissed(true)
+  }
+
+  async function loginWithTelegram(payload: TelegramLoginPayload) {
+    await telegramLogin(payload)
+    setAuthReady(true)
+    setStatus("TELEGRAM USER")
+  }
+
+  function authenticatedStatus() {
+    return authConfig.devLoginEnabled ? "DEMO USER" : "TELEGRAM USER"
   }
 
   async function refreshGlobal() {
@@ -464,8 +479,14 @@ function App() {
       setAnalytics(nextAnalytics)
       setDashboard(nextDashboard)
       setProviders(nextProviders)
-      setStatus("DEMO USER")
+      setStatus(authenticatedStatus())
     } catch (error) {
+      if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
+        clearAuthToken()
+        setAuthReady(false)
+        setStatus("LOGIN REQUIRED")
+        return
+      }
       setStatus("API ERROR")
       console.error(error)
     }
@@ -487,8 +508,14 @@ function App() {
       setZones(nextZones)
       setMeasurements(nextMeasurements)
       if (nextCompleteness.score >= ONBOARDING_READY_SCORE) dismissOnboarding()
-      setStatus("DEMO USER")
+      setStatus(authenticatedStatus())
     } catch (error) {
+      if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
+        clearAuthToken()
+        setAuthReady(false)
+        setStatus("LOGIN REQUIRED")
+        return
+      }
       setStatus("API ERROR")
       console.error(error)
     }
@@ -497,13 +524,21 @@ function App() {
   const effectiveCompleteness = completeness || dashboard?.profile_completeness || null
   const onboardingRequired = Boolean(effectiveCompleteness && effectiveCompleteness.score < ONBOARDING_READY_SCORE && !onboardingDismissed)
 
-  useEffect(() => { void refreshGlobal() }, [])
   useEffect(() => {
-    if (page === "profile") void refreshProfileData()
-  }, [page])
+    if (authReady) void refreshGlobal()
+  }, [authReady])
+  useEffect(() => onAuthExpired(() => {
+    setAuthReady(false)
+    setStatus("LOGIN REQUIRED")
+  }), [])
+  useEffect(() => {
+    if (authReady && page === "profile") void refreshProfileData()
+  }, [authReady, page])
   useEffect(() => {
     if (onboardingRequired && page !== "profile") setPage("profile")
   }, [onboardingRequired, page])
+
+  if (!authReady) return <TelegramLoginGate onLogin={loginWithTelegram} />
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -539,6 +574,53 @@ function App() {
   )
 }
 
+function TelegramLoginGate({ onLogin }: { onLogin: (payload: TelegramLoginPayload) => Promise<void> }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [error, setError] = useState("")
+  const botUsername = authConfig.telegramBotUsername
+
+  useEffect(() => {
+    if (!botUsername || !containerRef.current) return
+    const callbackName = `runforfanTelegramLogin_${Date.now()}`
+    const callbacks = window as typeof window & Record<string, (user: TelegramLoginPayload) => void>
+    callbacks[callbackName] = (user) => {
+      setError("")
+      void onLogin(user).catch((caught) => {
+        console.error(caught)
+        setError(apiErrorMessage(caught, "Telegram login failed"))
+      })
+    }
+    const script = document.createElement("script")
+    script.src = "https://telegram.org/js/telegram-widget.js?22"
+    script.async = true
+    script.setAttribute("data-telegram-login", botUsername)
+    script.setAttribute("data-size", "large")
+    script.setAttribute("data-request-access", "write")
+    script.setAttribute("data-userpic", "false")
+    script.setAttribute("data-onauth", `${callbackName}(user)`)
+    containerRef.current.innerHTML = ""
+    containerRef.current.appendChild(script)
+    return () => {
+      delete callbacks[callbackName]
+      script.remove()
+    }
+  }, [botUsername, onLogin])
+
+  return <div className="min-h-screen bg-[#090909] p-4 text-zinc-100 md:p-8">
+    <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl place-items-center">
+      <Card className="w-full max-w-xl border-orange-400/30 bg-zinc-950 p-6">
+        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · AUTH</p>
+        <h1 className="mt-3 text-2xl font-semibold text-white">Sign in with Telegram</h1>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">Production mode uses Telegram Login Widget and the backend validates the signed Telegram payload before issuing a session token. Dev login remains available only in local development.</p>
+        <div className="mt-5 rounded-lg border border-zinc-800 bg-black/30 p-4">
+          {botUsername ? <div ref={containerRef} className="min-h-10" /> : <p className="text-sm text-orange-100">Set `VITE_TELEGRAM_BOT_USERNAME` in the frontend environment to enable the Telegram widget.</p>}
+          {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+        </div>
+      </Card>
+    </div>
+  </div>
+}
+
 function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Page) => void; className?: string }) {
   return <div className={cn("sticky top-0 h-screen border-r border-zinc-800 bg-[#111] text-zinc-300", className)}>
     <div className="border-b border-zinc-800 px-3 py-3">
@@ -552,7 +634,7 @@ function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Pag
       })}
     </nav>
     <div className="mt-4 border-t border-zinc-800 p-2">
-      <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Shield className="h-4 w-4" /> Telegram later</div>
+      <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Shield className="h-4 w-4" /> Telegram auth</div>
       <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Bot className="h-4 w-4" /> User LLM keys</div>
     </div>
   </div>

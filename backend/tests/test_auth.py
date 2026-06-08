@@ -1,0 +1,58 @@
+import hashlib
+import hmac
+import unittest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import patch
+
+try:
+    from fastapi import HTTPException
+
+    from app.api.routes import auth as auth_routes
+    from app.services import auth as auth_service
+except ModuleNotFoundError as exc:
+    if exc.name in {"fastapi", "sqlalchemy"}:
+        raise unittest.SkipTest("Backend dependencies are required for auth tests") from exc
+    raise
+
+
+def signed_telegram_payload(bot_token: str, auth_date: int) -> dict[str, str]:
+    payload = {
+        "id": "12345",
+        "first_name": "Runner",
+        "username": "runner",
+        "auth_date": str(auth_date),
+    }
+    data_check = "\n".join(f"{key}={value}" for key, value in sorted(payload.items()))
+    secret = hashlib.sha256(bot_token.encode("utf-8")).digest()
+    payload["hash"] = hmac.new(secret, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
+    return payload
+
+
+class AuthTests(unittest.TestCase):
+    def test_dev_login_is_disabled_outside_development(self):
+        with patch.object(auth_routes, "get_settings", return_value=SimpleNamespace(app_env="production")):
+            with self.assertRaises(HTTPException) as caught:
+                auth_routes.dev_login(SimpleNamespace())
+
+        self.assertEqual(caught.exception.status_code, 403)
+
+    def test_telegram_login_rejects_stale_payloads(self):
+        bot_token = "test-token"
+        now = datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+        payload = signed_telegram_payload(bot_token, int((now - timedelta(days=2)).timestamp()))
+
+        with patch.object(auth_service, "get_settings", return_value=SimpleNamespace(telegram_bot_token=bot_token)):
+            self.assertFalse(auth_service.validate_telegram_login(payload, now=now))
+
+    def test_telegram_login_accepts_fresh_signed_payloads(self):
+        bot_token = "test-token"
+        now = datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+        payload = signed_telegram_payload(bot_token, int((now - timedelta(minutes=5)).timestamp()))
+
+        with patch.object(auth_service, "get_settings", return_value=SimpleNamespace(telegram_bot_token=bot_token)):
+            self.assertTrue(auth_service.validate_telegram_login(payload, now=now))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,4 +1,31 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080/api"
+const DEV_LOGIN_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"
+const TELEGRAM_BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || ""
+const AUTH_EXPIRED_EVENT = "runforfan-auth-expired"
+
+function safeStorageGet(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeStorageSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Auth still works for the current tab even if persistent storage is blocked.
+  }
+}
+
+function safeStorageRemove(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Ignore storage failures; in-memory token state is still cleared.
+  }
+}
 
 export type Activity = {
   id: number
@@ -1084,7 +1111,57 @@ export type CalendarResponse = {
   summary: CalendarSummary
 }
 
-let token = localStorage.getItem("runforfan_token")
+export type TelegramLoginPayload = {
+  id: string | number
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+  auth_date: string | number
+  hash: string
+}
+
+export type AuthToken = {
+  access_token: string
+  user: {
+    id: number
+    telegram_id: number | null
+    username: string | null
+    display_name: string
+    is_demo: boolean
+  }
+}
+
+let token = safeStorageGet("runforfan_token")
+
+export const authConfig = {
+  devLoginEnabled: DEV_LOGIN_ENABLED,
+  telegramBotUsername: TELEGRAM_BOT_USERNAME,
+}
+
+export function hasAuthToken() {
+  return Boolean(token)
+}
+
+export function clearAuthToken() {
+  token = null
+  safeStorageRemove("runforfan_token")
+}
+
+export function onAuthExpired(listener: () => void) {
+  window.addEventListener(AUTH_EXPIRED_EVENT, listener)
+  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, listener)
+}
+
+function notifyAuthExpired() {
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+}
+
+function storeAuthToken(data: AuthToken) {
+  token = data.access_token
+  safeStorageSet("runforfan_token", token)
+  return data
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -1095,15 +1172,32 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options.headers,
     },
   })
-  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
+  if (!response.ok) {
+    const body = await response.text()
+    if (response.status === 401 && !DEV_LOGIN_ENABLED) {
+      clearAuthToken()
+      notifyAuthExpired()
+    }
+    throw new Error(`${response.status}: ${body}`)
+  }
   return response.json()
 }
 
 export async function devLogin() {
-  const data = await request<{ access_token: string }>("/auth/dev-login", { method: "POST", body: "{}" })
-  token = data.access_token
-  localStorage.setItem("runforfan_token", token)
-  return data
+  if (!DEV_LOGIN_ENABLED) {
+    if (token) return { access_token: token, user: null }
+    throw new Error("Production login requires Telegram authentication")
+  }
+  const data = await request<AuthToken>("/auth/dev-login", { method: "POST", body: "{}" })
+  return storeAuthToken(data)
+}
+
+export async function telegramLogin(payload: TelegramLoginPayload) {
+  const data = await request<AuthToken>("/auth/telegram", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, id: String(payload.id), auth_date: String(payload.auth_date) }),
+  })
+  return storeAuthToken(data)
 }
 
 export const api = {

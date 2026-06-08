@@ -12,6 +12,10 @@ from app.db.session import get_db
 from app.models import AuthSession, User
 
 
+TELEGRAM_LOGIN_MAX_AGE_SECONDS = 86400
+TELEGRAM_LOGIN_FUTURE_SKEW_SECONDS = 300
+
+
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -39,12 +43,21 @@ def get_or_create_demo_user(db: Session) -> User:
     return user
 
 
-def validate_telegram_login(payload: dict[str, str]) -> bool:
+def validate_telegram_login(payload: dict[str, str], now: datetime | None = None) -> bool:
     settings = get_settings()
     if not settings.telegram_bot_token:
         raise HTTPException(status_code=400, detail="RUNFORFAN_TELEGRAM_BOT_TOKEN is not configured")
     received_hash = payload.get("hash")
     if not received_hash:
+        return False
+    try:
+        auth_time = datetime.fromtimestamp(int(payload.get("auth_date", "")), timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    if auth_time > current_time + timedelta(seconds=TELEGRAM_LOGIN_FUTURE_SKEW_SECONDS):
+        return False
+    if current_time - auth_time > timedelta(seconds=TELEGRAM_LOGIN_MAX_AGE_SECONDS):
         return False
     data_check = "\n".join(f"{key}={value}" for key, value in sorted(payload.items()) if key != "hash")
     secret = hashlib.sha256(settings.telegram_bot_token.encode("utf-8")).digest()
