@@ -102,12 +102,55 @@ class ActivityOut(BaseModel):
     elevation_loss_m: float | None = None
     aerobic_training_stress: float | None = None
     aerobic_training_effect: str | None = None
+    source_note: str | None = None
     segments: list[SegmentOut] = []
     split_blocks: list[SplitBlockOut] = []
     workout_blocks: list[WorkoutBlockOut] = []
     derived_metrics: list[DerivedActivityMetricOut] = []
 
     model_config = {"from_attributes": True}
+
+
+class ActivityCreate(BaseModel):
+    activity_type: str = Field(default="manual_workout", max_length=64)
+    title: str = Field(default="Manual activity", min_length=1, max_length=255)
+    started_at: datetime | None = None
+    distance_km: float | None = Field(default=None, gt=0, le=300)
+    duration_seconds: StrictInt = Field(ge=60, le=86400)
+    calories_kcal: StrictInt | None = Field(default=None, ge=0, le=20000)
+    average_pace_seconds_per_km: StrictInt | None = Field(default=None, ge=120, le=1200)
+    fastest_pace_seconds_per_km: StrictInt | None = Field(default=None, ge=60, le=1200)
+    average_speed_kmh: float | None = Field(default=None, ge=0, le=80)
+    average_cadence_spm: StrictInt | None = Field(default=None, ge=60, le=300)
+    average_stride_cm: StrictInt | None = Field(default=None, ge=20, le=300)
+    steps_count: StrictInt | None = Field(default=None, ge=0, le=200000)
+    average_heart_rate_bpm: StrictInt | None = Field(default=None, ge=40, le=230)
+    elevation_gain_m: float | None = Field(default=None, ge=0, le=20000)
+    elevation_loss_m: float | None = Field(default=None, ge=0, le=20000)
+    aerobic_training_stress: float | None = Field(default=None, ge=0, le=1000)
+    aerobic_training_effect: str | None = Field(default=None, max_length=255)
+    source_note: str | None = Field(default=None, max_length=2000)
+
+
+class ActivityUpdate(BaseModel):
+    activity_type: str | None = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    started_at: datetime | None = None
+    distance_km: float | None = Field(default=None, gt=0, le=300)
+    duration_seconds: StrictInt | None = Field(default=None, ge=60, le=86400)
+    calories_kcal: StrictInt | None = Field(default=None, ge=0, le=20000)
+    average_pace_seconds_per_km: StrictInt | None = Field(default=None, ge=120, le=1200)
+    fastest_pace_seconds_per_km: StrictInt | None = Field(default=None, ge=60, le=1200)
+    average_speed_kmh: float | None = Field(default=None, ge=0, le=80)
+    average_cadence_spm: StrictInt | None = Field(default=None, ge=60, le=300)
+    average_stride_cm: StrictInt | None = Field(default=None, ge=20, le=300)
+    steps_count: StrictInt | None = Field(default=None, ge=0, le=200000)
+    average_heart_rate_bpm: StrictInt | None = Field(default=None, ge=40, le=230)
+    elevation_gain_m: float | None = Field(default=None, ge=0, le=20000)
+    elevation_loss_m: float | None = Field(default=None, ge=0, le=20000)
+    aerobic_training_stress: float | None = Field(default=None, ge=0, le=1000)
+    aerobic_training_effect: str | None = Field(default=None, max_length=255)
+    source_note: str | None = Field(default=None, max_length=2000)
 
 
 class ActivityValidationIssueOut(BaseModel):

@@ -19,6 +19,7 @@ export type Activity = {
   elevation_loss_m: number | null
   aerobic_training_stress: number | null
   aerobic_training_effect: string | null
+  source_note: string | null
   segments: ActivitySegment[]
   split_blocks: ActivitySplitBlock[]
   workout_blocks: {
@@ -1097,6 +1098,8 @@ export async function devLogin() {
 export const api = {
   activities: () => request<Activity[]>("/activities"),
   activity: (id: number) => request<Activity>(`/activities/${id}`),
+  createActivity: (payload: Record<string, unknown>) => request<Activity>("/activities", { method: "POST", body: JSON.stringify(payload) }),
+  updateActivity: (id: number, payload: Record<string, unknown>) => request<Activity>(`/activities/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   activityValidation: (id: number) => request<ActivityValidation>(`/activities/${id}/validation`),
   imports: () => request<ImportBatch[]>("/imports"),
   uploadScreenshots: (files: File[]) => {

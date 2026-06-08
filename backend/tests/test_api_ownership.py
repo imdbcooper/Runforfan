@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -14,6 +15,7 @@ try:
     from app.api.routes import goals as goals_routes
     from app.api.routes import imports as imports_routes
     from app.api.routes import planning as planning_routes
+    from app.models import Activity
 except ModuleNotFoundError as exc:
     if exc.name in {"fastapi", "httpx", "pydantic", "pydantic_core", "sqlalchemy", "starlette", "multipart"}:
         raise unittest.SkipTest("Backend dependencies are required for API ownership tests") from exc
@@ -122,6 +124,33 @@ class ImportUploadDb(CommitDb):
         self.committed = True
 
 
+class ActivityWriteDb(CommitDb):
+    def __init__(self, activity=None):
+        self.activity = activity
+        self.added = []
+        self.committed = False
+        self.flushed = False
+        self.scalar_queries = []
+
+    def add(self, item):
+        if item.__class__.__name__ == "Activity" and item.id is None:
+            item.id = 77
+            self.activity = item
+        self.added.append(item)
+
+    def scalar(self, query):
+        self.scalar_queries.append(query)
+        if "activities" in str(query):
+            return self.activity
+        return None
+
+    def flush(self):
+        self.flushed = True
+
+    def commit(self):
+        self.committed = True
+
+
 def app_with_router(router, current_user_dependency, db_dependency, db):
     app = FastAPI()
     add_exception_handlers(app)
@@ -195,6 +224,95 @@ class ApiOwnershipTests(unittest.TestCase):
         query = compiled_query(db.scalar_queries[0])
         self.assertIn("activities.id = 7", query)
         self.assertIn("activities.user_id = 42", query)
+
+    def test_activity_create_derives_summary_fields_and_syncs_load(self):
+        db = ActivityWriteDb()
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1) as sync_load:
+            response = TestClient(app).post("/api/activities", json={"title": "Manual run", "started_at": "2026-06-08T07:00:00+00:00", "distance_km": 5.0, "duration_seconds": 1500, "average_heart_rate_bpm": 145})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["id"], 77)
+        self.assertEqual(body["title"], "Manual run")
+        self.assertEqual(body["average_pace_seconds_per_km"], 300)
+        self.assertEqual(body["average_speed_kmh"], 12.0)
+        self.assertEqual(body["source_note"], "Manually entered in admin UI.")
+        self.assertTrue(db.committed)
+        sync_load.assert_called_once()
+
+    def test_activity_update_is_user_scoped_and_recomputes_when_pace_omitted(self):
+        activity = Activity(id=7, user_id=42, title="Old run", started_at=datetime(2026, 6, 8, 7, tzinfo=UTC), distance_km=5.0, duration_seconds=1500, average_pace_seconds_per_km=300, average_speed_kmh=12.0)
+        db = ActivityWriteDb(activity)
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1) as sync_load:
+            response = TestClient(app).patch("/api/activities/7", json={"distance_km": 6.0})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["distance_km"], 6.0)
+        self.assertEqual(body["average_pace_seconds_per_km"], 250)
+        self.assertEqual(body["average_speed_kmh"], 14.4)
+        self.assertTrue(db.committed)
+        sync_load.assert_called_once()
+        query = compiled_query(db.scalar_queries[0])
+        self.assertIn("activities.id = 7", query)
+        self.assertIn("activities.user_id = 42", query)
+
+    def test_activity_update_preserves_imported_pace_on_unrelated_patch(self):
+        activity = Activity(id=7, user_id=42, title="Old run", distance_km=5.0, duration_seconds=1500, average_pace_seconds_per_km=290, average_speed_kmh=12.4)
+        db = ActivityWriteDb(activity)
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1):
+            response = TestClient(app).patch("/api/activities/7", json={"title": "Renamed run"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["title"], "Renamed run")
+        self.assertEqual(body["average_pace_seconds_per_km"], 290)
+        self.assertEqual(body["average_speed_kmh"], 12.4)
+
+    def test_activity_update_preserves_imported_pace_when_summary_values_are_unchanged(self):
+        activity = Activity(id=7, user_id=42, title="Old run", distance_km=5.0, duration_seconds=1500, average_pace_seconds_per_km=290, average_speed_kmh=12.4)
+        db = ActivityWriteDb(activity)
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1):
+            response = TestClient(app).patch("/api/activities/7", json={"title": "Renamed run", "distance_km": 5.0, "duration_seconds": 1500})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["average_pace_seconds_per_km"], 290)
+        self.assertEqual(body["average_speed_kmh"], 12.4)
+
+    def test_activity_update_rejects_inconsistent_explicit_pace(self):
+        activity = Activity(id=7, user_id=42, title="Old run", distance_km=5.0, duration_seconds=1500, average_pace_seconds_per_km=300)
+        db = ActivityWriteDb(activity)
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1) as sync_load:
+            response = TestClient(app).patch("/api/activities/7", json={"average_pace_seconds_per_km": 600})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"code": "bad_request", "message": "Average pace must match distance and duration within tolerance", "details": None})
+        self.assertFalse(db.committed)
+        sync_load.assert_not_called()
+
+    def test_activity_update_rejects_stale_explicit_pace_with_distance_change(self):
+        activity = Activity(id=7, user_id=42, title="Old run", distance_km=5.0, duration_seconds=1500, average_pace_seconds_per_km=300)
+        db = ActivityWriteDb(activity)
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        with patch.object(activities_routes, "sync_daily_training_loads_for_dates", return_value=1) as sync_load:
+            response = TestClient(app).patch("/api/activities/7", json={"distance_km": 6.0, "average_pace_seconds_per_km": 300})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Average pace", response.json()["message"])
+        self.assertFalse(db.committed)
+        sync_load.assert_not_called()
 
     def test_goal_update_lookup_is_user_scoped(self):
         db = CapturingDb()

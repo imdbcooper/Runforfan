@@ -3,14 +3,36 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import Activity, User
-from app.schemas.common import ActivityOut, ActivityValidationOut
+from app.models import Activity, AthleteProfile, User
+from app.schemas.common import ActivityCreate, ActivityOut, ActivityUpdate, ActivityValidationOut
+from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.analytics import activity_local_date, profile_timezone
 from app.services.auth import get_current_user
 from app.services.training_load import sync_daily_training_loads_for_dates
 
 
 router = APIRouter(prefix="/activities", tags=["activities"])
+ACTIVITY_WRITE_FIELDS = (
+    "activity_type",
+    "title",
+    "started_at",
+    "distance_km",
+    "duration_seconds",
+    "calories_kcal",
+    "average_pace_seconds_per_km",
+    "fastest_pace_seconds_per_km",
+    "average_speed_kmh",
+    "average_cadence_spm",
+    "average_stride_cm",
+    "steps_count",
+    "average_heart_rate_bpm",
+    "elevation_gain_m",
+    "elevation_loss_m",
+    "aerobic_training_stress",
+    "aerobic_training_effect",
+    "source_note",
+)
+DERIVED_SUMMARY_FIELDS = {"average_pace_seconds_per_km", "average_speed_kmh"}
 
 
 def validation_issue(code: str, severity: str, message: str, metric: str | None = None, expected: float | None = None, actual: float | None = None, unit: str | None = None) -> dict[str, object]:
@@ -90,6 +112,93 @@ def activity_validation_report(activity: Activity) -> dict[str, object]:
     }
 
 
+def activity_query(activity_id: int, user: User):
+    return (
+        select(Activity)
+        .where(Activity.id == activity_id, Activity.user_id == user.id)
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
+    )
+
+
+def load_activity_for_user(db: Session, user: User, activity_id: int) -> Activity:
+    activity = db.scalar(activity_query(activity_id, user))
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return activity
+
+
+def validate_activity_summary(activity: Activity) -> None:
+    distance = float(activity.distance_km or 0)
+    duration = int(activity.duration_seconds or 0)
+    if duration <= 0:
+        raise HTTPException(status_code=400, detail="Activity duration must be positive")
+    if distance <= 0:
+        return
+    expected_pace = round(duration / distance)
+    if activity.average_pace_seconds_per_km is not None and abs(int(activity.average_pace_seconds_per_km) - expected_pace) > max(5, expected_pace * 0.02):
+        raise HTTPException(status_code=400, detail="Average pace must match distance and duration within tolerance")
+    expected_speed = round(distance * 3600 / duration, 2)
+    if activity.average_speed_kmh is not None and abs(float(activity.average_speed_kmh) - expected_speed) > max(0.2, expected_speed * 0.02):
+        raise HTTPException(status_code=400, detail="Average speed must match distance and duration within tolerance")
+
+
+def normalize_activity_summary(activity: Activity, explicit_fields: set[str], recompute_summary: bool) -> None:
+    distance = float(activity.distance_km or 0)
+    duration = int(activity.duration_seconds or 0)
+    if duration <= 0:
+        raise HTTPException(status_code=400, detail="Activity duration must be positive")
+    if distance <= 0:
+        if recompute_summary and "average_pace_seconds_per_km" not in explicit_fields:
+            activity.average_pace_seconds_per_km = None
+        if recompute_summary and "average_speed_kmh" not in explicit_fields:
+            activity.average_speed_kmh = None
+        return
+    if recompute_summary and "average_pace_seconds_per_km" not in explicit_fields:
+        activity.average_pace_seconds_per_km = round(duration / distance)
+    if recompute_summary and "average_speed_kmh" not in explicit_fields:
+        activity.average_speed_kmh = round(distance * 3600 / duration, 2)
+    if recompute_summary or explicit_fields:
+        validate_activity_summary(activity)
+
+
+def apply_activity_values(activity: Activity, values: dict[str, object], explicit_fields: set[str], recompute_summary: bool) -> None:
+    if "duration_seconds" in values and values.get("duration_seconds") is None:
+        raise HTTPException(status_code=400, detail="Activity duration must be positive")
+    explicit_summary_fields = DERIVED_SUMMARY_FIELDS & explicit_fields
+    for key in ACTIVITY_WRITE_FIELDS:
+        if key in values:
+            setattr(activity, key, values[key])
+    activity.activity_type = activity.activity_type or "outdoor_run"
+    activity.title = activity.title or "Manual activity"
+    normalize_activity_summary(activity, explicit_summary_fields, recompute_summary)
+
+
+def sync_activity_after_write(db: Session, user: User, activity: Activity, changed_dates: list) -> None:
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    sync_derived_activity_metrics(db, activity, profile)
+    db.flush()
+    changed = list(changed_dates)
+    timezone = profile_timezone(db, user)
+    next_date = activity_local_date(activity, timezone)
+    if next_date is not None and next_date not in changed:
+        changed.append(next_date)
+    if changed:
+        sync_daily_training_loads_for_dates(db, user, changed)
+
+
+@router.post("", response_model=ActivityOut)
+def create_activity(payload: ActivityCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    values = payload.model_dump()
+    values["source_note"] = values.get("source_note") or "Manually entered in admin UI."
+    activity = Activity(user_id=user.id)
+    apply_activity_values(activity, values, set(payload.model_fields_set), recompute_summary=True)
+    db.add(activity)
+    db.flush()
+    sync_activity_after_write(db, user, activity, [])
+    db.commit()
+    return activity
+
+
 @router.get("", response_model=list[ActivityOut])
 def list_activities(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(
@@ -102,13 +211,21 @@ def list_activities(user: User = Depends(get_current_user), db: Session = Depend
 
 @router.get("/{activity_id}", response_model=ActivityOut)
 def get_activity(activity_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    activity = db.scalar(
-        select(Activity)
-        .where(Activity.id == activity_id, Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
-    )
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
+    return load_activity_for_user(db, user, activity_id)
+
+
+@router.patch("/{activity_id}", response_model=ActivityOut)
+def update_activity(activity_id: int, payload: ActivityUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    activity = load_activity_for_user(db, user, activity_id)
+    timezone = profile_timezone(db, user)
+    old_date = activity_local_date(activity, timezone)
+    values = payload.model_dump(exclude_unset=True)
+    if values:
+        summary_changed = any(key in values and getattr(activity, key) != values[key] for key in ("distance_km", "duration_seconds"))
+        apply_activity_values(activity, values, set(payload.model_fields_set), recompute_summary=summary_changed)
+        db.flush()
+        sync_activity_after_write(db, user, activity, [old_date] if old_date is not None else [])
+    db.commit()
     return activity
 
 
@@ -126,9 +243,7 @@ def get_activity_validation(activity_id: int, user: User = Depends(get_current_u
 
 @router.delete("/{activity_id}")
 def delete_activity(activity_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
+    activity = load_activity_for_user(db, user, activity_id)
     timezone = profile_timezone(db, user)
     changed_date = activity_local_date(activity, timezone)
     db.delete(activity)

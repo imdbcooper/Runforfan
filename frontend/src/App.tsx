@@ -257,6 +257,35 @@ function completionPayload(draft: CompletionDraft) {
   }
 }
 
+function activityWritePayload(form: HTMLFormElement) {
+  const data = new FormData(form)
+  const durationMinutes = numberOrNull(data.get("duration_minutes"))
+  const durationSeconds = numberOrNull(data.get("duration_seconds"))
+  const startedAt = stringOrNull(data.get("started_at"))
+  const parsedStartedAt = startedAt ? new Date(startedAt) : null
+  return {
+    activity_type: stringOrNull(data.get("activity_type")) || "manual_workout",
+    title: stringOrNull(data.get("title")) || "Manual activity",
+    started_at: parsedStartedAt && !Number.isNaN(parsedStartedAt.getTime()) ? parsedStartedAt.toISOString() : null,
+    distance_km: numberOrNull(data.get("distance_km")),
+    duration_seconds: durationSeconds === null ? durationMinutes === null ? null : Math.round(durationMinutes * 60) : Math.round(durationSeconds),
+    average_heart_rate_bpm: numberOrNull(data.get("average_heart_rate_bpm")),
+    source_note: stringOrNull(data.get("source_note")),
+  }
+}
+
+function activityDurationSeconds(activity: ActivityType) {
+  return activity.duration_seconds ? String(activity.duration_seconds) : ""
+}
+
+function datetimeLocalValue(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 19)
+}
+
 function formatZoneValue(zone: Zone, value: number | null) {
   if (value === null) return "--"
   if (zone.unit === "seconds_per_km") return `${formatPace(Math.round(value))}/км`
@@ -442,7 +471,7 @@ function App() {
           <Topbar status={status} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
             {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
-            {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} />}
+            {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "analytics" && <Analytics analytics={analytics} />}
@@ -657,11 +686,13 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
   return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">{label}</span></div>
 }
 
-function Activities({ activities, compact = false, onImport }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void }) {
+function Activities({ activities, compact = false, onImport, onChanged }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void; onChanged?: () => Promise<void> }) {
   const [detail, setDetail] = useState<ActivityType | null>(null)
   const [validation, setValidation] = useState<ActivityValidation | null>(null)
   const [detailError, setDetailError] = useState("")
   const [detailLoading, setDetailLoading] = useState(false)
+  const [manualBusy, setManualBusy] = useState(false)
+  const [manualMessage, setManualMessage] = useState("")
   const detailRequestId = useRef(0)
 
   async function openActivityDetail(activityId: number) {
@@ -694,6 +725,50 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
     setDetailLoading(false)
   }
 
+  async function createManualActivity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const payload = activityWritePayload(event.currentTarget)
+    if (!payload.duration_seconds) {
+      setManualMessage("Duration is required for manual activity.")
+      return
+    }
+    setManualBusy(true)
+    setManualMessage("")
+    try {
+      await devLogin()
+      const created = await api.createActivity(payload)
+      setManualMessage(`Created activity #${created.id}. Pace and speed were derived from distance/time when available.`)
+      event.currentTarget.reset()
+      setDetail(created)
+      setValidation(await api.activityValidation(created.id))
+      await onChanged?.()
+    } catch (error) {
+      setManualMessage(apiErrorMessage(error, "Failed to create manual activity"))
+    } finally {
+      setManualBusy(false)
+    }
+  }
+
+  async function updateActivity(activityId: number, payload: Record<string, unknown>) {
+    setDetailLoading(true)
+    setDetailError("")
+    try {
+      await devLogin()
+      const updated = await api.updateActivity(activityId, payload)
+      const nextValidation = await api.activityValidation(activityId)
+      setDetail(updated)
+      setValidation(nextValidation)
+      await onChanged?.()
+      return updated
+    } catch (error) {
+      const message = apiErrorMessage(error, "Не удалось обновить activity")
+      setDetailError(message)
+      throw error
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   if (!compact) {
     const activityColumns: DataTableColumn<ActivityType>[] = [
       { key: "name", header: "Name", sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
@@ -715,6 +790,17 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
     ]
     return <Card>
       <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total · sortable, filterable, paginated</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
+      <form onSubmit={createManualActivity} className="grid gap-3 border-t border-zinc-800 bg-zinc-950/50 p-4 text-xs md:grid-cols-6">
+        <Field label="Title"><Input name="title" placeholder="Manual run" /></Field>
+        <Field label="Started"><Input name="started_at" type="datetime-local" /></Field>
+        <Field label="Type"><Select name="activity_type"><option value="manual_workout">manual workout</option><option value="outdoor_run">outdoor run</option><option value="treadmill_run">treadmill run</option><option value="manual_strength">strength</option></Select></Field>
+        <Field label="Distance km"><Input name="distance_km" type="number" step="0.01" placeholder="5.0" /></Field>
+        <Field label="Duration min"><Input name="duration_minutes" type="number" step="1" min="1" required placeholder="30" /></Field>
+        <Field label="Avg HR"><Input name="average_heart_rate_bpm" type="number" step="1" placeholder="145" /></Field>
+        <div className="md:col-span-5"><Field label="Source note"><Input name="source_note" placeholder="Manual correction, watch missing, treadmill entry..." /></Field></div>
+        <div className="flex items-end"><Button type="submit" size="sm" disabled={manualBusy}>+ Manual</Button></div>
+        {manualMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{manualMessage}</p> : null}
+      </form>
       <DataTable
         rows={activities}
         columns={activityColumns}
@@ -723,7 +809,7 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
         filterPlaceholder="Filter by title, date, id"
         emptyState={<div className="flex flex-wrap items-center gap-3"><span>No activities match this filter.</span><Button size="sm" variant="secondary" onClick={onImport}>Import activity</Button></div>}
       />
-      {detail ? <ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} /> : null}
+      {detail ? <ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /> : null}
       {activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
           <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
@@ -753,12 +839,30 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
   </Card>
 }
 
-function ActivityDetailPanel({ activity, validation, loading, error, onClose, onRefresh }: { activity: ActivityType; validation: ActivityValidation | null; loading: boolean; error: string; onClose: () => void; onRefresh: () => void }) {
+function ActivityDetailPanel({ activity, validation, loading, error, onClose, onRefresh, onUpdate }: { activity: ActivityType; validation: ActivityValidation | null; loading: boolean; error: string; onClose: () => void; onRefresh: () => void; onUpdate: (activityId: number, payload: Record<string, unknown>) => Promise<ActivityType> }) {
   const derived = [...(activity.derived_metrics || [])].sort((left, right) => left.metric_key.localeCompare(right.metric_key))
   const segments = [...(activity.segments || [])].sort((left, right) => left.segment_index - right.segment_index)
   const workoutBlocks = [...(activity.workout_blocks || [])].sort((left, right) => left.block_index - right.block_index)
   const validationChecks = validation?.checks || []
   const warnings = validation?.issues || []
+  const [editMessage, setEditMessage] = useState("")
+
+  async function submitEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setEditMessage("")
+    const payload = activityWritePayload(event.currentTarget)
+    if (!payload.duration_seconds) {
+      setEditMessage("Duration is required.")
+      return
+    }
+    try {
+      const updated = await onUpdate(activity.id, payload)
+      setEditMessage(`Saved #${updated.id}. Derived metrics and load were recalculated.`)
+    } catch (caught) {
+      setEditMessage(apiErrorMessage(caught, "Failed to save activity"))
+    }
+  }
+
   return <Card className="border-orange-400/25 bg-zinc-950/70">
     <CardHeader>
       <div className="min-w-0">
@@ -785,6 +889,19 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <Stat label="elevation" value={activity.elevation_gain_m || activity.elevation_loss_m ? `+${activity.elevation_gain_m || 0} / -${activity.elevation_loss_m || 0} m` : "--"} />
         <Stat label="sources" value={`${validation?.source_counts.screenshots ?? 0} screenshots`} />
       </div>
+
+      <form key={`${activity.id}-${activity.title}-${activity.activity_type}-${activity.started_at || ""}-${activity.distance_km || ""}-${activity.duration_seconds}-${activity.average_heart_rate_bpm || ""}-${activity.source_note || ""}`} onSubmit={submitEdit} className="grid gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 md:grid-cols-6">
+        <div className="md:col-span-6 flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Quick edit</p><p className="mt-1 text-zinc-500">Manual corrections recalculate pace, speed, derived metrics and daily load.</p></div><Badge>manual correction</Badge></div>
+        <Field label="Title"><Input name="title" defaultValue={activity.title} /></Field>
+        <Field label="Started"><Input name="started_at" type="datetime-local" step="1" defaultValue={datetimeLocalValue(activity.started_at)} /></Field>
+        <Field label="Type"><Select name="activity_type" defaultValue={activity.activity_type}><option value="manual_workout">manual workout</option><option value="outdoor_run">outdoor run</option><option value="treadmill_run">treadmill run</option><option value="manual_strength">strength</option></Select></Field>
+        <Field label="Distance km"><Input name="distance_km" type="number" step="0.01" defaultValue={activity.distance_km?.toString() || ""} /></Field>
+        <Field label="Duration sec"><Input name="duration_seconds" type="number" step="1" min="60" required defaultValue={activityDurationSeconds(activity)} /></Field>
+        <Field label="Avg HR"><Input name="average_heart_rate_bpm" type="number" step="1" defaultValue={activity.average_heart_rate_bpm?.toString() || ""} /></Field>
+        <div className="md:col-span-5"><Field label="Source note"><Input name="source_note" defaultValue={activity.source_note || ""} /></Field></div>
+        <div className="flex items-end"><Button type="submit" size="sm" variant="secondary" disabled={loading}>Save edit</Button></div>
+        {editMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">{editMessage}</p> : null}
+      </form>
 
       <div className="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Validation report</p><p className="mt-1 text-zinc-500">Data quality checks for pace, segments, blocks and physiological ranges.</p></div><Badge className={signalClass(validation?.status)}>{warnings.length} warnings</Badge></div>
