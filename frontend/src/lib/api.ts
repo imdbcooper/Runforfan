@@ -681,11 +681,18 @@ export type TrainingLoadDailyPoint = {
   load_methods: string[]
   distance_km: number
   duration_seconds: number
+  duration_minutes: number
+  activity_ids: number[]
   activity_count: number
   srpe_count: number
   hard_session: boolean
   hard_reasons: string[]
   recovery_day: boolean
+  ctl: number | null
+  atl: number | null
+  tsb: number | null
+  monotony_window_value: number | null
+  strain_window_value: number | null
 }
 
 export type TrainingLoadDaily = {

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlan, TrainingPlanWorkout, User
 from app.services.analytics import activity_local_date, date_range_label, load_activities, profile_timezone
 from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_REF, calculate_monotony_strain, calculate_srpe_load, ewma_load
 
@@ -155,6 +155,7 @@ def empty_bucket(day: date) -> dict[str, object]:
         "load_methods": set(),
         "distance_km": 0.0,
         "duration_seconds": 0,
+        "activity_ids": [],
         "activity_count": 0,
         "srpe_count": 0,
         "hard_session": False,
@@ -170,6 +171,8 @@ def bucket_activity(bucket: dict[str, object], activity: Activity, workout: Trai
         bucket["load_methods"].add(method)
     bucket["distance_km"] = round(float(bucket["distance_km"]) + (activity.distance_km or 0), 2)
     bucket["duration_seconds"] = int(bucket["duration_seconds"]) + max(activity.duration_seconds or 0, 0)
+    if activity.id is not None:
+        bucket["activity_ids"].append(int(activity.id))
     bucket["activity_count"] = int(bucket["activity_count"]) + 1
     bucket["srpe_count"] = int(bucket["srpe_count"]) + srpe_count
     reasons = hard_session_reasons(activity, workout, load)
@@ -188,11 +191,18 @@ def daily_point(bucket: dict[str, object]) -> dict[str, object]:
         "load_methods": methods,
         "distance_km": round(float(bucket["distance_km"]), 2),
         "duration_seconds": int(bucket["duration_seconds"]),
+        "duration_minutes": round(int(bucket["duration_seconds"]) / 60, 1),
+        "activity_ids": sorted(set(int(activity_id) for activity_id in bucket["activity_ids"])),
         "activity_count": int(bucket["activity_count"]),
         "srpe_count": int(bucket["srpe_count"]),
         "hard_session": bool(bucket["hard_session"]),
         "hard_reasons": sorted(set(bucket["hard_reasons"])),
         "recovery_day": bool(bucket["recovery_day"]),
+        "ctl": None,
+        "atl": None,
+        "tsb": None,
+        "monotony_window_value": None,
+        "strain_window_value": None,
     }
 
 
@@ -238,6 +248,24 @@ def weekly_points(daily: list[dict[str, object]]) -> list[dict[str, object]]:
             "strain": monotony["strain"].value,
         })
     return result
+
+
+def annotate_daily_training_loads(selected_daily: list[dict[str, object]], all_daily: list[dict[str, object]], fitness_points: list[dict[str, object]]) -> None:
+    fitness_by_date = {point["date"]: point for point in fitness_points}
+    all_by_date = {point["date"]: index for index, point in enumerate(all_daily)}
+    for point in selected_daily:
+        fitness = fitness_by_date.get(point["date"])
+        if fitness:
+            point["ctl"] = fitness["ctl"]
+            point["atl"] = fitness["atl"]
+            point["tsb"] = fitness["tsb"]
+        index = all_by_date.get(point["date"])
+        if index is None:
+            continue
+        window = all_daily[max(0, index - 6):index + 1]
+        monotony = calculate_monotony_strain([float(item["load"]) for item in window])
+        point["monotony_window_value"] = monotony["monotony"].value
+        point["strain_window_value"] = monotony["strain"].value
 
 
 def warning(severity: str, title: str, message: str, reasons: list[str], metric: str | None = None, value: float | None = None, threshold: float | None = None) -> dict[str, object]:
@@ -294,6 +322,7 @@ def training_load_from_data(activities: list[Activity], workouts: list[TrainingP
     all_daily = [daily_point(buckets[day]) for day in sorted(buckets)]
     selected_daily = [point for point in all_daily if from_date <= point["date"] <= to_date]
     fitness_points = append_fitness(selected_daily, all_daily)
+    annotate_daily_training_loads(selected_daily, all_daily, fitness_points)
     weekly = weekly_points(selected_daily)
     method = primary_method({method for point in selected_daily for method in point["load_methods"]})
     current_fitness = fitness_points[-1] if fitness_points else {"ctl": 0.0, "atl": 0.0, "tsb": 0.0}
@@ -343,3 +372,95 @@ def training_load_fitness_fatigue(db: Session, user: User, from_date: date | Non
 
 def training_load_warning_list(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> list[dict[str, object]]:
     return training_load_context(db, user, from_date, to_date)["warnings"]
+
+
+def persisted_load_method(load_method: str) -> str:
+    mapping = {
+        "session_rpe": "srpe",
+        "hr_trimp": "hr_trimp",
+        "pace_based_fallback": "pace_fallback",
+        "support_duration_fallback": "manual",
+        "aerobic_training_stress": "manual",
+    }
+    return mapping.get(load_method, load_method)
+
+
+def sync_daily_training_loads(db: Session, user: User, from_date: date, to_date: date) -> int:
+    if to_date < from_date:
+        return 0
+    db.flush()
+    timezone = profile_timezone(db, user)
+    warmup_start = from_date - timedelta(days=LOAD_LOOKBACK_DAYS)
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    activities = load_activities(db, user, warmup_start, to_date, timezone)
+    workouts = load_planned_workouts_with_feedback(db, user, [activity.id for activity in activities])
+    context = training_load_from_data(activities, workouts, profile, from_date, to_date, timezone)
+    points = context["daily"]["points"]
+    dates = [point["date"] for point in points]
+    existing = {
+        row.date: row
+        for row in db.scalars(
+            select(DailyTrainingLoad)
+            .where(DailyTrainingLoad.user_id == user.id, DailyTrainingLoad.date.in_(dates))
+            .order_by(DailyTrainingLoad.date.asc())
+        )
+    }
+    synced_count = 0
+    for point in points:
+        row = existing.get(point["date"])
+        if row is None:
+            row = DailyTrainingLoad(user_id=user.id, date=point["date"])
+            db.add(row)
+        row.load_value = float(point["load"])
+        row.method = persisted_load_method(str(point["load_method"]))
+        row.duration_minutes = float(point["duration_minutes"])
+        row.activity_ids = [int(activity_id) for activity_id in point["activity_ids"]]
+        row.ctl = float(point["ctl"]) if point["ctl"] is not None else None
+        row.atl = float(point["atl"]) if point["atl"] is not None else None
+        row.tsb = float(point["tsb"]) if point["tsb"] is not None else None
+        row.monotony_window_value = float(point["monotony_window_value"]) if point["monotony_window_value"] is not None else None
+        row.strain_window_value = float(point["strain_window_value"]) if point["strain_window_value"] is not None else None
+        row.computed_at = datetime.now(UTC)
+        synced_count += 1
+    return synced_count
+
+
+def sync_daily_training_loads_for_dates(db: Session, user: User, changed_dates: list[date]) -> int:
+    if not changed_dates:
+        return 0
+    timezone = profile_timezone(db, user)
+    start_date = min(changed_dates)
+    end_date = max(datetime.now(timezone).date(), max(changed_dates))
+    return sync_daily_training_loads(db, user, start_date, end_date)
+
+
+def sync_daily_training_loads_for_activity(db: Session, user: User, activity: Activity) -> int:
+    timezone = profile_timezone(db, user)
+    activity_date = activity_local_date(activity, timezone)
+    if activity_date is None:
+        return 0
+    return sync_daily_training_loads_for_dates(db, user, [activity_date])
+
+
+def sync_daily_training_loads_for_activities(db: Session, user: User, activities: list[Activity]) -> int:
+    timezone = profile_timezone(db, user)
+    changed_dates = [activity_date for activity in activities if (activity_date := activity_local_date(activity, timezone)) is not None]
+    return sync_daily_training_loads_for_dates(db, user, changed_dates)
+
+
+def backfill_recent_daily_training_loads(db: Session, *, days: int = DEFAULT_PERIOD_DAYS, user_limit: int = 100) -> int:
+    if days <= 0 or user_limit <= 0:
+        return 0
+    users = list(db.scalars(
+        select(User)
+        .where(User.id.in_(select(Activity.user_id).distinct()))
+        .order_by(User.id.asc())
+        .limit(user_limit)
+    ))
+    synced_count = 0
+    for user in users:
+        timezone = profile_timezone(db, user)
+        end_date = datetime.now(timezone).date()
+        start_date = end_date - timedelta(days=days - 1)
+        synced_count += sync_daily_training_loads(db, user, start_date, end_date)
+    return synced_count

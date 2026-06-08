@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,7 @@ class User(Base, TimestampMixin):
     training_zones: Mapped[list["TrainingZone"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     performance_results: Mapped[list["PerformanceResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -234,6 +235,25 @@ class DerivedActivityMetric(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     activity: Mapped[Activity] = relationship(back_populates="derived_metrics")
+
+
+class DailyTrainingLoad(Base):
+    __tablename__ = "daily_training_loads"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True, index=True)
+    load_value: Mapped[float] = mapped_column(Float, default=0.0)
+    method: Mapped[str] = mapped_column(String(64), default="unavailable")
+    duration_minutes: Mapped[float] = mapped_column(Float, default=0.0)
+    activity_ids: Mapped[list[int] | None] = mapped_column(JSON)
+    ctl: Mapped[float | None] = mapped_column(Float)
+    atl: Mapped[float | None] = mapped_column(Float)
+    tsb: Mapped[float | None] = mapped_column(Float)
+    monotony_window_value: Mapped[float | None] = mapped_column(Float)
+    strain_window_value: Mapped[float | None] = mapped_column(Float)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user: Mapped[User] = relationship(back_populates="daily_training_loads")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):

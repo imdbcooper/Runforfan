@@ -55,6 +55,12 @@ class FakeDb:
             if getattr(item, "id", None) is None:
                 item.id = index
 
+    def scalar(self, _query):
+        return None
+
+    def scalars(self, _query):
+        return iter([])
+
     def commit(self):
         self.committed = True
 

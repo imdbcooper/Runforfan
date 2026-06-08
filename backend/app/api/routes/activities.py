@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.session import get_db
 from app.models import Activity, User
 from app.schemas.common import ActivityOut
+from app.services.analytics import activity_local_date, profile_timezone
 from app.services.auth import get_current_user
+from app.services.training_load import sync_daily_training_loads_for_dates
 
 
 router = APIRouter(prefix="/activities", tags=["activities"])
@@ -38,6 +40,11 @@ def delete_activity(activity_id: int, user: User = Depends(get_current_user), db
     activity = db.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
+    timezone = profile_timezone(db, user)
+    changed_date = activity_local_date(activity, timezone)
     db.delete(activity)
+    db.flush()
+    if changed_date is not None:
+        sync_daily_training_loads_for_dates(db, user, [changed_date])
     db.commit()
     return {"deleted": True, "id": activity_id}

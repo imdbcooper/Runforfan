@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.models import Activity, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
+    from app.models import Activity, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
     from app.services.csv_imports import activity_payload_from_csv_row, iter_csv_rows
     from app.services.data_management import activity_export, llm_provider_export, model_to_dict, training_plan_export
 except ModuleNotFoundError as exc:
@@ -89,6 +89,14 @@ class DataManagementTests(unittest.TestCase):
         exported = training_plan_export(plan)
 
         self.assertEqual(exported["workouts"][0]["blocks"][0]["block_type"], "work")
+
+    def test_daily_training_load_model_to_dict_serializes_date(self):
+        load = DailyTrainingLoad(user_id=1, date=datetime(2026, 6, 8, tzinfo=UTC).date(), load_value=42.0, method="manual", duration_minutes=60.0, activity_ids=[5], ctl=1.0, atl=2.0, tsb=-1.0, computed_at=datetime(2026, 6, 8, tzinfo=UTC))
+
+        exported = model_to_dict(load)
+
+        self.assertEqual(exported["date"], "2026-06-08")
+        self.assertEqual(exported["activity_ids"], [5])
 
 
 if __name__ == "__main__":

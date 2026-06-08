@@ -314,11 +314,18 @@ class TrainingLoadDailyPointOut(BaseModel):
     load_methods: list[str] = Field(default_factory=list)
     distance_km: float
     duration_seconds: int
+    duration_minutes: float = 0
+    activity_ids: list[int] = Field(default_factory=list)
     activity_count: int
     srpe_count: int = 0
     hard_session: bool = False
     hard_reasons: list[str] = Field(default_factory=list)
     recovery_day: bool = False
+    ctl: float | None = None
+    atl: float | None = None
+    tsb: float | None = None
+    monotony_window_value: float | None = None
+    strain_window_value: float | None = None
 
 
 class TrainingLoadDailyOut(BaseModel):

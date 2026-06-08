@@ -299,6 +299,32 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_derived_activity_metrics_computed_at ON derived_activity_metrics (computed_at)",
         ),
     ),
+    (
+        "20260608_0014_daily_training_loads",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS daily_training_loads (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                date DATE NOT NULL,
+                load_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                method VARCHAR(64) NOT NULL DEFAULT 'unavailable',
+                duration_minutes DOUBLE PRECISION NOT NULL DEFAULT 0,
+                activity_ids JSON,
+                ctl DOUBLE PRECISION,
+                atl DOUBLE PRECISION,
+                tsb DOUBLE PRECISION,
+                monotony_window_value DOUBLE PRECISION,
+                strain_window_value DOUBLE PRECISION,
+                computed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                PRIMARY KEY (user_id, date)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_daily_training_loads_user_id ON daily_training_loads (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_training_loads_date ON daily_training_loads (date)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_training_loads_user_date ON daily_training_loads (user_id, date)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_training_loads_computed_at ON daily_training_loads (computed_at)",
+        ),
+    ),
 )
 
 

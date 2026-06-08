@@ -17,6 +17,7 @@ from app.services.auth import get_current_user
 from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
 from app.services.planning import auto_match_activity_to_plan
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
+from app.services.training_load import sync_daily_training_loads_for_activities, sync_daily_training_loads_for_activity
 
 
 router = APIRouter(prefix="/imports", tags=["imports"])
@@ -176,6 +177,7 @@ def upload_screenshots(
         activity = create_activity_from_payload(db, user, recognition["payload"], source_ids) if recognition.get("payload") else None
         if activity:
             matched_workout = auto_match_activity_to_plan(db, user, activity)
+            sync_daily_training_loads_for_activity(db, user, activity)
         batch.status = "recognized" if activity else recognition["status"]
         batch.recognition_engine = recognition["engine"]
         batch.recognition_message = recognition["message"]
@@ -235,6 +237,7 @@ def upload_csv(
     db.flush()
 
     created_ids: list[int] = []
+    touched_activities: list[Activity] = []
     skipped_duplicates = 0
     matched_workouts = 0
     errors: list[str] = []
@@ -247,6 +250,7 @@ def upload_csv(
         created_activity_id = None
         duplicate = False
         matched = False
+        activity = None
         try:
             with db.begin_nested():
                 activity, created = create_activity_from_csv_payload(db, user, payload)
@@ -258,6 +262,8 @@ def upload_csv(
         except Exception as exc:
             errors.append(str(exc)[:250])
             continue
+        if activity is not None:
+            touched_activities.append(activity)
         if created_activity_id is not None:
             created_ids.append(created_activity_id)
             if matched:
@@ -268,6 +274,7 @@ def upload_csv(
     batch.created_activity_id = created_ids[0] if len(created_ids) == 1 else None
     batch.status = "failed" if not created_ids and not skipped_duplicates else "partial_failed" if errors else "imported"
     batch.recognition_message = f"CSV import: {len(created_ids)} created, {skipped_duplicates} duplicates, {len(errors)} failed, {matched_workouts} matched."
+    sync_daily_training_loads_for_activities(db, user, touched_activities)
     log_audit_event(db, user.id, "import.csv", "import_batch", batch.id, {
         "source_app": source_label,
         "created_activities": len(created_ids),

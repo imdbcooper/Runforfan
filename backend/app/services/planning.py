@@ -13,6 +13,7 @@ from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompl
 from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
+from app.services.training_load import sync_daily_training_loads_for_activity
 from app.services.zones import calculated_zones, zone_type_for_unit
 
 
@@ -1642,6 +1643,7 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"
+    sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
     except IntegrityError as error:
@@ -1671,8 +1673,10 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
     if workout.completed_activity_id is not None or workout.status not in MATCHABLE_WORKOUT_STATUSES:
         return None
     workout.completed_activity_id = activity.id
+    workout.completed_activity = activity
     workout.status = "done"
     db.flush()
+    sync_daily_training_loads_for_activity(db, user, activity)
     return workout
 
 
@@ -2309,6 +2313,8 @@ def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkou
 
 def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
     feedback = upsert_workout_feedback(db, user, workout, payload.model_dump())
+    if workout.completed_activity:
+        sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     db.commit()
     db.refresh(feedback)
     return feedback
@@ -2319,6 +2325,8 @@ def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout
     if not updates:
         raise ValueError("Feedback patch is empty")
     feedback = upsert_workout_feedback(db, user, workout, updates)
+    if workout.completed_activity:
+        sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     db.commit()
     db.refresh(feedback)
     return feedback
@@ -2370,6 +2378,7 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
         feedback_updates["pain_level"] = None
     if feedback_updates:
         upsert_workout_feedback(db, user, workout, feedback_updates)
+    sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
     except IntegrityError as error:

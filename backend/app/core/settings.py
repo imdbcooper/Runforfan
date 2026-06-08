@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     allow_private_llm_base_urls: bool = False
     derived_metrics_backfill_on_startup: bool = True
     derived_metrics_backfill_startup_limit: int = 500
+    daily_training_load_backfill_on_startup: bool = True
+    daily_training_load_backfill_days: int = 28
+    daily_training_load_backfill_user_limit: int = 100
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",
