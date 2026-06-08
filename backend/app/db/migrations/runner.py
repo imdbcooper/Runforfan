@@ -258,6 +258,47 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_plan_versions_created_at ON plan_versions (created_at)",
         ),
     ),
+    (
+        "20260608_0013_planned_workout_blocks_derived_metrics",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS planned_workout_blocks (
+                id SERIAL PRIMARY KEY,
+                workout_id INTEGER NOT NULL REFERENCES training_plan_workouts(id) ON DELETE CASCADE,
+                block_index INTEGER NOT NULL,
+                block_type VARCHAR(64) NOT NULL,
+                repeat_count INTEGER NOT NULL DEFAULT 1,
+                target_distance_km DOUBLE PRECISION,
+                target_duration_seconds INTEGER,
+                target_pace_min_seconds_per_km INTEGER,
+                target_pace_max_seconds_per_km INTEGER,
+                target_hr_min_bpm INTEGER,
+                target_hr_max_bpm INTEGER,
+                target_rpe_min INTEGER,
+                target_rpe_max INTEGER,
+                description TEXT,
+                CONSTRAINT uq_planned_workout_block UNIQUE (workout_id, block_index)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_planned_workout_blocks_workout_id ON planned_workout_blocks (workout_id)",
+            """
+            CREATE TABLE IF NOT EXISTS derived_activity_metrics (
+                activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+                metric_key VARCHAR(100) NOT NULL,
+                metric_value DOUBLE PRECISION NOT NULL,
+                unit VARCHAR(64) NOT NULL,
+                method VARCHAR(64) NOT NULL,
+                source_reference VARCHAR(255),
+                input_hash VARCHAR(64) NOT NULL,
+                computed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                PRIMARY KEY (activity_id, metric_key),
+                CONSTRAINT uq_derived_activity_metric UNIQUE (activity_id, metric_key)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_derived_activity_metrics_activity_id ON derived_activity_metrics (activity_id)",
+            "CREATE INDEX IF NOT EXISTS ix_derived_activity_metrics_computed_at ON derived_activity_metrics (computed_at)",
+        ),
+    ),
 )
 
 

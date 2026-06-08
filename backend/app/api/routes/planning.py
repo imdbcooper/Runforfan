@@ -17,6 +17,7 @@ def plan_options():
     return (
         selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.completed_activity),
         selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback),
+        selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks),
     )
 
 
@@ -36,7 +37,12 @@ def get_user_workout(db: Session, user: User, workout_id: int) -> TrainingPlanWo
         select(TrainingPlanWorkout)
         .join(TrainingPlan)
         .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
-        .options(selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.feedback))
+        .options(
+            selectinload(TrainingPlanWorkout.completed_activity),
+            selectinload(TrainingPlanWorkout.feedback),
+            selectinload(TrainingPlanWorkout.blocks),
+            selectinload(TrainingPlanWorkout.plan).selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks),
+        )
     )
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
@@ -47,7 +53,7 @@ def get_user_activity(db: Session, user: User, activity_id: int) -> Activity:
     activity = db.scalar(
         select(Activity)
         .where(Activity.id == activity_id, Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
     )
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")

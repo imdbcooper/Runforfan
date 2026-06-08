@@ -19,6 +19,18 @@ export type Activity = {
     pace_seconds_per_km: number | null
     average_heart_rate_bpm: number | null
   }[]
+  derived_metrics: DerivedActivityMetric[]
+}
+
+export type DerivedActivityMetric = {
+  activity_id: number
+  metric_key: string
+  metric_value: number
+  unit: string
+  method: string
+  source_reference: string | null
+  input_hash: string
+  computed_at: string
 }
 
 export type LlmProvider = {
@@ -254,8 +266,26 @@ export type PlanWorkout = {
   duration_seconds: number | null
   intensity: string | null
   description: string | null
+  blocks: PlannedWorkoutBlock[]
   feedback: PlanWorkoutFeedback | null
   execution_score: PlanWorkoutExecutionScore | null
+}
+
+export type PlannedWorkoutBlock = {
+  id: number | null
+  workout_id: number | null
+  block_index: number
+  block_type: string
+  repeat_count: number
+  target_distance_km: number | null
+  target_duration_seconds: number | null
+  target_pace_min_seconds_per_km: number | null
+  target_pace_max_seconds_per_km: number | null
+  target_hr_min_bpm: number | null
+  target_hr_max_bpm: number | null
+  target_rpe_min: number | null
+  target_rpe_max: number | null
+  description: string | null
 }
 
 export type PlanWorkoutFeedback = {
@@ -466,6 +496,7 @@ export type PlanBuilderPreviewWorkout = {
   duration_seconds: number | null
   intensity: string | null
   description: string | null
+  blocks: PlannedWorkoutBlock[]
 }
 
 export type PlanBuilderPreview = {

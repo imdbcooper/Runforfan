@@ -24,6 +24,7 @@ def plan_load_options():
     return (
         selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.completed_activity),
         selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback),
+        selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks),
     )
 
 
@@ -130,7 +131,7 @@ def recent_activities(db: Session, user: User, limit: int = 6) -> list[Activity]
     return list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
         .limit(limit)
     ))

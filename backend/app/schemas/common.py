@@ -64,6 +64,19 @@ class WorkoutBlockOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DerivedActivityMetricOut(BaseModel):
+    activity_id: int
+    metric_key: str
+    metric_value: float
+    unit: str
+    method: str
+    source_reference: str | None = None
+    input_hash: str
+    computed_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ActivityOut(BaseModel):
     id: int
     activity_type: str
@@ -86,6 +99,7 @@ class ActivityOut(BaseModel):
     segments: list[SegmentOut] = []
     split_blocks: list[SplitBlockOut] = []
     workout_blocks: list[WorkoutBlockOut] = []
+    derived_metrics: list[DerivedActivityMetricOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -704,6 +718,25 @@ class PlanBuilderRiskFlagOut(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class PlannedWorkoutBlockOut(BaseModel):
+    id: int | None = None
+    workout_id: int | None = None
+    block_index: int
+    block_type: str
+    repeat_count: int = 1
+    target_distance_km: float | None = None
+    target_duration_seconds: int | None = None
+    target_pace_min_seconds_per_km: int | None = None
+    target_pace_max_seconds_per_km: int | None = None
+    target_hr_min_bpm: int | None = None
+    target_hr_max_bpm: int | None = None
+    target_rpe_min: int | None = None
+    target_rpe_max: int | None = None
+    description: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class PlanBuilderPreviewWorkoutOut(BaseModel):
     week_index: int
     day_index: int
@@ -714,6 +747,7 @@ class PlanBuilderPreviewWorkoutOut(BaseModel):
     duration_seconds: int | None = None
     intensity: str | None = None
     description: str | None = None
+    blocks: list[PlannedWorkoutBlockOut] = Field(default_factory=list)
 
 
 class PlanBuilderPreviewOut(BaseModel):
@@ -843,6 +877,7 @@ class PlanWorkoutOut(BaseModel):
     duration_seconds: int | None = None
     intensity: str | None = None
     description: str | None = None
+    blocks: list[PlannedWorkoutBlockOut] = Field(default_factory=list)
     feedback: PlanWorkoutFeedbackOut | None = None
     execution_score: PlanWorkoutExecutionScoreOut | None = None
 

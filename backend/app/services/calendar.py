@@ -163,6 +163,7 @@ def calendar_range(db: Session, user: User, from_date: date, to_date: date) -> d
             selectinload(TrainingPlanWorkout.plan),
             selectinload(TrainingPlanWorkout.completed_activity),
             selectinload(TrainingPlanWorkout.feedback),
+            selectinload(TrainingPlanWorkout.blocks),
         )
         .order_by(TrainingPlanWorkout.scheduled_date.asc(), TrainingPlanWorkout.id.asc())
     ))
@@ -174,7 +175,7 @@ def calendar_range(db: Session, user: User, from_date: date, to_date: date) -> d
             Activity.started_at >= start_at,
             Activity.started_at < end_at,
         )
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
         .order_by(Activity.started_at.asc(), Activity.id.asc())
     ))
     activity_ids = [activity.id for activity in activities]
@@ -184,7 +185,7 @@ def calendar_range(db: Session, user: User, from_date: date, to_date: date) -> d
             select(TrainingPlanWorkout)
             .join(TrainingPlan)
             .where(TrainingPlan.user_id == user.id, TrainingPlanWorkout.completed_activity_id.in_(activity_ids))
-            .options(selectinload(TrainingPlanWorkout.plan), selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.feedback))
+            .options(selectinload(TrainingPlanWorkout.plan), selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.feedback), selectinload(TrainingPlanWorkout.blocks))
             .order_by(TrainingPlanWorkout.id.asc())
         ))
         linked_by_activity = {workout.completed_activity_id: workout for workout in linked_workouts if workout.completed_activity_id is not None}

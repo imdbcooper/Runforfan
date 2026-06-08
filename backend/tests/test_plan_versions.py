@@ -6,7 +6,7 @@ from datetime import date, datetime
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.models import TrainingPlan, TrainingPlanWorkout, User
+    from app.models import TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
     from app.services.plan_versions import create_plan_version, plan_snapshot
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
@@ -51,12 +51,14 @@ class PlanVersionTests(unittest.TestCase):
             TrainingPlanWorkout(id=2, plan_id=10, week_index=2, day_index=1, scheduled_date=date(2026, 6, 15), status="planned", workout_type="long", title="Long", duration_seconds=3600),
             TrainingPlanWorkout(id=1, plan_id=10, week_index=1, day_index=1, scheduled_date=date(2026, 6, 8), status="planned", workout_type="easy", title="Easy", duration_seconds=1800),
         ]
+        plan.workouts[1].blocks = [TrainingPlanWorkoutBlock(id=11, workout_id=1, block_index=1, block_type="work", repeat_count=1, target_duration_seconds=1800)]
 
         snapshot = plan_snapshot(plan)
 
         self.assertEqual(snapshot["target_date"], "2026-09-01")
         self.assertEqual([workout["id"] for workout in snapshot["workouts"]], [1, 2])
         self.assertEqual(snapshot["workouts"][0]["scheduled_date"], "2026-06-08")
+        self.assertEqual(snapshot["workouts"][0]["blocks"][0]["block_type"], "work")
 
     def test_create_plan_version_uses_next_number_and_snapshot(self):
         db = FakeDb(current_version=2)

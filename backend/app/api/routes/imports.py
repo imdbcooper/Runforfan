@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
 from app.schemas.common import CsvImportOut
 from app.services.audit import log_audit_event
+from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.auth import get_current_user
 from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
 from app.services.planning import auto_match_activity_to_plan
@@ -43,6 +44,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     if existing:
         for source_id in source_ids:
             db.add(ActivityScreenshot(activity_id=existing.id, source_id=source_id))
+        sync_derived_activity_metrics(db, existing)
         db.flush()
         return existing
     activity = Activity(
@@ -71,12 +73,11 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
     for source_id in source_ids:
         db.add(ActivityScreenshot(activity_id=activity.id, source_id=source_id))
     for segment in payload.get("segments") or []:
-        db.add(ActivitySegment(activity_id=activity.id, **segment))
+        activity.segments.append(ActivitySegment(**segment))
     for block in payload.get("split_blocks") or []:
-        db.add(ActivitySplitBlock(activity_id=activity.id, **block))
+        activity.split_blocks.append(ActivitySplitBlock(**block))
     for block in payload.get("workout_blocks") or []:
-        db.add(ActivityWorkoutBlock(
-            activity_id=activity.id,
+        activity.workout_blocks.append(ActivityWorkoutBlock(
             block_index=block.get("block_index"),
             block_type=block.get("block_type") or "unknown",
             title=block.get("title") or block.get("block_type") or "Блок",
@@ -88,6 +89,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
             notes=block.get("notes"),
         ))
     db.flush()
+    sync_derived_activity_metrics(db, activity)
     return activity
 
 

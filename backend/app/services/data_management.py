@@ -9,6 +9,7 @@ from app.models import (
     AuditLog,
     AthleteMeasurement,
     AthleteProfile,
+    DerivedActivityMetric,
     ImportBatch,
     LactateThresholdMeasurement,
     LlmProviderSetting,
@@ -19,6 +20,7 @@ from app.models import (
     TrainingPlanRecommendationAudit,
     TrainingPlanVersion,
     TrainingPlanWorkout,
+    TrainingPlanWorkoutBlock,
     TrainingPlanWorkoutFeedback,
     TrainingZone,
     User,
@@ -51,6 +53,7 @@ def activity_export(activity: Activity) -> dict[str, Any]:
     data["segments"] = [model_to_dict(segment) for segment in activity.segments]
     data["split_blocks"] = [model_to_dict(block) for block in activity.split_blocks]
     data["workout_blocks"] = [model_to_dict(block) for block in activity.workout_blocks]
+    data["derived_metrics"] = [model_to_dict(metric) for metric in activity.derived_metrics]
     return data
 
 
@@ -59,6 +62,7 @@ def training_plan_export(plan: TrainingPlan) -> dict[str, Any]:
     data["workouts"] = []
     for workout in plan.workouts:
         workout_data = model_to_dict(workout)
+        workout_data["blocks"] = [model_to_dict(block) for block in workout.blocks]
         workout_data["feedback"] = model_to_dict(workout.feedback) if workout.feedback else None
         data["workouts"].append(workout_data)
     return data
@@ -73,13 +77,13 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
     activities = list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
     ))
     plans = list(db.scalars(
         select(TrainingPlan)
         .where(TrainingPlan.user_id == user.id)
-        .options(selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback))
+        .options(selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback), selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks))
         .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
     ))
     providers = list(db.scalars(select(LlmProviderSetting).where(LlmProviderSetting.user_id == user.id).order_by(LlmProviderSetting.created_at.desc())))
@@ -87,7 +91,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-06-08.0018",
+        "version": "2026-06-08.0019",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -113,6 +117,7 @@ DELETE_MODELS: tuple[tuple[str, Any], ...] = (
     ("audit_log", AuditLog),
     ("training_plan_recommendation_audits", TrainingPlanRecommendationAudit),
     ("plan_versions", TrainingPlanVersion),
+    ("planned_workout_blocks", TrainingPlanWorkoutBlock),
     ("training_plan_workout_feedback", TrainingPlanWorkoutFeedback),
     ("running_goals", RunningGoal),
     ("performance_results", PerformanceResult),
@@ -129,7 +134,14 @@ DELETE_MODELS: tuple[tuple[str, Any], ...] = (
 
 
 def delete_user_data(db: Session, user_id: int) -> dict[str, int]:
-    counts = {name: count_rows_for_user(db, model, user_id) for name, model in DELETE_MODELS}
+    counts = {
+        "derived_activity_metrics": int(db.scalar(select(func.count()).select_from(DerivedActivityMetric).join(Activity, DerivedActivityMetric.activity_id == Activity.id).where(Activity.user_id == user_id)) or 0),
+        "planned_workout_blocks": int(db.scalar(select(func.count()).select_from(TrainingPlanWorkoutBlock).join(TrainingPlanWorkout, TrainingPlanWorkoutBlock.workout_id == TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id)) or 0),
+    }
+    counts.update({name: count_rows_for_user(db, model, user_id) for name, model in DELETE_MODELS if hasattr(model, "user_id")})
+    db.execute(delete(DerivedActivityMetric).where(DerivedActivityMetric.activity_id.in_(select(Activity.id).where(Activity.user_id == user_id))))
+    db.execute(delete(TrainingPlanWorkoutBlock).where(TrainingPlanWorkoutBlock.workout_id.in_(select(TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id))))
     for _, model in DELETE_MODELS:
-        db.execute(delete(model).where(model.user_id == user_id))
+        if hasattr(model, "user_id"):
+            db.execute(delete(model).where(model.user_id == user_id))
     return counts

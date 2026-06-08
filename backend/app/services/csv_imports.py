@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Activity, User
+from app.services.activity_metrics import sync_derived_activity_metrics
 
 
 FIELD_ALIASES = {
@@ -117,10 +118,12 @@ def create_activity_from_csv_payload(db: Session, user: User, payload: dict[str,
             Activity.duration_seconds == payload["duration_seconds"],
         ))
     if existing:
+        sync_derived_activity_metrics(db, existing)
         return existing, False
     activity = Activity(user_id=user.id, **payload)
     db.add(activity)
     db.flush()
+    sync_derived_activity_metrics(db, activity)
     return activity, True
 
 

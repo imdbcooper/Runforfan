@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 
 try:
-    from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
+    from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanUpdate, PlanWorkoutUpdate
     from app.services.planning import delete_plan, duplicate_plan, update_plan, update_workout
 except ModuleNotFoundError as exc:
@@ -93,6 +93,7 @@ class PlanManagementTests(unittest.TestCase):
     def test_duplicate_plan_resets_status_links_and_feedback(self):
         workout = make_workout(1, status="done", linked=True)
         workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, rpe=8)
+        workout.blocks = [TrainingPlanWorkoutBlock(id=11, workout_id=1, block_index=1, block_type="work", repeat_count=1, target_distance_km=5.0)]
         plan = make_plan(workout, status="active")
         db = FakeDb()
 
@@ -106,6 +107,8 @@ class PlanManagementTests(unittest.TestCase):
         self.assertEqual(duplicate.workouts[0].status, "planned")
         self.assertIsNone(duplicate.workouts[0].completed_activity_id)
         self.assertIsNone(duplicate.workouts[0].feedback)
+        self.assertEqual(len(duplicate.workouts[0].blocks), 1)
+        self.assertEqual(duplicate.workouts[0].blocks[0].block_type, "work")
         self.assertTrue(db.committed)
 
     def test_delete_plan_rejects_active_plan(self):

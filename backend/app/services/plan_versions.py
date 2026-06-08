@@ -18,6 +18,7 @@ def json_safe(value: Any) -> Any:
 
 
 def workout_snapshot(workout: TrainingPlanWorkout) -> dict[str, Any]:
+    blocks = sorted(getattr(workout, "blocks", []) or [], key=lambda block: (block.block_index, block.id or 0))
     return json_safe({
         "id": workout.id,
         "week_index": workout.week_index,
@@ -31,6 +32,24 @@ def workout_snapshot(workout: TrainingPlanWorkout) -> dict[str, Any]:
         "duration_seconds": workout.duration_seconds,
         "intensity": workout.intensity,
         "description": workout.description,
+        "blocks": [
+            {
+                "id": block.id,
+                "block_index": block.block_index,
+                "block_type": block.block_type,
+                "repeat_count": block.repeat_count,
+                "target_distance_km": block.target_distance_km,
+                "target_duration_seconds": block.target_duration_seconds,
+                "target_pace_min_seconds_per_km": block.target_pace_min_seconds_per_km,
+                "target_pace_max_seconds_per_km": block.target_pace_max_seconds_per_km,
+                "target_hr_min_bpm": block.target_hr_min_bpm,
+                "target_hr_max_bpm": block.target_hr_max_bpm,
+                "target_rpe_min": block.target_rpe_min,
+                "target_rpe_max": block.target_rpe_max,
+                "description": block.description,
+            }
+            for block in blocks
+        ],
     })
 
 

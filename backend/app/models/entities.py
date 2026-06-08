@@ -154,6 +154,7 @@ class Activity(Base, TimestampMixin):
     segments: Mapped[list["ActivitySegment"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     split_blocks: Mapped[list["ActivitySplitBlock"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     workout_blocks: Mapped[list["ActivityWorkoutBlock"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
+    derived_metrics: Mapped[list["DerivedActivityMetric"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     screenshots: Mapped[list["ActivityScreenshot"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
 
 
@@ -217,6 +218,22 @@ class ActivityScreenshot(Base):
 
     activity: Mapped[Activity] = relationship(back_populates="screenshots")
     source: Mapped[ScreenshotSource] = relationship()
+
+
+class DerivedActivityMetric(Base):
+    __tablename__ = "derived_activity_metrics"
+    __table_args__ = (UniqueConstraint("activity_id", "metric_key", name="uq_derived_activity_metric"),)
+
+    activity_id: Mapped[int] = mapped_column(ForeignKey("activities.id", ondelete="CASCADE"), primary_key=True)
+    metric_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    metric_value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(64))
+    method: Mapped[str] = mapped_column(String(64))
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    input_hash: Mapped[str] = mapped_column(String(64))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    activity: Mapped[Activity] = relationship(back_populates="derived_metrics")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):
@@ -397,6 +414,29 @@ class TrainingPlanWorkout(Base):
     plan: Mapped[TrainingPlan] = relationship(back_populates="workouts")
     completed_activity: Mapped[Activity | None] = relationship()
     feedback: Mapped["TrainingPlanWorkoutFeedback | None"] = relationship(back_populates="workout", cascade="all, delete-orphan", uselist=False)
+    blocks: Mapped[list["TrainingPlanWorkoutBlock"]] = relationship(back_populates="workout", cascade="all, delete-orphan")
+
+
+class TrainingPlanWorkoutBlock(Base):
+    __tablename__ = "planned_workout_blocks"
+    __table_args__ = (UniqueConstraint("workout_id", "block_index", name="uq_planned_workout_block"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="CASCADE"), index=True)
+    block_index: Mapped[int] = mapped_column(Integer)
+    block_type: Mapped[str] = mapped_column(String(64))
+    repeat_count: Mapped[int] = mapped_column(Integer, default=1)
+    target_distance_km: Mapped[float | None] = mapped_column(Float)
+    target_duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    target_pace_min_seconds_per_km: Mapped[int | None] = mapped_column(Integer)
+    target_pace_max_seconds_per_km: Mapped[int | None] = mapped_column(Integer)
+    target_hr_min_bpm: Mapped[int | None] = mapped_column(Integer)
+    target_hr_max_bpm: Mapped[int | None] = mapped_column(Integer)
+    target_rpe_min: Mapped[int | None] = mapped_column(Integer)
+    target_rpe_max: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str | None] = mapped_column(Text)
+
+    workout: Mapped[TrainingPlanWorkout] = relationship(back_populates="blocks")
 
 
 class TrainingPlanWorkoutFeedback(Base, TimestampMixin):

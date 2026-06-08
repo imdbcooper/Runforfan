@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, TrainingZone, User
+from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
+from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import calculated_zones, zone_type_for_unit
@@ -559,6 +560,141 @@ def workout_description(workout_type: str, intensity: str, zones: dict, conserva
     return f"Комфортный бег в разговорном темпе. Цель: {target}."
 
 
+def numeric_zone_range(zones: dict[str, object], zone_type: str, zone_key: str) -> tuple[int | None, int | None]:
+    for zone in zones.get(zone_type, []) or []:
+        if str(zone.get("zone_key")) != zone_key:
+            continue
+        lower = zone.get("lower_value")
+        upper = zone.get("upper_value")
+        values = [round(float(value)) for value in (lower, upper) if value is not None]
+        if not values:
+            return None, None
+        return min(values), max(values)
+    return None, None
+
+
+def _scaled(value: float | int | None, ratio: float, digits: int = 1) -> float | None:
+    if value is None:
+        return None
+    return round(max(0.0, float(value) * ratio), digits)
+
+
+def _scaled_seconds(value: int | None, ratio: float) -> int | None:
+    if value is None:
+        return None
+    return max(1, round(value * ratio))
+
+
+def planned_block(
+    block_index: int,
+    block_type: str,
+    description: str,
+    repeat_count: int = 1,
+    distance_km: float | None = None,
+    duration_seconds: int | None = None,
+    pace: tuple[int | None, int | None] = (None, None),
+    hr: tuple[int | None, int | None] = (None, None),
+    rpe: tuple[int | None, int | None] = (None, None),
+) -> dict[str, object]:
+    return {
+        "id": None,
+        "workout_id": None,
+        "block_index": block_index,
+        "block_type": block_type,
+        "repeat_count": repeat_count,
+        "target_distance_km": distance_km,
+        "target_duration_seconds": duration_seconds,
+        "target_pace_min_seconds_per_km": pace[0],
+        "target_pace_max_seconds_per_km": pace[1],
+        "target_hr_min_bpm": hr[0],
+        "target_hr_max_bpm": hr[1],
+        "target_rpe_min": rpe[0],
+        "target_rpe_max": rpe[1],
+        "description": description,
+    }
+
+
+def planned_workout_blocks_for_preview(workout: dict[str, object], zones: dict[str, object]) -> list[dict[str, object]]:
+    workout_type = str(workout.get("workout_type") or "")
+    distance = float(workout["distance_km"]) if workout.get("distance_km") is not None else None
+    duration = int(workout["duration_seconds"]) if workout.get("duration_seconds") is not None else None
+    easy_pace = numeric_zone_range(zones, "pace", "easy")
+    steady_pace = numeric_zone_range(zones, "pace", "steady")
+    threshold_pace = numeric_zone_range(zones, "pace", "threshold")
+    interval_pace = numeric_zone_range(zones, "pace", "interval")
+    easy_hr = numeric_zone_range(zones, "hr", "z2")
+    recovery_hr = numeric_zone_range(zones, "hr", "z1")
+    quality_hr = numeric_zone_range(zones, "hr", "z3")
+    interval_hr = numeric_zone_range(zones, "hr", "z4")
+
+    if workout_type in STRENGTH_WORKOUT_TYPES:
+        return [planned_block(1, "strength", "Runner strength circuit: calves/soleus, glutes, hamstrings, single-leg stability and core.", duration_seconds=duration, rpe=(4, 7))]
+    if workout_type in MOBILITY_WORKOUT_TYPES:
+        return [planned_block(1, "recovery", "Mobility/prehab flow with ankle, hip, glute activation and relaxed breathing.", duration_seconds=duration, rpe=(1, 3))]
+    if workout_type == "interval":
+        return [
+            planned_block(1, "warmup", "Easy warmup before quality work.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Long controlled work repeats near interval/threshold effort.", repeat_count=4, distance_km=_scaled(distance, 0.55 / 4, 2), duration_seconds=_scaled_seconds(duration, 0.5 / 4), pace=interval_pace, hr=interval_hr, rpe=(6, 8)),
+            planned_block(3, "recovery", "Easy jog or walk between work repeats.", repeat_count=4, distance_km=_scaled(distance, 0.15 / 4, 2), duration_seconds=_scaled_seconds(duration, 0.2 / 4), pace=easy_pace, hr=recovery_hr, rpe=(2, 3)),
+            planned_block(4, "cooldown", "Relaxed cooldown; stop early if form deteriorates.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ]
+    if workout_type in {"tempo", "threshold", "race_pace"}:
+        return [
+            planned_block(1, "warmup", "Easy warmup and drills before sustained quality.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Sustained controlled quality block below all-out effort.", distance_km=_scaled(distance, 0.7), duration_seconds=_scaled_seconds(duration, 0.7), pace=threshold_pace, hr=quality_hr, rpe=(5, 7)),
+            planned_block(3, "cooldown", "Easy cooldown to bring HR down.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ]
+    if workout_type == "steady":
+        return [
+            planned_block(1, "warmup", "Easy start before aerobic steady work.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Controlled aerobic block without hard intensity.", distance_km=_scaled(distance, 0.7), duration_seconds=_scaled_seconds(duration, 0.7), pace=steady_pace, hr=easy_hr, rpe=(3, 5)),
+            planned_block(3, "cooldown", "Relaxed finish.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ]
+    if workout_type == "long":
+        return [
+            planned_block(1, "warmup", "Easy opening segment; keep it conversational.", distance_km=_scaled(distance, 0.25), duration_seconds=_scaled_seconds(duration, 0.25), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Steady middle segment with fueling and hydration checks.", distance_km=_scaled(distance, 0.6), duration_seconds=_scaled_seconds(duration, 0.6), pace=easy_pace, hr=easy_hr, rpe=(2, 5)),
+            planned_block(3, "cooldown", "Easy finish; do not force pace late.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 4)),
+        ]
+    return [planned_block(1, "work", "Continuous easy aerobic running in a relaxed conversational effort.", distance_km=distance, duration_seconds=duration, pace=easy_pace, hr=easy_hr, rpe=(2, 4))]
+
+
+def block_to_dict(block: TrainingPlanWorkoutBlock) -> dict[str, object]:
+    return {
+        "id": block.id,
+        "workout_id": block.workout_id,
+        "block_index": block.block_index,
+        "block_type": block.block_type,
+        "repeat_count": block.repeat_count,
+        "target_distance_km": block.target_distance_km,
+        "target_duration_seconds": block.target_duration_seconds,
+        "target_pace_min_seconds_per_km": block.target_pace_min_seconds_per_km,
+        "target_pace_max_seconds_per_km": block.target_pace_max_seconds_per_km,
+        "target_hr_min_bpm": block.target_hr_min_bpm,
+        "target_hr_max_bpm": block.target_hr_max_bpm,
+        "target_rpe_min": block.target_rpe_min,
+        "target_rpe_max": block.target_rpe_max,
+        "description": block.description,
+    }
+
+
+def create_workout_block_from_dict(block: dict[str, object]) -> TrainingPlanWorkoutBlock:
+    return TrainingPlanWorkoutBlock(
+        block_index=int(block["block_index"]),
+        block_type=str(block["block_type"]),
+        repeat_count=int(block.get("repeat_count") or 1),
+        target_distance_km=float(block["target_distance_km"]) if block.get("target_distance_km") is not None else None,
+        target_duration_seconds=int(block["target_duration_seconds"]) if block.get("target_duration_seconds") is not None else None,
+        target_pace_min_seconds_per_km=int(block["target_pace_min_seconds_per_km"]) if block.get("target_pace_min_seconds_per_km") is not None else None,
+        target_pace_max_seconds_per_km=int(block["target_pace_max_seconds_per_km"]) if block.get("target_pace_max_seconds_per_km") is not None else None,
+        target_hr_min_bpm=int(block["target_hr_min_bpm"]) if block.get("target_hr_min_bpm") is not None else None,
+        target_hr_max_bpm=int(block["target_hr_max_bpm"]) if block.get("target_hr_max_bpm") is not None else None,
+        target_rpe_min=int(block["target_rpe_min"]) if block.get("target_rpe_min") is not None else None,
+        target_rpe_max=int(block["target_rpe_max"]) if block.get("target_rpe_max") is not None else None,
+        description=str(block["description"]) if block.get("description") is not None else None,
+    )
+
+
 def feedback_to_dict(feedback: TrainingPlanWorkoutFeedback | None) -> dict[str, object] | None:
     if feedback is None:
         return None
@@ -678,6 +814,7 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
 
 def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
     activity = workout.completed_activity
+    blocks = sorted(getattr(workout, "blocks", []) or [], key=lambda block: (block.block_index, block.id or 0))
     return {
         "id": workout.id,
         "plan_id": workout.plan_id,
@@ -694,6 +831,7 @@ def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
         "duration_seconds": workout.duration_seconds,
         "intensity": workout.intensity,
         "description": workout.description,
+        "blocks": [block_to_dict(block) for block in blocks],
         "feedback": feedback_to_dict(workout.feedback),
         "execution_score": workout_execution_score(workout),
     }
@@ -1423,7 +1561,7 @@ def activity_match_candidates_for_workout(db: Session, user: User, workout: Trai
     activities = list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id)
-        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks))
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics))
         .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
         .limit(200)
     ))
@@ -1461,7 +1599,7 @@ def workout_match_candidates_for_activity(
             TrainingPlanWorkout.status.in_(MATCHABLE_WORKOUT_STATUSES),
             TrainingPlanWorkout.completed_activity_id.is_(None),
         )
-        .options(selectinload(TrainingPlanWorkout.completed_activity))
+        .options(selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.blocks))
         .order_by(TrainingPlanWorkout.scheduled_date.asc().nullslast(), TrainingPlanWorkout.id.asc())
     )
     if active_only:
@@ -1849,6 +1987,9 @@ def build_plan_preview_blueprint(
             "support_duration_seconds": support_duration,
         })
 
+    for workout in workouts:
+        workout["blocks"] = planned_workout_blocks_for_preview(workout, zones)
+
     total_intensity_volume = sum(intensity_volume.values())
     intensity_split = {key: round(value / total_intensity_volume, 3) if total_intensity_volume else 0.0 for key, value in intensity_volume.items()}
     effective_peak_volume = max((float(week["planned_distance_km"] or 0) for week in weekly_curve), default=round(peak_volume, 1))
@@ -1987,6 +2128,8 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
         )
         plan.workouts.append(plan_workout)
         db.add(plan_workout)
+        for block in workout.get("blocks") or []:
+            plan_workout.blocks.append(create_workout_block_from_dict(block))
 
     create_plan_version(db, user, plan, "initial", "Generated from Plan Builder")
     db.commit()
@@ -2057,6 +2200,21 @@ def duplicate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
         )
         duplicate.workouts.append(copied_workout)
         db.add(copied_workout)
+        for block in sorted(getattr(workout, "blocks", []) or [], key=lambda item: (item.block_index, item.id or 0)):
+            copied_workout.blocks.append(TrainingPlanWorkoutBlock(
+                block_index=block.block_index,
+                block_type=block.block_type,
+                repeat_count=block.repeat_count,
+                target_distance_km=block.target_distance_km,
+                target_duration_seconds=block.target_duration_seconds,
+                target_pace_min_seconds_per_km=block.target_pace_min_seconds_per_km,
+                target_pace_max_seconds_per_km=block.target_pace_max_seconds_per_km,
+                target_hr_min_bpm=block.target_hr_min_bpm,
+                target_hr_max_bpm=block.target_hr_max_bpm,
+                target_rpe_min=block.target_rpe_min,
+                target_rpe_max=block.target_rpe_max,
+                description=block.description,
+            ))
     create_plan_version(db, user, duplicate, "user_request", f"Duplicated from plan #{plan.id}")
     db.commit()
     db.refresh(duplicate)
@@ -2199,6 +2357,7 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
     )
     db.add(activity)
     db.flush()
+    sync_derived_activity_metrics(db, activity)
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"

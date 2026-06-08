@@ -277,6 +277,37 @@ function workoutBlockSummary(activity: ActivityType) {
   return sameDistance ? `${workBlocks.length} x ${distance.toFixed(2)} км` : `${workBlocks.length} рабочих блока`
 }
 
+function activityMetricLabel(key: string) {
+  const labels: Record<string, string> = {
+    average_pace_seconds_per_km: "pace",
+    average_speed_kmh: "speed",
+    duration_minutes: "minutes",
+    pace_variability_seconds_per_km: "variability",
+    training_load_proxy: "load",
+    vertical_balance_m: "vertical",
+    work_block_count: "work blocks",
+    work_block_distance_km: "work km",
+    work_block_duration_seconds: "work time",
+  }
+  return labels[key] || key.replace(/_/g, " ")
+}
+
+function formatActivityMetric(metric: ActivityType["derived_metrics"][number]) {
+  if (metric.unit === "seconds_per_km") return `${formatPace(metric.metric_value)}/км`
+  if (metric.unit === "seconds") return formatDuration(metric.metric_value)
+  if (metric.unit === "minutes") return `${metric.metric_value.toFixed(1)} min`
+  if (metric.unit === "kmh") return `${metric.metric_value.toFixed(2)} km/h`
+  if (metric.unit === "km") return `${metric.metric_value.toFixed(2)} km`
+  if (metric.unit === "count") return String(Math.round(metric.metric_value))
+  return `${Number.isInteger(metric.metric_value) ? Math.round(metric.metric_value) : metric.metric_value.toFixed(1)} ${metric.unit}`
+}
+
+function primaryActivityMetrics(activity: ActivityType) {
+  const priority = ["average_pace_seconds_per_km", "average_speed_kmh", "training_load_proxy", "pace_variability_seconds_per_km"]
+  const metrics = activity.derived_metrics || []
+  return priority.map((key) => metrics.find((metric) => metric.metric_key === key)).filter(Boolean) as ActivityType["derived_metrics"]
+}
+
 function App() {
   const [page, setPage] = useState<Page>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -577,7 +608,8 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Name</th><th>Distance</th><th>Pace</th><th>HR</th><th>Structure</th><th>ID</th></tr></thead>
         <tbody>{activities.slice(0, compact ? 6 : undefined).map((activity) => {
           const summary = workoutBlockSummary(activity)
-          return <tr key={activity.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</td><td>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></td><td>{formatPace(activity.average_pace_seconds_per_km)}/км</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>
+          const derived = primaryActivityMetrics(activity)
+          return <tr key={activity.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</td><td>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></td><td>{formatPace(activity.average_pace_seconds_per_km)}/км{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{activity.derived_metrics.length} derived metrics</div> : null}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>
         })}</tbody>
       </table>
     </div>
@@ -2136,6 +2168,17 @@ function workoutTargetMode(workout: PlanWorkout) {
 }
 
 function workoutBlocks(workout: PlanWorkout) {
+  if (workout.blocks?.length) {
+    return workout.blocks
+      .slice()
+      .sort((first, second) => first.block_index - second.block_index)
+      .map((block) => {
+        const repeat = block.repeat_count > 1 ? `${block.repeat_count}x ` : ""
+        const target = block.target_distance_km ? `${block.target_distance_km.toFixed(2)} км` : block.target_duration_seconds ? formatDuration(block.target_duration_seconds) : "target"
+        const rpe = block.target_rpe_min !== null && block.target_rpe_max !== null ? ` RPE ${block.target_rpe_min}-${block.target_rpe_max}` : ""
+        return `${repeat}${block.block_type}: ${target}${rpe}`
+      })
+  }
   if (workout.workout_type === "strength" || workout.workout_type === "ofp") return ["Warmup", "Calves/soleus", "Single-leg strength", "Glutes/core", "Cooldown"]
   if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return ["Ankle mobility", "Hip mobility", "Glute activation", "Breathing"]
   if (workout.workout_type === "interval") return ["Warmup 10-15m", "Repeats at target", "Easy recovery", "Cooldown"]

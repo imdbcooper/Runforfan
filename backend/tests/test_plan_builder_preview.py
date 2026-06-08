@@ -83,6 +83,7 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertEqual(len(preview["weekly_volume_curve"]), 8)
         self.assertEqual(len(preview["workouts"]), 32)
         self.assertEqual(preview["workouts"][0]["scheduled_date"], start_date)
+        self.assertTrue(preview["workouts"][0]["blocks"])
         self.assertGreater(preview["peak_weekly_distance_km"], preview["current_weekly_distance_km"])
         self.assertNotIn("missing_recovery_after_hard", {flag["code"] for flag in preview["risk_flags"]})
 
