@@ -143,8 +143,10 @@ function planBuilderPayload(form: HTMLFormElement, activate = false) {
     goal_type: stringOrNull(data.get("goal_type")) || "marathon",
     race_distance_km: numberOrNull(data.get("race_distance_km")) || 42.2,
     target_date: stringOrNull(data.get("target_date")),
+    plan_length_weeks: numberOrNull(data.get("plan_length_weeks")),
     target_time_seconds: targetTimeMinutes ? Math.round(targetTimeMinutes * 60) : null,
     priority: stringOrNull(data.get("priority")) || "b",
+    aggressiveness: stringOrNull(data.get("aggressiveness")) || "auto",
     available_days_per_week: numberOrNull(data.get("available_days_per_week")) || 4,
     current_weekly_distance_km: numberOrNull(data.get("current_weekly_distance_km")),
     longest_recent_run_km: numberOrNull(data.get("longest_recent_run_km")),
@@ -2697,8 +2699,10 @@ function Planning() {
         <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option><option value="base_building">Base building</option></Select></Field>
         <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
         <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
+        <Field label="Длина, недель"><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder="если без даты" /></Field>
         <Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field>
         <Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">A race</option><option value="b">B race</option><option value="c">C race</option></Select></Field>
+        <Field label="Aggressiveness"><Select name="aggressiveness" defaultValue="auto"><option value="auto">Auto safety</option><option value="beginner">Beginner cap</option><option value="intermediate">Intermediate cap</option><option value="advanced">Advanced if detected</option></Select></Field>
         <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
         <Field label="Preferred days"><Input name="preferred_weekdays" placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
         <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
@@ -2775,6 +2779,8 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
       <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500">
         <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
         <p>history: <span className="text-zinc-300">{preview.baseline.history_span_days} days</span></p>
+        <p>consistent: <span className="text-zinc-300">{preview.baseline.consistent_weeks || 0} weeks</span></p>
+        <p>quality: <span className="text-zinc-300">{preview.baseline.quality_sessions_8w || 0}/8w</span></p>
         <p>activities: <span className="text-zinc-300">{preview.baseline.activity_count}</span></p>
         <p>recent long: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} km</span></p>
       </div>

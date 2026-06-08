@@ -700,8 +700,10 @@ class PlanGenerateRequest(BaseModel):
     goal_type: str = "marathon"
     race_distance_km: float | None = Field(default=42.2, ge=1, le=100)
     target_date: date | None = None
+    plan_length_weeks: StrictInt | None = Field(default=None, ge=4, le=24)
     target_time_seconds: StrictInt | None = Field(default=None, ge=60, le=172800)
     priority: str = Field(default="b", pattern="^(a|b|c|low|medium|high)$")
+    aggressiveness: str = Field(default="auto", pattern="^(auto|beginner|intermediate|advanced)$")
     available_days_per_week: int = Field(default=4, ge=2, le=7)
     current_weekly_distance_km: float | None = Field(default=None, ge=0, le=250)
     longest_recent_run_km: float | None = Field(default=None, ge=0, le=100)
@@ -739,8 +741,11 @@ class PlanBuilderBaselineOut(BaseModel):
     current_weekly_volume_source: str
     recent_long_run_km: float | None = None
     history_span_days: int
+    consistent_weeks: int = 0
     activity_count: int
     training_age_level: str
+    detected_training_age_level: str | None = None
+    quality_sessions_8w: int = 0
     confidence: str
 
 

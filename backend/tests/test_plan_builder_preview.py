@@ -4,9 +4,9 @@ from datetime import date, timedelta
 try:
     from pydantic import ValidationError
 
-    from app.models import AthleteProfile, TrainingPlan, User
+    from app.models import Activity, ActivityWorkoutBlock, AthleteProfile, TrainingPlan, User
     from app.schemas.common import PlanGenerateRequest
-    from app.services.planning import apply_generated_plan_status, build_plan_preview_blueprint
+    from app.services.planning import activity_is_quality_session, apply_generated_plan_status, build_plan_preview_blueprint, classify_training_age_level
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
@@ -35,6 +35,8 @@ def make_context(**kwargs) -> dict[str, object]:
         "current_weekly_volume_source": "observed_median_4w",
         "recent_weekly_distance_km": 25.0,
         "recent_long_run_km": 14.0,
+        "consistent_weeks": 10,
+        "quality_sessions_8w": 1,
         "training_age_level": "intermediate",
         "confidence": "high",
     }
@@ -80,12 +82,285 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertEqual(preview["weeks"], 8)
         self.assertEqual(preview["baseline"]["current_weekly_volume_source"], "observed_median_4w")
         self.assertEqual(preview["baseline"]["training_age_level"], "intermediate")
+        self.assertEqual(preview["baseline"]["detected_training_age_level"], "intermediate")
+        self.assertEqual(preview["baseline"]["consistent_weeks"], 10)
         self.assertEqual(len(preview["weekly_volume_curve"]), 8)
         self.assertEqual(len(preview["workouts"]), 32)
         self.assertEqual(preview["workouts"][0]["scheduled_date"], start_date)
         self.assertTrue(preview["workouts"][0]["blocks"])
         self.assertGreater(preview["peak_weekly_distance_km"], preview["current_weekly_distance_km"])
         self.assertNotIn("missing_recovery_after_hard", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_plan_length_weeks_drives_preview_without_target_date(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(
+            title="12 week 10K",
+            goal_type="10k",
+            race_distance_km=10.0,
+            plan_length_weeks=12,
+            available_days_per_week=3,
+            current_weekly_distance_km=24.0,
+            longest_recent_run_km=9.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        self.assertEqual(preview["weeks"], 12)
+        self.assertIsNone(preview["target_date"])
+        self.assertEqual(preview["constraints"]["plan_length_weeks"], 12)
+        self.assertEqual(len([workout for workout in preview["workouts"] if workout["distance_km"] is not None]), 36)
+
+    def test_training_age_classification_uses_spec_inputs(self):
+        self.assertEqual(classify_training_age_level(14.9, 12.0, 8, 4), "beginner")
+        self.assertEqual(classify_training_age_level(30.0, 5.9, 8, 4), "beginner")
+        self.assertEqual(classify_training_age_level(30.0, 10.0, 8, 0), "intermediate")
+        self.assertEqual(classify_training_age_level(50.0, 20.0, 16, 0), "intermediate")
+        self.assertEqual(classify_training_age_level(50.0, 20.0, 16, 2), "advanced")
+
+    def test_quality_session_detection_ignores_generic_single_work_block(self):
+        easy = Activity(id=1, user_id=1, activity_type="outdoor_run", title="Easy run", duration_seconds=3600)
+        easy.workout_blocks = [ActivityWorkoutBlock(block_index=1, block_type="work", title="Continuous running", duration_seconds=3600)]
+        imported_easy = Activity(id=4, user_id=1, activity_type="outdoor_run", title="Easy run", source_note="intervals.csv", duration_seconds=3600)
+        tempo = Activity(id=2, user_id=1, activity_type="outdoor_run", title="Easy run", duration_seconds=3600)
+        tempo.workout_blocks = [ActivityWorkoutBlock(block_index=1, block_type="work", title="Threshold segment", duration_seconds=1200)]
+        intervals = Activity(id=3, user_id=1, activity_type="outdoor_run", title="Structured run", duration_seconds=3600)
+        intervals.workout_blocks = [
+            ActivityWorkoutBlock(block_index=1, block_type="work", title="Fast repeat", duration_seconds=300),
+            ActivityWorkoutBlock(block_index=2, block_type="recovery", title="Jog", duration_seconds=180),
+            ActivityWorkoutBlock(block_index=3, block_type="work", title="Fast repeat", duration_seconds=300),
+        ]
+
+        self.assertFalse(activity_is_quality_session(easy))
+        self.assertFalse(activity_is_quality_session(imported_easy))
+        self.assertTrue(activity_is_quality_session(tempo))
+        self.assertTrue(activity_is_quality_session(intervals))
+
+    def test_aggressiveness_override_only_lowers_detected_level(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        advanced_context = make_context(
+            history_span_days=140,
+            observed_weekly_volume_km=[48.0, 50.0, 52.0, 54.0, 56.0, 58.0],
+            current_weekly_volume_km=54.0,
+            recent_weekly_distance_km=54.0,
+            recent_long_run_km=22.0,
+            consistent_weeks=16,
+            quality_sessions_8w=3,
+            training_age_level="advanced",
+        )
+        lowered_request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, aggressiveness="beginner", available_days_per_week=4)
+
+        lowered = build_plan_preview_blueprint(
+            lowered_request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            advanced_context,
+            start_date,
+        )
+
+        self.assertEqual(lowered["baseline"]["detected_training_age_level"], "advanced")
+        self.assertEqual(lowered["baseline"]["training_age_level"], "beginner")
+        self.assertFalse(lowered["constraints"]["aggressiveness_capped"])
+
+        beginner_context = make_context(
+            history_span_days=12,
+            observed_weekly_volume_km=[0.0, 0.0, 0.0, 0.0, 8.0, 10.0],
+            current_weekly_volume_km=10.0,
+            recent_weekly_distance_km=10.0,
+            recent_long_run_km=4.0,
+            consistent_weeks=2,
+            quality_sessions_8w=0,
+            training_age_level="beginner",
+        )
+        upgrade_request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, aggressiveness="advanced", available_days_per_week=4)
+
+        capped = build_plan_preview_blueprint(
+            upgrade_request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            beginner_context,
+            start_date,
+        )
+
+        self.assertEqual(capped["baseline"]["detected_training_age_level"], "beginner")
+        self.assertEqual(capped["baseline"]["training_age_level"], "beginner")
+        self.assertTrue(capped["constraints"]["aggressiveness_capped"])
+
+    def test_zero_consistent_weeks_is_not_recomputed_from_observed_buckets(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="marathon", race_distance_km=42.2, available_days_per_week=5, current_weekly_distance_km=60.0, longest_recent_run_km=24.0)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                history_span_days=180,
+                observed_weekly_volume_km=[50.0, 55.0, 60.0, 62.0, 64.0, 66.0],
+                current_weekly_volume_km=60.0,
+                recent_weekly_distance_km=60.0,
+                recent_long_run_km=24.0,
+                consistent_weeks=0,
+                quality_sessions_8w=3,
+                training_age_level="beginner",
+            ),
+            start_date,
+        )
+
+        self.assertEqual(preview["baseline"]["consistent_weeks"], 0)
+        self.assertEqual(preview["baseline"]["detected_training_age_level"], "beginner")
+        self.assertEqual(preview["constraints"]["max_weekly_growth"], 0.05)
+
+    def test_beginner_weekly_growth_and_long_run_share_are_capped(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(
+            title="Safe 10K",
+            goal_type="10k",
+            race_distance_km=10.0,
+            plan_length_weeks=10,
+            available_days_per_week=3,
+            current_weekly_distance_km=10.0,
+            longest_recent_run_km=5.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                history_span_days=18,
+                observed_weekly_volume_km=[0.0, 0.0, 0.0, 10.0, 10.0, 10.0],
+                current_weekly_volume_km=10.0,
+                recent_weekly_distance_km=10.0,
+                recent_long_run_km=5.0,
+                consistent_weeks=2,
+                quality_sessions_8w=0,
+                training_age_level="beginner",
+            ),
+            start_date,
+        )
+
+        previous_build_volume = preview["current_weekly_distance_km"]
+        for week in preview["weekly_volume_curve"]:
+            planned = week["planned_distance_km"]
+            if week["week_index"] % 4 == 0:
+                self.assertLessEqual(planned, round(previous_build_volume * 0.85, 1))
+            else:
+                self.assertLessEqual(planned, round(previous_build_volume * 1.05, 1) + 0.1)
+                previous_build_volume = planned
+            self.assertLessEqual(week["long_run_km"], round(planned * 0.30, 1) + 0.1)
+        self.assertEqual(preview["constraints"]["max_weekly_growth"], 0.05)
+        self.assertEqual(preview["constraints"]["long_run_share"], 0.30)
+
+    def test_time_budget_growth_cap_uses_actual_planned_distance(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(
+            title="Budget capped",
+            goal_type="10k",
+            race_distance_km=10.0,
+            plan_length_weeks=8,
+            available_days_per_week=7,
+            current_weekly_distance_km=60.0,
+            longest_recent_run_km=20.0,
+            time_budget_minutes_per_week=70,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                history_span_days=140,
+                observed_weekly_volume_km=[55.0, 56.0, 57.0, 58.0, 59.0, 60.0],
+                current_weekly_volume_km=60.0,
+                recent_weekly_distance_km=60.0,
+                recent_long_run_km=20.0,
+                consistent_weeks=16,
+                quality_sessions_8w=2,
+                training_age_level="advanced",
+            ),
+            start_date,
+        )
+
+        previous_build_volume = preview["weekly_volume_curve"][0]["planned_distance_km"]
+        for week in preview["weekly_volume_curve"][1:]:
+            planned = week["planned_distance_km"]
+            if week["week_index"] % 4 != 0:
+                self.assertLessEqual(planned, round(previous_build_volume * 1.10, 1) + 0.1)
+                previous_build_volume = planned
+
+    def test_marathon_defaults_cap_long_run_distance_and_duration(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(max_run_duration_minutes=240)
+        request = PlanGenerateRequest(
+            title="Advanced marathon",
+            goal_type="marathon",
+            race_distance_km=42.2,
+            plan_length_weeks=18,
+            available_days_per_week=5,
+            current_weekly_distance_km=80.0,
+            longest_recent_run_km=28.0,
+            max_long_run_km=40.0,
+            max_long_run_duration_minutes=240,
+        )
+        zones = {
+            "pace": [{"zone_key": "easy", "lower_value": 300, "upper_value": 420}],
+            "hr": [],
+            "rpe": [],
+            "metadata": {},
+        }
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            zones,
+            make_context(
+                history_span_days=180,
+                observed_weekly_volume_km=[70.0, 75.0, 80.0, 82.0, 84.0, 86.0],
+                current_weekly_volume_km=82.0,
+                recent_weekly_distance_km=82.0,
+                recent_long_run_km=28.0,
+                consistent_weeks=18,
+                quality_sessions_8w=3,
+                training_age_level="advanced",
+            ),
+            start_date,
+        )
+
+        max_long_run = max(week["long_run_km"] for week in preview["weekly_volume_curve"])
+        long_runs = [workout for workout in preview["workouts"] if workout["workout_type"] == "long"]
+
+        self.assertEqual(preview["baseline"]["training_age_level"], "advanced")
+        self.assertEqual(preview["constraints"]["default_max_long_run_km"], 32.0)
+        self.assertEqual(preview["constraints"]["default_max_long_run_duration_minutes"], 180)
+        self.assertEqual(preview["constraints"]["max_long_run_km"], 32.0)
+        self.assertEqual(preview["constraints"]["max_long_run_duration_minutes"], 180)
+        self.assertLessEqual(max_long_run, 32.0)
+        self.assertLessEqual(max(workout["duration_seconds"] for workout in long_runs), 180 * 60)
 
     def test_preview_flags_target_too_close_before_plan_length_clamp(self):
         start_date = date(2026, 6, 8)

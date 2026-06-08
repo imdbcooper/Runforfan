@@ -476,8 +476,11 @@ export type PlanBuilderBaseline = {
   current_weekly_volume_source: string
   recent_long_run_km: number | null
   history_span_days: number
+  consistent_weeks: number
   activity_count: number
   training_age_level: string
+  detected_training_age_level: string | null
+  quality_sessions_8w: number
   confidence: string
 }
 

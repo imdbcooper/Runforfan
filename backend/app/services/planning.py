@@ -23,6 +23,12 @@ CANDIDATE_DATE_WINDOW_DAYS = 7
 AUTO_MATCH_MIN_SCORE = 0.78
 AUTO_MATCH_DATE_WINDOW_DAYS = 3
 DEFAULT_WEEKLY_VOLUME_KM = 15.0
+TRAINING_LEVEL_RANK = {"beginner": 0, "intermediate": 1, "advanced": 2}
+TRAINING_LEVEL_MAX_WEEKLY_GROWTH = {"beginner": 0.05, "intermediate": 0.08, "advanced": 0.10}
+TRAINING_LEVEL_LONG_RUN_SHARE = {"beginner": 0.30, "intermediate": 0.33, "advanced": 0.35}
+MARATHON_LONG_RUN_DISTANCE_CAP_KM = {"beginner": 28.0, "intermediate": 30.0, "advanced": 32.0}
+MARATHON_LONG_RUN_DURATION_CAP_MINUTES = {"beginner": 150, "intermediate": 165, "advanced": 180}
+HALF_MARATHON_LONG_RUN_DISTANCE_CAP_KM = {"beginner": 16.0, "intermediate": 20.0, "advanced": 22.0}
 HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
 HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
 SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
@@ -42,6 +48,95 @@ def weeks_until(target_date: date | None, today: date | None = None) -> int:
         return 8
     reference_date = today or date.today()
     return max(4, min(24, ceil((target_date - reference_date).days / 7)))
+
+
+def plan_weeks_for_request(request: PlanGenerateRequest, today: date) -> int:
+    if request.target_date:
+        return weeks_until(request.target_date, today)
+    if request.plan_length_weeks:
+        return int(request.plan_length_weeks)
+    return weeks_until(None, today)
+
+
+def observed_consistent_weeks(observed_weekly_volume: list[float], history_span_days: int) -> int:
+    active_recent_weeks = sum(1 for volume in observed_weekly_volume if float(volume or 0) > 0)
+    history_weeks = max(0, history_span_days // 7)
+    return min(active_recent_weeks, history_weeks) if history_weeks else 0
+
+
+def consecutive_active_weeks(dates: list[date], today: date) -> int:
+    active_week_starts = {item - timedelta(days=item.isoweekday() - 1) for item in dates}
+    cursor = today - timedelta(days=today.isoweekday() - 1)
+    if cursor not in active_week_starts:
+        cursor -= timedelta(days=7)
+    weeks = 0
+    while cursor in active_week_starts:
+        weeks += 1
+        cursor -= timedelta(days=7)
+    return weeks
+
+
+def activity_is_quality_session(activity: Activity) -> bool:
+    haystack = " ".join(str(part or "") for part in (activity.title, activity.activity_type, activity.aerobic_training_effect)).lower()
+    quality_markers = ("interval", "интервал", "tempo", "темп", "threshold", "порог", "hill", "гор", "race pace", "race-pace", "fartlek", "vo2")
+    if any(marker in haystack for marker in quality_markers):
+        return True
+    blocks = getattr(activity, "workout_blocks", []) or []
+    for block in blocks:
+        block_haystack = " ".join(str(part or "") for part in (getattr(block, "title", None), getattr(block, "notes", None))).lower()
+        if any(marker in block_haystack for marker in quality_markers):
+            return True
+    work_blocks = [block for block in blocks if getattr(block, "block_type", None) == "work"]
+    recovery_blocks = [block for block in blocks if getattr(block, "block_type", None) == "recovery"]
+    return len(work_blocks) >= 2 and bool(recovery_blocks)
+
+
+def classify_training_age_level(current_volume: float, recent_long_run: float | None, consistent_weeks: int, quality_sessions: int) -> str:
+    if consistent_weeks < 3 or current_volume < 15 or recent_long_run is None or recent_long_run < 6:
+        return "beginner"
+    if consistent_weeks > 12 and current_volume > 45 and quality_sessions >= 2:
+        return "advanced"
+    if consistent_weeks >= 4 and current_volume >= 15 and recent_long_run >= 6:
+        return "intermediate"
+    return "beginner"
+
+
+def apply_aggressiveness_override(detected_level: str, requested_aggressiveness: str) -> str:
+    if requested_aggressiveness == "auto":
+        return detected_level
+    requested_rank = TRAINING_LEVEL_RANK.get(requested_aggressiveness, TRAINING_LEVEL_RANK["beginner"])
+    detected_rank = TRAINING_LEVEL_RANK.get(detected_level, TRAINING_LEVEL_RANK["beginner"])
+    if requested_rank <= detected_rank:
+        return requested_aggressiveness
+    return detected_level
+
+
+def max_weekly_growth_for_level(training_age_level: str) -> float:
+    return TRAINING_LEVEL_MAX_WEEKLY_GROWTH.get(training_age_level, TRAINING_LEVEL_MAX_WEEKLY_GROWTH["beginner"])
+
+
+def long_run_share_for_level(training_age_level: str, conservative: bool) -> float:
+    share = TRAINING_LEVEL_LONG_RUN_SHARE.get(training_age_level, TRAINING_LEVEL_LONG_RUN_SHARE["beginner"])
+    return min(share, 0.32) if conservative else share
+
+
+def default_long_run_distance_cap_km(goal_distance: float, training_age_level: str) -> float | None:
+    if goal_distance >= 42:
+        return MARATHON_LONG_RUN_DISTANCE_CAP_KM.get(training_age_level, MARATHON_LONG_RUN_DISTANCE_CAP_KM["beginner"])
+    if goal_distance >= 21:
+        return HALF_MARATHON_LONG_RUN_DISTANCE_CAP_KM.get(training_age_level, HALF_MARATHON_LONG_RUN_DISTANCE_CAP_KM["beginner"])
+    return None
+
+
+def default_long_run_duration_cap_minutes(goal_distance: float, training_age_level: str) -> int | None:
+    if goal_distance >= 42:
+        return MARATHON_LONG_RUN_DURATION_CAP_MINUTES.get(training_age_level, MARATHON_LONG_RUN_DURATION_CAP_MINUTES["beginner"])
+    return None
+
+
+def smallest_cap(values: list[float | int | None]) -> float | None:
+    caps = [float(value) for value in values if value is not None]
+    return min(caps) if caps else None
 
 
 def race_name(distance_km: float | None) -> str:
@@ -290,6 +385,7 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
     activities = list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id, Activity.started_at.is_not(None))
+        .options(selectinload(Activity.workout_blocks))
         .order_by(Activity.started_at.desc(), Activity.id.desc())
         .limit(240)
     ))
@@ -302,6 +398,7 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
     observed_weekly_volume = [0.0 for _ in range(6)]
     observed_start = today - timedelta(days=41)
     recent_long_run = 0.0
+    quality_sessions_8w = 0
     recent_long_start = today - timedelta(days=55)
     for activity, started_date in dated:
         distance = float(activity.distance_km or 0)
@@ -310,6 +407,8 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
             observed_weekly_volume[bucket] += distance
         if recent_long_start <= started_date <= today:
             recent_long_run = max(recent_long_run, distance)
+            if activity_is_quality_session(activity):
+                quality_sessions_8w += 1
 
     active_recent_weeks = [volume for volume in observed_weekly_volume[-4:] if volume > 0]
     if len(active_recent_weeks) >= 2:
@@ -319,12 +418,9 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
         current_volume = DEFAULT_WEEKLY_VOLUME_KM
         source = "fallback"
 
-    if history_span_days >= 180 and current_volume >= 45:
-        training_age_level = "advanced"
-    elif history_span_days >= 56 and current_volume >= 18:
-        training_age_level = "intermediate"
-    else:
-        training_age_level = "beginner"
+    running_dates = [started_date for activity, started_date in dated if float(activity.distance_km or 0) > 0]
+    consistent_weeks = consecutive_active_weeks(running_dates, today)
+    training_age_level = classify_training_age_level(current_volume, recent_long_run or None, consistent_weeks, quality_sessions_8w)
 
     if source == "observed_median_4w" and history_span_days >= 42:
         confidence = "high"
@@ -341,6 +437,8 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
         "current_weekly_volume_source": source,
         "recent_weekly_distance_km": round(current_volume, 1),
         "recent_long_run_km": round(recent_long_run, 1) if recent_long_run else None,
+        "consistent_weeks": consistent_weeks,
+        "quality_sessions_8w": quality_sessions_8w,
         "training_age_level": training_age_level,
         "confidence": confidence,
     }
@@ -1920,7 +2018,7 @@ def build_plan_preview_blueprint(
     context: dict[str, object],
     start_date: date,
 ) -> dict[str, object]:
-    weeks = weeks_until(request.target_date, start_date)
+    weeks = plan_weeks_for_request(request, start_date)
     days = request.available_days_per_week
     goal_distance = goal_distance_for_request(request)
     if request.current_weekly_distance_km is not None:
@@ -1930,14 +2028,26 @@ def build_plan_preview_blueprint(
         current_volume = float(context["current_weekly_volume_km"] or DEFAULT_WEEKLY_VOLUME_KM)
         volume_source = str(context["current_weekly_volume_source"])
     current_volume = round(max(3.0, current_volume), 1)
+    observed_weekly_volume = [float(volume or 0) for volume in (context.get("observed_weekly_volume_km") or [])]
+    recent_long_run = request.longest_recent_run_km if request.longest_recent_run_km is not None else context.get("recent_long_run_km")
+    if "consistent_weeks" in context and context["consistent_weeks"] is not None:
+        consistent_weeks = int(context["consistent_weeks"])
+    else:
+        consistent_weeks = observed_consistent_weeks(observed_weekly_volume, int(context.get("history_span_days") or 0))
+    quality_sessions_8w = int(context.get("quality_sessions_8w") or 0)
+    detected_training_age_level = classify_training_age_level(current_volume, float(recent_long_run) if recent_long_run is not None else None, consistent_weeks, quality_sessions_8w)
+    training_age_level = apply_aggressiveness_override(detected_training_age_level, request.aggressiveness)
     baseline = {
         "observed_weekly_volume_km": context["observed_weekly_volume_km"],
         "current_weekly_volume_km": current_volume,
         "current_weekly_volume_source": volume_source,
-        "recent_long_run_km": request.longest_recent_run_km if request.longest_recent_run_km is not None else context["recent_long_run_km"],
+        "recent_long_run_km": recent_long_run,
         "history_span_days": context["history_span_days"],
+        "consistent_weeks": consistent_weeks,
         "activity_count": context["activity_count"],
-        "training_age_level": context["training_age_level"],
+        "training_age_level": training_age_level,
+        "detected_training_age_level": detected_training_age_level,
+        "quality_sessions_8w": quality_sessions_8w,
         "confidence": "medium" if volume_source == "manual_override" else context["confidence"],
     }
     safety_context = {**context, "recent_weekly_distance_km": current_volume, "current_weekly_volume_km": current_volume}
@@ -1952,7 +2062,10 @@ def build_plan_preview_blueprint(
     preferred_weekdays = request_preferred_weekdays or profile.preferred_weekdays or []
     profile_long_run_weekday = profile.long_run_weekday if profile.long_run_weekday and 1 <= profile.long_run_weekday <= 7 else None
     long_run_weekday = profile_long_run_weekday if profile_long_run_weekday and (not request_preferred_weekdays or profile_long_run_weekday in preferred_weekdays) else None
-    max_run_duration_minutes = request.max_long_run_duration_minutes or profile.max_run_duration_minutes
+    default_max_long_run_km = default_long_run_distance_cap_km(goal_distance, training_age_level)
+    default_max_long_run_duration_minutes = default_long_run_duration_cap_minutes(goal_distance, training_age_level)
+    max_long_run_km = smallest_cap([request.max_long_run_km, default_max_long_run_km])
+    max_run_duration_minutes = smallest_cap([request.max_long_run_duration_minutes, profile.max_run_duration_minutes, default_max_long_run_duration_minutes])
     schedule_offsets = schedule_offsets_for_plan(start_date, days, preferred_weekdays, long_run_weekday)
     long_run_day_index = None
     if long_run_weekday:
@@ -1961,29 +2074,35 @@ def build_plan_preview_blueprint(
             long_run_day_index = schedule_offsets.index(long_offset) + 1
     priority_multiplier = 1.05 if request.priority in {"a", "high"} else 0.95 if request.priority in {"c", "low"} else 1.0
     target_time_multiplier = 1.03 if request.target_time_seconds else 1.0
-    growth_factor = (1.16 if conservative else 1.35) * priority_multiplier
-    goal_factor = (0.75 if conservative else (1.15 if goal_distance >= 21 else 0.9)) * priority_multiplier * target_time_multiplier
+    days_multiplier = max(0.75, min(1.15, days / 4))
+    length_multiplier = max(0.75, min(1.1, weeks / 12))
+    growth_factor = (1.16 if conservative else 1.35) * priority_multiplier * length_multiplier
+    goal_factor = (0.75 if conservative else (1.15 if goal_distance >= 21 else 0.9)) * priority_multiplier * target_time_multiplier * days_multiplier * length_multiplier
     peak_volume = max(current_volume * growth_factor, goal_distance * goal_factor)
     if conservative:
         peak_volume = min(peak_volume, current_volume * growth_factor)
+    max_weekly_growth = max_weekly_growth_for_level(training_age_level)
+    long_run_share = long_run_share_for_level(training_age_level, conservative)
 
     workouts: list[dict[str, object]] = []
     weekly_curve: list[dict[str, object]] = []
     intensity_volume = {"easy": 0.0, "steady": 0.0, "hard": 0.0, "strength": 0.0, "mobility": 0.0}
     running_floor_limited_by_budget = False
+    last_build_week_volume = current_volume
     for week in range(1, weeks + 1):
         progression = week / weeks
         week_volume = current_volume + (peak_volume - current_volume) * min(1, progression * 1.15)
+        week_volume = min(week_volume, last_build_week_volume * (1 + max_weekly_growth))
         if week % 4 == 0:
             week_volume *= 0.78
         if request.time_budget_minutes_per_week:
             running_budget_seconds = max(0, request.time_budget_minutes_per_week * 60 - weekly_support_duration_seconds)
             budget_distance = running_budget_seconds / easy_pace_seconds_per_km
             week_volume = min(week_volume, max(1.0, budget_distance))
-        long_cap = 0.62 if conservative else 0.75
-        long_run = min(goal_distance * long_cap, week_volume * (0.34 if conservative else 0.38))
-        if request.max_long_run_km:
-            long_run = min(long_run, request.max_long_run_km)
+        goal_long_cap = default_max_long_run_km if default_max_long_run_km is not None else goal_distance * (0.62 if conservative else 0.75)
+        long_run = min(goal_long_cap, week_volume * long_run_share)
+        if max_long_run_km:
+            long_run = min(long_run, max_long_run_km)
         if max_run_duration_minutes:
             long_run = min(long_run, max_run_duration_minutes * 60 / easy_pace_seconds_per_km)
         long_run = min(long_run, week_volume)
@@ -2028,6 +2147,8 @@ def build_plan_preview_blueprint(
         week_distance = sum(float(workout.get("distance_km") or 0) for workout in week_preview_workouts)
         long_run = max((float(workout.get("distance_km") or 0) for workout in week_preview_workouts if workout.get("workout_type") == "long"), default=0.0)
         hard_sessions = sum(1 for workout in week_preview_workouts if preview_workout_is_hard(workout))
+        if week % 4 != 0:
+            last_build_week_volume = week_distance
         for workout in week_preview_workouts:
             intensity_volume[preview_intensity_category(workout)] += int(workout.get("duration_seconds") or 0)
         workouts.extend(week_preview_workouts)
@@ -2099,11 +2220,21 @@ def build_plan_preview_blueprint(
         "constraints": {
             "injury": request.injury,
             "no_hard_workouts": request.no_hard_workouts,
-            "max_long_run_km": request.max_long_run_km,
+            "max_long_run_km": max_long_run_km,
+            "requested_max_long_run_km": request.max_long_run_km,
+            "default_max_long_run_km": default_max_long_run_km,
             "max_long_run_duration_minutes": max_run_duration_minutes,
+            "default_max_long_run_duration_minutes": default_max_long_run_duration_minutes,
             "profile_max_run_duration_minutes": profile.max_run_duration_minutes,
+            "max_weekly_growth": max_weekly_growth,
+            "long_run_share": long_run_share,
             "time_budget_minutes_per_week": request.time_budget_minutes_per_week,
             "include_strength": request.include_strength,
+            "plan_length_weeks": request.plan_length_weeks,
+            "requested_aggressiveness": request.aggressiveness,
+            "detected_training_age_level": detected_training_age_level,
+            "effective_training_age_level": training_age_level,
+            "aggressiveness_capped": request.aggressiveness != "auto" and training_age_level != request.aggressiveness,
             "strength_sessions_per_week": support_settings["strength_sessions"],
             "include_mobility": request.include_mobility,
             "mobility_sessions_per_week": support_settings["mobility_sessions"],
@@ -2123,7 +2254,7 @@ def build_plan_preview_blueprint(
         "explanation": (
             f"Plan Builder Preview: план построен от текущего объема {current_volume:.1f} км/нед до пика {effective_peak_volume:.1f} км/нед. "
             f"Support sessions: strength {support_settings['strength_sessions']}/week, mobility {support_settings['mobility_sessions']}/week. "
-            f"Baseline source: {volume_source}, training age={baseline['training_age_level']}, confidence={baseline['confidence']}. "
+            f"Baseline source: {volume_source}, training age={baseline['training_age_level']} (detected={detected_training_age_level}, consistent weeks={consistent_weeks}, quality sessions 8w={quality_sessions_8w}), confidence={baseline['confidence']}. "
             f"Safety gates: {safety_text}. Zones: {zone_summary}. "
             f"Profile completeness: {float(completeness['score']):.0%}, confidence={completeness['confidence']}. "
             f"Medical safety: {profile_safety['message']}"
