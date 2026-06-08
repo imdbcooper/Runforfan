@@ -143,6 +143,13 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertIn("hold_volume", self.recommendation_types(result))
         self.assertIn("move_workout", self.recommendation_types(result))
 
+    def test_missed_hill_and_race_pace_are_key_workouts(self):
+        hill_plan = make_plan(make_workout(1, date(2026, 6, 5), status="missed", workout_type="hill", intensity="threshold"))
+        race_pace_plan = make_plan(make_workout(2, date(2026, 6, 5), status="missed", workout_type="race_pace", intensity="race_pace"))
+
+        self.assertIn("move_workout", self.recommendation_types(self.recommendations(hill_plan)))
+        self.assertIn("move_workout", self.recommendation_types(self.recommendations(race_pace_plan)))
+
     def test_done_workout_without_activity_recommends_linking(self):
         plan = make_plan(
             make_workout(1, TODAY, status="done", distance_km=6.0),
@@ -376,6 +383,18 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         first_hard = make_workout(2, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=2)
         second_hard = make_workout(3, date(2026, 6, 9), workout_type="tempo", intensity="threshold", day_index=3)
         plan = make_plan(completed, first_hard, second_hard)
+
+        preview = self.preview(plan)
+        intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
+
+        self.assertEqual(len(intensity_changes), 1)
+        self.assertEqual(intensity_changes[0]["workout_id"], 2)
+
+    def test_reduce_intensity_treats_race_pace_as_hard(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
+        race_pace = make_workout(2, date(2026, 6, 8), workout_type="race_pace", intensity="race_pace", day_index=2)
+        plan = make_plan(completed, race_pace)
 
         preview = self.preview(plan)
         intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]

@@ -227,6 +227,90 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertEqual(preview["baseline"]["detected_training_age_level"], "beginner")
         self.assertEqual(preview["constraints"]["max_weekly_growth"], 0.05)
 
+    def test_four_day_composition_has_one_quality_and_recovery_day(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, available_days_per_week=4, current_weekly_distance_km=28.0, longest_recent_run_km=10.0)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
+        hard = [workout for workout in first_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
+
+        self.assertEqual(len(first_week), 4)
+        self.assertEqual(len(hard), 1)
+        self.assertIn("recovery", {workout["workout_type"] for workout in first_week})
+
+    def test_beginner_rpe_without_threshold_zones_avoids_hard_workouts(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=4,
+            current_weekly_distance_km=12.0,
+            longest_recent_run_km=5.0,
+            intensity_mode="rpe",
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                current_weekly_volume_km=12.0,
+                recent_weekly_distance_km=12.0,
+                recent_long_run_km=5.0,
+                consistent_weeks=2,
+                quality_sessions_8w=0,
+                training_age_level="beginner",
+            ),
+            start_date,
+        )
+
+        workout_types = {workout["workout_type"] for workout in preview["workouts"]}
+        self.assertNotIn("interval", workout_types)
+        self.assertNotIn("tempo", workout_types)
+        self.assertNotIn("hill", workout_types)
+        self.assertIn("steady", workout_types)
+
+    def test_beginner_seven_day_request_is_capped_by_experience(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, available_days_per_week=7, current_weekly_distance_km=12.0, longest_recent_run_km=5.0)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                current_weekly_volume_km=12.0,
+                recent_weekly_distance_km=12.0,
+                recent_long_run_km=5.0,
+                consistent_weeks=2,
+                quality_sessions_8w=0,
+                training_age_level="beginner",
+            ),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
+        self.assertEqual(preview["available_days_per_week"], 5)
+        self.assertEqual(len(first_week), 5)
+        self.assertTrue(preview["constraints"]["running_days_capped_by_experience"])
+        self.assertIn("running_days_capped_by_experience", {flag["code"] for flag in preview["risk_flags"]})
+
     def test_beginner_weekly_growth_and_long_run_share_are_capped(self):
         start_date = date(2026, 6, 8)
         profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
@@ -509,7 +593,7 @@ class PlanBuilderPreviewTests(unittest.TestCase):
             title="Constraint plan",
             goal_type="half_marathon",
             race_distance_km=21.1,
-            available_days_per_week=4,
+            available_days_per_week=5,
             current_weekly_distance_km=30.0,
             no_hard_workouts=True,
             max_long_run_km=8.0,
@@ -528,6 +612,7 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         workout_types = {workout["workout_type"] for workout in preview["workouts"]}
         self.assertNotIn("interval", workout_types)
         self.assertNotIn("tempo", workout_types)
+        self.assertNotIn("strides", workout_types)
         self.assertLessEqual(max(week["long_run_km"] for week in preview["weekly_volume_curve"]), 8.0)
         self.assertTrue(preview["constraints"]["no_hard_workouts"])
 
@@ -553,9 +638,11 @@ class PlanBuilderPreviewTests(unittest.TestCase):
             start_date,
         )
 
-        workout_types = {workout["workout_type"] for workout in preview["workouts"]}
-        self.assertIn("interval", workout_types)
-        self.assertIn("tempo", workout_types)
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
+        workout_types = {workout["workout_type"] for workout in first_week}
+        hard = [workout for workout in first_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
+        self.assertIn("hill", workout_types)
+        self.assertEqual(len(hard), 1)
         self.assertNotIn("missing_pace_zones", {flag["code"] for flag in preview["risk_flags"]})
 
     def test_preview_adds_duration_only_strength_and_mobility_support(self):

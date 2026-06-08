@@ -29,6 +29,10 @@ TRAINING_LEVEL_LONG_RUN_SHARE = {"beginner": 0.30, "intermediate": 0.33, "advanc
 MARATHON_LONG_RUN_DISTANCE_CAP_KM = {"beginner": 28.0, "intermediate": 30.0, "advanced": 32.0}
 MARATHON_LONG_RUN_DURATION_CAP_MINUTES = {"beginner": 150, "intermediate": 165, "advanced": 180}
 HALF_MARATHON_LONG_RUN_DISTANCE_CAP_KM = {"beginner": 16.0, "intermediate": 20.0, "advanced": 22.0}
+TRAINING_LEVEL_MAX_RUNNING_DAYS = {"beginner": 5, "intermediate": 6, "advanced": 7}
+INTERVAL_WORK_CAP_SECONDS = {"beginner": 15 * 60, "intermediate": 20 * 60, "advanced": 25 * 60}
+TEMPO_WORK_CAP_SECONDS = {"beginner": 20 * 60, "intermediate": 30 * 60, "advanced": 40 * 60}
+HILL_WORK_CAP_SECONDS = {"beginner": 12 * 60, "intermediate": 16 * 60, "advanced": 20 * 60}
 HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
 HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
 SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
@@ -137,6 +141,34 @@ def default_long_run_duration_cap_minutes(goal_distance: float, training_age_lev
 def smallest_cap(values: list[float | int | None]) -> float | None:
     caps = [float(value) for value in values if value is not None]
     return min(caps) if caps else None
+
+
+def max_running_days_for_level(training_age_level: str) -> int:
+    return TRAINING_LEVEL_MAX_RUNNING_DAYS.get(training_age_level, TRAINING_LEVEL_MAX_RUNNING_DAYS["beginner"])
+
+
+def hard_work_cap_seconds(workout_type: str, training_age_level: str) -> int:
+    if workout_type == "interval":
+        return INTERVAL_WORK_CAP_SECONDS.get(training_age_level, INTERVAL_WORK_CAP_SECONDS["beginner"])
+    if workout_type == "hill":
+        return HILL_WORK_CAP_SECONDS.get(training_age_level, HILL_WORK_CAP_SECONDS["beginner"])
+    return TEMPO_WORK_CAP_SECONDS.get(training_age_level, TEMPO_WORK_CAP_SECONDS["beginner"])
+
+
+def capped_work_seconds(duration: int | None, workout_type: str, training_age_level: str, ratio: float) -> int | None:
+    if duration is None:
+        return None
+    return max(1, min(round(duration * ratio), hard_work_cap_seconds(workout_type, training_age_level)))
+
+
+def capped_work_distance(distance: float | None, duration: int | None, work_seconds: int | None, distance_ratio: float, duration_ratio: float, repeat_count: int = 1) -> float | None:
+    if distance is None:
+        return None
+    scaled_distance = float(distance) * distance_ratio
+    if duration and work_seconds:
+        planned_work_seconds = max(1, round(duration * duration_ratio))
+        scaled_distance *= min(1.0, work_seconds / planned_work_seconds)
+    return round(max(0.0, scaled_distance / max(1, repeat_count)), 2)
 
 
 def race_name(distance_km: float | None) -> str:
@@ -473,28 +505,55 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
     }
 
 
-def workout_template(days: int, conservative: bool, has_precise_zones: bool) -> list[tuple[int, str, str, str]]:
-    hard_allowed = (not conservative) and has_precise_zones
+def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False) -> list[tuple[int, str, str, str]]:
+    hard_allowed = (not conservative) and can_prescribe_hard
+    quality_lite = (not conservative)
+    specific_phase = has_target_time and weeks >= 8 and week_index > weeks * 0.6
+
+    def primary_quality() -> tuple[str, str, str]:
+        if not hard_allowed:
+            return "steady", "Аэробная работа", "steady-rpe"
+        if specific_phase:
+            return "race_pace", "Работа в целевом темпе", "race_pace"
+        if has_pace_zones:
+            return "interval", "Длинные интервалы", "interval"
+        return "hill", "Силовая работа в горку", "hill"
+
+    def secondary_quality() -> tuple[str, str, str]:
+        if not hard_allowed:
+            return "strides" if quality_lite else "easy", "Страйды" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"
+        if specific_phase:
+            return "interval", "Контролируемые интервалы", "interval"
+        return "tempo", "Темповая работа", "threshold"
+
+    quality_type, quality_title, quality_intensity = primary_quality()
     if days <= 2:
         return [
-            (1, "easy", "Легкий бег", "easy"),
+            (1, "strides" if quality_lite else "easy", "Легкий бег со страйдами" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"),
             (days, "long", "Длинная тренировка", "easy-long"),
         ]
-    template = [(1, "easy", "Легкий бег", "easy")]
-    if hard_allowed:
-        template.append((2, "interval", "Длинные интервалы", "threshold"))
-    else:
-        template.append((2, "steady", "Аэробная работа", "steady-rpe"))
+    template = [(1, "easy", "Легкий бег", "easy"), (2, quality_type, quality_title, quality_intensity)]
     if days >= 4:
-        template.append((3, "tempo" if hard_allowed else "easy", "Темповая работа" if hard_allowed else "Восстановительный бег", "steady" if hard_allowed else "easy"))
-    for day in range(4, days):
-        template.append((day, "easy", "Легкий бег", "easy"))
+        template.append((3, "recovery", "Восстановительный бег", "recovery"))
+    if days >= 5:
+        second_type, second_title, second_intensity = secondary_quality()
+        if hard_allowed and training_age_level == "advanced" and days >= 6:
+            template.append((4, second_type, second_title, second_intensity))
+        elif not hard_allowed:
+            template.append((4, second_type, second_title, second_intensity))
+        else:
+            template.append((4, "strides", "Страйды", "strides"))
+    for day in range(5, days):
+        if day == 5 and days >= 7:
+            template.append((day, "easy", "Легкий бег", "easy"))
+        else:
+            template.append((day, "recovery" if day % 2 == 1 else "easy", "Восстановительный бег" if day % 2 == 1 else "Легкий бег", "recovery" if day % 2 == 1 else "easy"))
     template.append((days, "long", "Длинная тренировка", "easy-long"))
     return template[:days]
 
 
-def workout_template_for_schedule(days: int, conservative: bool, has_precise_zones: bool, long_run_day_index: int | None = None) -> list[tuple[int, str, str, str]]:
-    template = workout_template(days, conservative, has_precise_zones)
+def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False) -> list[tuple[int, str, str, str]]:
+    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time)
     if not long_run_day_index or long_run_day_index >= days:
         return template
     long_item = next((item for item in template if item[1] == "long"), None)
@@ -645,9 +704,21 @@ def workout_description(workout_type: str, intensity: str, zones: dict, conserva
     if workout_type == "interval":
         target = target_text(zones, pace_key="interval", hr_key="z4", fallback="RPE 6-7, без выхода в максимальную интенсивность")
         return f"Работа около порога: 3-5 длинных отрезков с восстановлением. Цель: {target}."
+    if workout_type == "hill":
+        target = target_text(zones, hr_key="z3", fallback="RPE 5-7, короткие контролируемые подъемы")
+        return f"Горки для силы и механики, хорошая замена скоростной работе при ненадежных pace zones. Цель: {target}."
     if workout_type == "tempo":
         target = target_text(zones, pace_key="threshold", hr_key="z3", fallback="RPE 5-6, контролируемый темп")
         return f"Устойчивый темп ниже порога, без закисления. Цель: {target}."
+    if workout_type == "race_pace":
+        target = target_text(zones, pace_key="threshold", hr_key="z3", fallback="RPE 5-7, контролируемый целевой темп")
+        return f"Специфичная работа в целевом темпе гонки без all-out усилия. Цель: {target}."
+    if workout_type == "strides":
+        target = target_text(zones, pace_key="easy", hr_key="z2", fallback="RPE 2-3 между короткими расслабленными ускорениями")
+        return f"Легкий бег плюс короткие расслабленные страйды с полным восстановлением. Цель: {target}."
+    if workout_type == "recovery":
+        target = target_text(zones, pace_key="easy", hr_key="z1", fallback="RPE 1-3, очень легко")
+        return f"Короткое восстановление для привычки и мягкого кровотока. Цель: {target}."
     if workout_type == "steady":
         target = target_text(zones, pace_key="steady", hr_key="z2", fallback="RPE 3-4, разговорный контроль")
         suffix = " Высокоинтенсивные тренировки отключены safety gate." if conservative else ""
@@ -672,6 +743,15 @@ def numeric_zone_range(zones: dict[str, object], zone_type: str, zone_key: str) 
     return None, None
 
 
+def target_race_pace_range(workout: dict[str, object]) -> tuple[int | None, int | None]:
+    target = workout.get("target_race_pace_seconds_per_km")
+    if target is None:
+        return None, None
+    seconds = max(1, round(float(target)))
+    spread = max(2, round(seconds * 0.02))
+    return max(1, seconds - spread), seconds + spread
+
+
 def _scaled(value: float | int | None, ratio: float, digits: int = 1) -> float | None:
     if value is None:
         return None
@@ -682,6 +762,51 @@ def _scaled_seconds(value: int | None, ratio: float) -> int | None:
     if value is None:
         return None
     return max(1, round(value * ratio))
+
+
+def _remaining_seconds(total: int | None, *parts: int | None) -> int | None:
+    if total is None:
+        return None
+    return max(0, int(total) - sum(int(part or 0) for part in parts))
+
+
+def _remaining_distance(total: float | None, *parts: float | None) -> float | None:
+    if total is None:
+        return None
+    return round(max(0.0, float(total) - sum(float(part or 0) for part in parts)), 2)
+
+
+def _per_repeat_seconds(total: int | None, repeat_count: int) -> int | None:
+    if total is None:
+        return None
+    return max(0, round(total / max(1, repeat_count)))
+
+
+def _per_repeat_distance(total: float | None, repeat_count: int) -> float | None:
+    if total is None:
+        return None
+    return round(max(0.0, total / max(1, repeat_count)), 2)
+
+
+def block_targets_total(blocks: list[dict[str, object]], field: str) -> float:
+    return sum(float(block.get(field) or 0) * int(block.get("repeat_count") or 1) for block in blocks)
+
+
+def align_blocks_to_workout_targets(blocks: list[dict[str, object]], duration: int | None, distance: float | None) -> list[dict[str, object]]:
+    adjustment_block = next((block for block in reversed(blocks) if int(block.get("repeat_count") or 1) == 1), blocks[-1] if blocks else None)
+    if not adjustment_block:
+        return blocks
+    if duration is not None:
+        duration_delta = int(duration) - round(block_targets_total(blocks, "target_duration_seconds"))
+        if duration_delta:
+            current = int(adjustment_block.get("target_duration_seconds") or 0)
+            adjustment_block["target_duration_seconds"] = max(1, current + duration_delta)
+    if distance is not None:
+        distance_delta = round(float(distance) - block_targets_total(blocks, "target_distance_km"), 2)
+        if abs(distance_delta) >= 0.01:
+            current = float(adjustment_block.get("target_distance_km") or 0)
+            adjustment_block["target_distance_km"] = round(max(0.0, current + distance_delta), 2)
+    return blocks
 
 
 def planned_block(
@@ -715,12 +840,16 @@ def planned_block(
 
 def planned_workout_blocks_for_preview(workout: dict[str, object], zones: dict[str, object]) -> list[dict[str, object]]:
     workout_type = str(workout.get("workout_type") or "")
+    training_age_level = str(workout.get("training_age_level") or "intermediate")
     distance = float(workout["distance_km"]) if workout.get("distance_km") is not None else None
     duration = int(workout["duration_seconds"]) if workout.get("duration_seconds") is not None else None
     easy_pace = numeric_zone_range(zones, "pace", "easy")
     steady_pace = numeric_zone_range(zones, "pace", "steady")
     threshold_pace = numeric_zone_range(zones, "pace", "threshold")
     interval_pace = numeric_zone_range(zones, "pace", "interval")
+    race_pace = target_race_pace_range(workout)
+    if race_pace == (None, None):
+        race_pace = numeric_zone_range(zones, "pace", "race_pace")
     easy_hr = numeric_zone_range(zones, "hr", "z2")
     recovery_hr = numeric_zone_range(zones, "hr", "z1")
     quality_hr = numeric_zone_range(zones, "hr", "z3")
@@ -730,19 +859,78 @@ def planned_workout_blocks_for_preview(workout: dict[str, object], zones: dict[s
         return [planned_block(1, "strength", "Runner strength circuit: calves/soleus, glutes, hamstrings, single-leg stability and core.", duration_seconds=duration, rpe=(4, 7))]
     if workout_type in MOBILITY_WORKOUT_TYPES:
         return [planned_block(1, "recovery", "Mobility/prehab flow with ankle, hip, glute activation and relaxed breathing.", duration_seconds=duration, rpe=(1, 3))]
+    if workout_type in HARD_PLAN_WORKOUT_TYPES and duration is not None and duration < 10 * 60:
+        return [planned_block(1, "work", "Workout was shortened below a safe quality duration; keep this as easy aerobic running.", distance_km=distance, duration_seconds=duration, pace=easy_pace, hr=easy_hr, rpe=(2, 4))]
     if workout_type == "interval":
-        return [
-            planned_block(1, "warmup", "Easy warmup before quality work.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
-            planned_block(2, "work", "Long controlled work repeats near interval/threshold effort.", repeat_count=4, distance_km=_scaled(distance, 0.55 / 4, 2), duration_seconds=_scaled_seconds(duration, 0.5 / 4), pace=interval_pace, hr=interval_hr, rpe=(6, 8)),
-            planned_block(3, "recovery", "Easy jog or walk between work repeats.", repeat_count=4, distance_km=_scaled(distance, 0.15 / 4, 2), duration_seconds=_scaled_seconds(duration, 0.2 / 4), pace=easy_pace, hr=recovery_hr, rpe=(2, 3)),
-            planned_block(4, "cooldown", "Relaxed cooldown; stop early if form deteriorates.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
-        ]
+        repeat_count = 4
+        warmup_seconds = _scaled_seconds(duration, 0.15)
+        cooldown_seconds = _scaled_seconds(duration, 0.15)
+        work_seconds = capped_work_seconds(duration, "interval", training_age_level, 0.5)
+        recovery_seconds = _remaining_seconds(duration, warmup_seconds, work_seconds, cooldown_seconds)
+        warmup_distance = _scaled(distance, 0.15)
+        cooldown_distance = _scaled(distance, 0.15)
+        work_distance = capped_work_distance(distance, duration, work_seconds, 0.55, 0.5)
+        recovery_distance = _remaining_distance(distance, warmup_distance, work_distance, cooldown_distance)
+        return align_blocks_to_workout_targets([
+            planned_block(1, "warmup", "Easy warmup before quality work.", distance_km=warmup_distance, duration_seconds=warmup_seconds, pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Long controlled work repeats near interval/threshold effort.", repeat_count=repeat_count, distance_km=_per_repeat_distance(work_distance, repeat_count), duration_seconds=_per_repeat_seconds(work_seconds, repeat_count), pace=interval_pace, hr=interval_hr, rpe=(6, 8)),
+            planned_block(3, "recovery", "Easy jog or walk between work repeats; capped hard time is redistributed here.", repeat_count=repeat_count, distance_km=_per_repeat_distance(recovery_distance, repeat_count), duration_seconds=_per_repeat_seconds(recovery_seconds, repeat_count), pace=easy_pace, hr=recovery_hr, rpe=(2, 3)),
+            planned_block(4, "cooldown", "Relaxed cooldown; stop early if form deteriorates.", distance_km=cooldown_distance, duration_seconds=cooldown_seconds, pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ], duration, distance)
+    if workout_type == "hill":
+        repeat_count = 6
+        warmup_seconds = _scaled_seconds(duration, 0.2)
+        cooldown_seconds = _scaled_seconds(duration, 0.2)
+        work_seconds = capped_work_seconds(duration, "hill", training_age_level, 0.35)
+        recovery_seconds = _remaining_seconds(duration, warmup_seconds, work_seconds, cooldown_seconds)
+        warmup_distance = _scaled(distance, 0.2)
+        cooldown_distance = _scaled(distance, 0.2)
+        work_distance = capped_work_distance(distance, duration, work_seconds, 0.3, 0.35)
+        recovery_distance = _remaining_distance(distance, warmup_distance, work_distance, cooldown_distance)
+        return align_blocks_to_workout_targets([
+            planned_block(1, "warmup", "Easy warmup before hill mechanics.", distance_km=warmup_distance, duration_seconds=warmup_seconds, pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Short controlled uphill repeats; walk or jog down fully recovered.", repeat_count=repeat_count, distance_km=_per_repeat_distance(work_distance, repeat_count), duration_seconds=_per_repeat_seconds(work_seconds, repeat_count), hr=quality_hr, rpe=(5, 7)),
+            planned_block(3, "recovery", "Easy downhill/walk recovery after each repeat; capped hard time is redistributed here.", repeat_count=repeat_count, distance_km=_per_repeat_distance(recovery_distance, repeat_count), duration_seconds=_per_repeat_seconds(recovery_seconds, repeat_count), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+            planned_block(4, "cooldown", "Easy cooldown on flat terrain.", distance_km=cooldown_distance, duration_seconds=cooldown_seconds, pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ], duration, distance)
     if workout_type in {"tempo", "threshold", "race_pace"}:
-        return [
-            planned_block(1, "warmup", "Easy warmup and drills before sustained quality.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
-            planned_block(2, "work", "Sustained controlled quality block below all-out effort.", distance_km=_scaled(distance, 0.7), duration_seconds=_scaled_seconds(duration, 0.7), pace=threshold_pace, hr=quality_hr, rpe=(5, 7)),
-            planned_block(3, "cooldown", "Easy cooldown to bring HR down.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        quality_pace = race_pace if workout_type == "race_pace" and race_pace != (None, None) else threshold_pace
+        warmup_seconds = _scaled_seconds(duration, 0.15)
+        cooldown_seconds = _scaled_seconds(duration, 0.15)
+        work_seconds = capped_work_seconds(duration, workout_type, training_age_level, 0.7)
+        easy_seconds = _remaining_seconds(duration, warmup_seconds, work_seconds, cooldown_seconds)
+        warmup_distance = _scaled(distance, 0.15)
+        cooldown_distance = _scaled(distance, 0.15)
+        work_distance = capped_work_distance(distance, duration, work_seconds, 0.7, 0.7)
+        easy_distance = _remaining_distance(distance, warmup_distance, work_distance, cooldown_distance)
+        blocks = [
+            planned_block(1, "warmup", "Easy warmup and drills before sustained quality.", distance_km=warmup_distance, duration_seconds=warmup_seconds, pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "work", "Sustained controlled quality block below all-out effort.", distance_km=work_distance, duration_seconds=work_seconds, pace=quality_pace, hr=quality_hr, rpe=(5, 7)),
         ]
+        if easy_seconds or easy_distance:
+            blocks.append(planned_block(len(blocks) + 1, "recovery", "Easy aerobic time added so capped hard work still matches the workout target.", distance_km=easy_distance, duration_seconds=easy_seconds, pace=easy_pace, hr=easy_hr, rpe=(2, 4)))
+        blocks.append(planned_block(len(blocks) + 1, "cooldown", "Easy cooldown to bring HR down.", distance_km=cooldown_distance, duration_seconds=cooldown_seconds, pace=easy_pace, hr=recovery_hr, rpe=(1, 3)))
+        return align_blocks_to_workout_targets(blocks, duration, distance)
+    if workout_type == "strides":
+        if duration is not None and duration < 8 * 60:
+            return [planned_block(1, "work", "Workout was shortened below a safe strides duration; keep this as easy aerobic running.", distance_km=distance, duration_seconds=duration, pace=easy_pace, hr=easy_hr, rpe=(2, 4))]
+        repeat_count = min(6, max(2, int((duration or 12 * 60) // (2 * 60))))
+        easy_seconds = _scaled_seconds(duration, 0.7)
+        cooldown_seconds = _scaled_seconds(duration, 0.1)
+        strides_seconds = min(20, max(10, round((duration or 20 * repeat_count) * 0.12 / repeat_count)))
+        recovery_seconds = _remaining_seconds(duration, easy_seconds, strides_seconds * repeat_count, cooldown_seconds)
+        strides_distance = _scaled(distance, 0.02, 2)
+        cooldown_distance = _scaled(distance, 0.08)
+        recovery_distance = _scaled(distance, 0.18 / repeat_count, 2)
+        easy_distance = _remaining_distance(distance, (strides_distance or 0) * repeat_count, (recovery_distance or 0) * repeat_count, cooldown_distance)
+        return align_blocks_to_workout_targets([
+            planned_block(1, "work", "Continuous easy aerobic running before strides.", distance_km=easy_distance, duration_seconds=easy_seconds, pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
+            planned_block(2, "strides", "Short fast relaxed strides; never sprint all-out.", repeat_count=repeat_count, distance_km=strides_distance, duration_seconds=strides_seconds, rpe=(5, 7)),
+            planned_block(3, "recovery", "Full easy jog or walk recovery between strides.", repeat_count=repeat_count, distance_km=recovery_distance, duration_seconds=_per_repeat_seconds(recovery_seconds, repeat_count), pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+            planned_block(4, "cooldown", "Easy cooldown after strides.", distance_km=cooldown_distance, duration_seconds=cooldown_seconds, pace=easy_pace, hr=recovery_hr, rpe=(1, 3)),
+        ], duration, distance)
+    if workout_type == "recovery":
+        return [planned_block(1, "recovery", "Very easy short recovery run; keep it restorative.", distance_km=distance, duration_seconds=duration, pace=easy_pace, hr=recovery_hr, rpe=(1, 3))]
     if workout_type == "steady":
         return [
             planned_block(1, "warmup", "Easy start before aerobic steady work.", distance_km=_scaled(distance, 0.15), duration_seconds=_scaled_seconds(duration, 0.15), pace=easy_pace, hr=easy_hr, rpe=(2, 4)),
@@ -1147,7 +1335,7 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
     recommendations: list[dict[str, object]] = []
 
     missed_recent = [workout for workout in recent if workout.status in {"missed", "skipped"}]
-    missed_key = [workout for workout in missed_recent if workout.workout_type in {"long", "interval", "tempo"}]
+    missed_key = [workout for workout in missed_recent if workout.workout_type == "long" or workout_is_hard(workout)]
     recent_linked = [workout for workout in recent if workout.status == "done" and workout.completed_activity]
     risky_feedback = [
         workout
@@ -1430,7 +1618,7 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
             workout
             for workout in upcoming
             if workout.scheduled_date and workout.scheduled_date <= window_end
-            and (workout.workout_type in {"interval", "tempo"} or (workout.intensity or "") in {"threshold", "interval", "tempo"})
+            and workout_is_hard(workout)
         ]
         hard_workouts.sort(key=lambda workout: (workout.scheduled_date or today, workout.week_index, workout.day_index, workout.id))
         if first_only:
@@ -1917,6 +2105,17 @@ def builder_risk_flags(
     start_date: date,
 ) -> list[dict[str, object]]:
     flags: list[dict[str, object]] = []
+    max_days = max_running_days_for_level(str(baseline.get("training_age_level") or "beginner"))
+    if request.available_days_per_week > max_days:
+        flags.append({
+            "code": "running_days_capped_by_experience",
+            "severity": "warning",
+            "message": "Requested running frequency is above the safe level for current training age.",
+            "reasons": [
+                f"requested days/week: {request.available_days_per_week}",
+                f"effective cap for {baseline.get('training_age_level')}: {max_days}",
+            ],
+        })
     if request.target_date:
         min_weeks = 16 if goal_distance >= 42 else 10 if goal_distance >= 21 else 6 if goal_distance >= 10 else 4
         if request.priority in {"a", "high"}:
@@ -2019,7 +2218,6 @@ def build_plan_preview_blueprint(
     start_date: date,
 ) -> dict[str, object]:
     weeks = plan_weeks_for_request(request, start_date)
-    days = request.available_days_per_week
     goal_distance = goal_distance_for_request(request)
     if request.current_weekly_distance_km is not None:
         current_volume = request.current_weekly_distance_km
@@ -2037,6 +2235,9 @@ def build_plan_preview_blueprint(
     quality_sessions_8w = int(context.get("quality_sessions_8w") or 0)
     detected_training_age_level = classify_training_age_level(current_volume, float(recent_long_run) if recent_long_run is not None else None, consistent_weeks, quality_sessions_8w)
     training_age_level = apply_aggressiveness_override(detected_training_age_level, request.aggressiveness)
+    requested_days = request.available_days_per_week
+    max_running_days = max_running_days_for_level(training_age_level)
+    days = min(requested_days, max_running_days)
     baseline = {
         "observed_weekly_volume_km": context["observed_weekly_volume_km"],
         "current_weekly_volume_km": current_volume,
@@ -2053,7 +2254,15 @@ def build_plan_preview_blueprint(
     safety_context = {**context, "recent_weekly_distance_km": current_volume, "current_weekly_volume_km": current_volume}
     safety = build_safety_context(profile, completeness, safety_context, goal_distance, request)
     conservative = bool(safety["conservative"])
-    has_precise_zones = bool(completeness["can_calculate_pace_zones"] or completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"] or request.intensity_mode == "rpe")
+    has_pace_zones = bool(completeness["can_calculate_pace_zones"])
+    has_hr_zones = bool(completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"])
+    has_threshold_zones = bool(
+        completeness["can_calculate_pace_zones"]
+        or profile.lactate_threshold_hr_bpm
+        or any(str(zone.get("method") or "") in {"threshold_hr", "threshold_pace"} for zone in (zones.get("hr") or []) + (zones.get("pace") or []))
+    )
+    has_precise_zones = bool(has_pace_zones or has_hr_zones or request.intensity_mode == "rpe")
+    can_prescribe_hard = bool(has_precise_zones and (training_age_level != "beginner" or has_threshold_zones))
     easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
     support_settings = support_session_settings(request, str(baseline["training_age_level"]), conservative)
     support_settings, support_limited_by_budget = fit_support_settings_to_time_budget(support_settings, request.time_budget_minutes_per_week, easy_pace_seconds_per_km)
@@ -2108,7 +2317,17 @@ def build_plan_preview_blueprint(
         long_run = min(long_run, week_volume)
         easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
         week_start = start_date + timedelta(days=(week - 1) * 7)
-        week_workouts = workout_template_for_schedule(days, conservative=conservative, has_precise_zones=has_precise_zones, long_run_day_index=long_run_day_index)
+        week_workouts = workout_template_for_schedule(
+            days,
+            conservative=conservative,
+            can_prescribe_hard=can_prescribe_hard,
+            training_age_level=training_age_level,
+            has_pace_zones=has_pace_zones,
+            long_run_day_index=long_run_day_index,
+            week_index=week,
+            weeks=weeks,
+            has_target_time=bool(request.target_time_seconds),
+        )
         week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
             distance = round(long_run if workout_type == "long" else easy_distance, 1)
@@ -2122,6 +2341,8 @@ def build_plan_preview_blueprint(
                 "duration_seconds": max(1, round(distance * easy_pace_seconds_per_km)),
                 "intensity": intensity,
                 "description": wizard_workout_description(workout_description(workout_type, intensity, zones, conservative), request, goal_distance),
+                "training_age_level": training_age_level,
+                "target_race_pace_seconds_per_km": round(request.target_time_seconds / goal_distance) if request.target_time_seconds and goal_distance > 0 else None,
             }
             week_preview_workouts.append(workout)
         if request.time_budget_minutes_per_week:
@@ -2220,6 +2441,9 @@ def build_plan_preview_blueprint(
         "constraints": {
             "injury": request.injury,
             "no_hard_workouts": request.no_hard_workouts,
+            "requested_available_days_per_week": requested_days,
+            "max_running_days_for_level": max_running_days,
+            "running_days_capped_by_experience": requested_days != days,
             "max_long_run_km": max_long_run_km,
             "requested_max_long_run_km": request.max_long_run_km,
             "default_max_long_run_km": default_max_long_run_km,
