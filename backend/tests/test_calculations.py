@@ -2,9 +2,19 @@ import unittest
 from datetime import date
 
 from app.services.calculations import (
+    ACSM_REF,
+    BANISTER_REF,
+    DANIELS_REF,
+    FOSTER_REF,
+    KARVONEN_REF,
+    LTHR_REF,
+    RIEGEL_REF,
+    RPE_SCALE_REF,
+    TANAKA_REF,
     age_from_birthdate,
     calculate_acsm_running_energy_kcal,
     calculate_ctl_atl_tsb,
+    calculate_hrmax_zones,
     calculate_hr_trimp,
     calculate_hrr_zones,
     calculate_monotony_strain,
@@ -15,12 +25,18 @@ from app.services.calculations import (
     calculate_threshold_hr_zones,
     calculate_threshold_pace_zones,
     calculate_vdot,
+    calculate_weighted_average_pace,
     estimate_hrmax_tanaka,
     predict_riegel_time,
 )
 
 
 class CalculationTests(unittest.TestCase):
+    def assertZoneSource(self, zones, source_reference):
+        self.assertTrue(zones)
+        for zone in zones:
+            self.assertEqual(zone["source_reference"], source_reference)
+
     def test_pace_and_speed(self):
         self.assertEqual(calculate_pace_seconds_per_km(1800, 5).value, 360)
         self.assertEqual(calculate_speed_kmh(10, 3600).value, 10.0)
@@ -114,6 +130,27 @@ class CalculationTests(unittest.TestCase):
     def test_hr_trimp_requires_valid_sex_and_hr_reserve(self):
         self.assertIsNone(calculate_hr_trimp(60, 160, 50, 190, sex="unspecified").value)
         self.assertIsNone(calculate_hr_trimp(60, 160, 190, 190, sex="male").value)
+
+    def test_public_calculations_have_source_references(self):
+        self.assertEqual(calculate_pace_seconds_per_km(1800, 5).source_reference, ACSM_REF)
+        self.assertEqual(calculate_speed_kmh(10, 3600).source_reference, ACSM_REF)
+        self.assertEqual(calculate_weighted_average_pace([(5, 1500), (3, 960)]).source_reference, ACSM_REF)
+        self.assertEqual(estimate_hrmax_tanaka(35).source_reference, TANAKA_REF)
+        self.assertZoneSource(calculate_hrr_zones(50, 190), KARVONEN_REF)
+        self.assertZoneSource(calculate_hrmax_zones(190), ACSM_REF)
+        self.assertZoneSource(calculate_threshold_hr_zones(170), LTHR_REF)
+        self.assertZoneSource(calculate_threshold_pace_zones(324), DANIELS_REF)
+        self.assertZoneSource(calculate_rpe_zones(), RPE_SCALE_REF)
+        self.assertEqual(calculate_vdot(5, 1200).source_reference, DANIELS_REF)
+        self.assertEqual(predict_riegel_time(5, 1200, 10).source_reference, RIEGEL_REF)
+        self.assertEqual(calculate_srpe_load(60, 5).source_reference, FOSTER_REF)
+        self.assertEqual(calculate_acsm_running_energy_kcal(10, 3000, 70).source_reference, ACSM_REF)
+        self.assertEqual(calculate_hr_trimp(60, 160, 50, 190, sex="male").source_reference, BANISTER_REF)
+        self.assertEqual(calculate_ctl_atl_tsb([50])["ctl"].source_reference, BANISTER_REF)
+        self.assertEqual(calculate_ctl_atl_tsb([50])["atl"].source_reference, BANISTER_REF)
+        self.assertEqual(calculate_ctl_atl_tsb([50])["tsb"].source_reference, BANISTER_REF)
+        self.assertEqual(calculate_monotony_strain([100, 80, 120])["monotony"].source_reference, FOSTER_REF)
+        self.assertEqual(calculate_monotony_strain([100, 80, 120])["strain"].source_reference, FOSTER_REF)
 
 
 if __name__ == "__main__":

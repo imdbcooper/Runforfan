@@ -144,6 +144,7 @@ API настроек AI:
 - История измерений хранится отдельно в `athlete_measurements` и может обновлять актуальные поля профиля.
 - `GET /api/profile/measurements` отдает bounded timeline с `limit`/`offset` и включает legacy `lactate_threshold_measurements`, чтобы старые импортированные пороги были видны рядом с новыми ручными измерениями.
 - Расчеты вынесены в `backend/app/services/calculations.py` и возвращают `value`, `unit`, `method`, `confidence`, `source_reference`.
+- Source reference map для расчетов: pace/speed/weighted pace and HRmax zones use `ACSM Position Stand 2011, PMID 21694556`; HRmax estimate uses `Tanaka, Monahan, Seals 2001, PMID 11153730`; HRR zones use `Karvonen et al. 1957 heart-rate reserve method`; threshold HR zones use `Lactate-threshold heart-rate zone model`; threshold pace zones and VDOT use `Daniels/Gilbert oxygen power VDOT model`; race predictions use `Riegel 1981 race prediction power law`; sRPE, monotony and strain use `Foster et al. 2001 session RPE, PMID 11708692`; HR TRIMP and CTL/ATL/TSB use `Banister impulse-response fitness/fatigue model`; RPE zones use `Modified Borg CR10 session-RPE scale`.
 - HR-зоны считаются через HRR/Karvonen, если есть HRmax и пульс покоя; иначе через HRmax/Tanaka-derived estimate при наличии даты рождения.
 - Pace-зоны считаются от lactate threshold pace.
 - Ручные зоны сохраняются отдельно и имеют приоритет над расчетными зонами соответствующего типа.
