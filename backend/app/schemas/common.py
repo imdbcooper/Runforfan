@@ -1090,3 +1090,47 @@ class PlanRecommendationApplyOut(BaseModel):
     changes: list[PlanRecommendationChangeOut]
     skipped: list[dict] = Field(default_factory=list)
     plan: PlanOut
+
+
+class IntegrationOut(BaseModel):
+    id: str
+    name: str
+    category: str
+    status: str
+    configured: bool
+    description: str
+    details: dict[str, object] = Field(default_factory=dict)
+
+
+class CsvImportOut(BaseModel):
+    id: int
+    status: str
+    source_app: str = "csv"
+    created_activities: int
+    skipped_duplicates: int
+    failed_rows: int
+    matched_workouts: int
+    created_activity_ids: list[int] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    recognition_message: str | None = None
+
+
+class AccountDataDeleteIn(BaseModel):
+    confirmation: str = Field(pattern="^DELETE$")
+
+
+class AccountDataDeleteOut(BaseModel):
+    deleted: bool
+    counts: dict[str, int]
+    audit_id: int | None = None
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: int | None = None
+    metadata_json: dict[str, object] | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

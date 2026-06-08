@@ -22,6 +22,7 @@ class FakeDb:
     def __init__(self, provider: LlmProviderSetting, providers: list[LlmProviderSetting] | None = None):
         self.provider = provider
         self.providers = providers or [provider]
+        self.added = []
         self.committed = False
 
     def scalar(self, query):
@@ -31,6 +32,12 @@ class FakeDb:
         return self.providers
 
     def execute(self, query):
+        return None
+
+    def add(self, item):
+        self.added.append(item)
+
+    def flush(self):
         return None
 
     def commit(self):

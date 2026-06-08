@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -52,7 +52,7 @@ const nav = [
   ["goals", "Goals & races", Goal],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
-  ["settings", "LLM providers", Settings],
+  ["settings", "Settings & data", Settings],
 ] as const
 
 function formatPace(seconds?: number | null) {
@@ -593,6 +593,7 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
 function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   const [imports, setImports] = useState<ImportBatch[]>([])
   const [uploadResult, setUploadResult] = useState<ImportUploadResult | null>(null)
+  const [csvResult, setCsvResult] = useState<CsvImportResult | null>(null)
   const [matchCandidates, setMatchCandidates] = useState<PlanWorkoutMatchCandidate[]>([])
   const [candidateError, setCandidateError] = useState("")
   const [linkError, setLinkError] = useState("")
@@ -660,6 +661,33 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     }
   }
 
+  async function uploadCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const input = form.elements.namedItem("csv_file") as HTMLInputElement | null
+    const file = input?.files?.[0]
+    if (!file) {
+      setMessage("Выберите CSV файл.")
+      return
+    }
+    setBusy(true)
+    setMessage("CSV import is running...")
+    try {
+      await devLogin()
+      const result = await api.uploadCsv(file, stringOrNull(new FormData(form).get("source_app")) || "csv")
+      setCsvResult(result)
+      setMessage(result.recognition_message || "CSV import completed")
+      await loadImports()
+      await onChanged()
+      form.reset()
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? error.message : "CSV import failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function linkCandidate(candidate: PlanWorkoutMatchCandidate) {
     if (!uploadResult?.created_activity_id) return
     setBusy(true)
@@ -681,17 +709,34 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   useEffect(() => { void loadImports() }, [])
 
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <Card>
-      <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">LLM recognition or supported template fallback.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
-      <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
-        <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
-        <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
-      </form>
-      <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
-        <p className="leading-5">{message}</p>
-        <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
-      </div>
-    </Card>
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">LLM recognition or supported template fallback.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
+        <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
+          <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
+          <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
+        </form>
+        <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
+          <p className="leading-5">{message}</p>
+          <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
+        </div>
+      </Card>
+      <Card>
+        <CardHeader><div><CardTitle>CSV import</CardTitle><p className="text-xs text-zinc-500">Import date, distance, duration, pace and HR columns.</p></div><Badge>6.18</Badge></CardHeader>
+        <form onSubmit={uploadCsv} className="grid gap-3 p-4 text-xs">
+          <Field label="CSV file"><Input name="csv_file" type="file" accept=".csv,text/csv" required /></Field>
+          <Field label="Source app"><Input name="source_app" defaultValue="csv" placeholder="garmin, strava, manual" /></Field>
+          <Button type="submit" disabled={busy}>{busy ? "Importing..." : "Import CSV"}</Button>
+        </form>
+        {csvResult ? <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
+          <Stat label="created" value={csvResult.created_activities} />
+          <Stat label="duplicates" value={csvResult.skipped_duplicates} />
+          <Stat label="matched" value={csvResult.matched_workouts} />
+          <Stat label="failed" value={csvResult.failed_rows} />
+          {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
+        </div> : null}
+      </Card>
+    </div>
 
     <div className="grid gap-4">
       <Card>
@@ -2765,6 +2810,25 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
   const [busyProvider, setBusyProvider] = useState<number | null>(null)
   const [message, setMessage] = useState("")
   const [testResults, setTestResults] = useState<Record<number, LlmProviderTest>>({})
+  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([])
+  const [dataMessage, setDataMessage] = useState("")
+  const [deleteConfirm, setDeleteConfirm] = useState("")
+  const [dataBusy, setDataBusy] = useState(false)
+
+  async function loadDataManagement() {
+    try {
+      await devLogin()
+      const [nextIntegrations, nextAuditLog] = await Promise.all([api.integrations(), api.auditLog(100, 0)])
+      setIntegrations(nextIntegrations)
+      setAuditLog(nextAuditLog)
+    } catch (error) {
+      console.error(error)
+      setDataMessage("Не удалось загрузить integrations/audit log")
+    }
+  }
+
+  useEffect(() => { void loadDataManagement() }, [])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2854,7 +2918,48 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
     }
   }
 
-  return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
+  async function downloadExport() {
+    setDataBusy(true)
+    setDataMessage("")
+    try {
+      await devLogin()
+      const exported = await api.exportData()
+      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `runforfan-export-${new Date().toISOString().slice(0, 10)}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+      setDataMessage("Export generated. Secrets are omitted; provider keys are represented as has_api_key only.")
+      await loadDataManagement()
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Failed to export data")
+    } finally {
+      setDataBusy(false)
+    }
+  }
+
+  async function deleteAccountData() {
+    if (deleteConfirm !== "DELETE") return
+    setDataBusy(true)
+    setDataMessage("")
+    try {
+      await devLogin()
+      const result = await api.deleteAccountData("DELETE")
+      setDataMessage(`Deleted account-scoped data. Audit #${result.audit_id ?? "--"}.`)
+      setDeleteConfirm("")
+      await onChanged()
+      await loadDataManagement()
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Failed to delete account data")
+    } finally {
+      setDataBusy(false)
+    }
+  }
+
+  return <div className="grid gap-4">
+    <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card><CardHeader><div><CardTitle>Add LLM provider</CardTitle><p className="text-xs text-zinc-500">OpenAI-compatible and Anthropic providers for recognition and explanations. Keys are never returned to the frontend.</p></div><Badge>6.17</Badge></CardHeader><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
       <Field label="Provider"><Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select></Field>
       <Field label="Display name"><Input name="display_name" placeholder="Display name" required /></Field>
@@ -2884,6 +2989,34 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         {result ? <div className={`rounded-md border px-2 py-1.5 text-xs ${result.ok ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/20 bg-orange-400/10 text-orange-100"}`}>{result.status} · {result.response_ms ?? "--"} ms · vision {result.supports_vision ? "likely" : "unknown"}<div className="mt-1 text-zinc-500">{result.message}</div></div> : null}
       </div>
     })}{!providers.length ? <p className="p-4 text-xs text-zinc-500">No active providers yet.</p> : null}</div></Card>
+    </div>
+    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+      <Card>
+        <CardHeader><div><CardTitle>Integrations</CardTitle><p className="text-xs text-zinc-500">Configured and planned data sources.</p></div><Button size="sm" variant="secondary" onClick={loadDataManagement}>Refresh</Button></CardHeader>
+        <div className="divide-y divide-zinc-800">{integrations.map((integration) => <div key={integration.id} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[1fr_auto] md:items-start">
+          <div><p className="font-medium text-white">{integration.name}</p><p className="mt-1 text-zinc-500">{integration.description}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">{integration.category} · {integration.id}</p></div>
+          <Badge className={integration.configured ? "border-zinc-700 bg-zinc-900 text-zinc-300" : integration.status === "planned" ? "border-zinc-800 bg-zinc-950 text-zinc-500" : "border-orange-400/30 bg-orange-400/10 text-orange-200"}>{integration.status}</Badge>
+        </div>)}{!integrations.length ? <p className="p-4 text-xs text-zinc-500">No integration data loaded.</p> : null}</div>
+      </Card>
+      <Card>
+        <CardHeader><div><CardTitle>Data management</CardTitle><p className="text-xs text-zinc-500">Export current user data or wipe account-scoped records.</p></div><Badge>6.18</Badge></CardHeader>
+        <div className="grid gap-3 p-4 text-xs">
+          <Button type="button" disabled={dataBusy} onClick={downloadExport}>{dataBusy ? "Working..." : "Download JSON export"}</Button>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">Export omits API keys and local screenshot file paths. It includes user-scoped activities, plans, goals, profile, providers without secrets, imports and audit log.</div>
+          <div className="grid gap-2 rounded-md border border-orange-400/20 bg-orange-400/10 p-3">
+            <p className="font-medium text-orange-100">Danger zone: delete account data</p>
+            <p className="text-orange-100/80">This keeps the user/session but deletes activities, plans, goals, profile, zones, imports, provider settings and prior audit rows.</p>
+            <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} placeholder="Type DELETE to confirm" />
+            <Button type="button" variant="secondary" disabled={dataBusy || deleteConfirm !== "DELETE"} onClick={deleteAccountData}>Delete user data</Button>
+          </div>
+          {dataMessage ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">{dataMessage}</p> : null}
+        </div>
+      </Card>
+    </div>
+    <Card>
+      <CardHeader><div><CardTitle>Audit log</CardTitle><p className="text-xs text-zinc-500">Recent user-scoped import, provider, export and delete events.</p></div><Badge>{auditLog.length} events</Badge></CardHeader>
+      <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500">{new Date(event.created_at).toLocaleString("ru-RU")}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></td><td className="text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
+    </Card>
   </div>
 }
 

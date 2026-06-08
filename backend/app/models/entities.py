@@ -32,6 +32,7 @@ class User(Base, TimestampMixin):
     measurements: Mapped[list["AthleteMeasurement"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     training_zones: Mapped[list["TrainingZone"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     performance_results: Mapped[list["PerformanceResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -411,3 +412,17 @@ class TrainingPlanRecommendationAudit(Base):
     preview_changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     applied_changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    entity_type: Mapped[str] = mapped_column(String(64))
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user: Mapped[User] = relationship(back_populates="audit_logs")

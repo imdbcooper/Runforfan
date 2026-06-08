@@ -219,6 +219,24 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(32) NOT NULL DEFAULT 'normal'",
         ),
     ),
+    (
+        "20260608_0011_audit_log",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                action VARCHAR(64) NOT NULL,
+                entity_type VARCHAR(64) NOT NULL,
+                entity_id INTEGER,
+                metadata_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_audit_log_user_id ON audit_log (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_log_created_at ON audit_log (created_at)",
+        ),
+    ),
 )
 
 

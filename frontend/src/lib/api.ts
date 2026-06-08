@@ -43,6 +43,16 @@ export type LlmProviderTest = {
   message: string
 }
 
+export type Integration = {
+  id: string
+  name: string
+  category: string
+  status: string
+  configured: boolean
+  description: string
+  details: Record<string, unknown>
+}
+
 export type ImportBatch = {
   id: number
   status: string
@@ -59,6 +69,28 @@ export type ImportBatch = {
 export type ImportUploadResult = Omit<ImportBatch, "source_app" | "created_at"> & {
   source_app?: string | null
   created_at?: string
+}
+
+export type CsvImportResult = {
+  id: number
+  status: string
+  source_app: string
+  created_activities: number
+  skipped_duplicates: number
+  failed_rows: number
+  matched_workouts: number
+  created_activity_ids: number[]
+  errors: string[]
+  recognition_message: string | null
+}
+
+export type AuditLogEntry = {
+  id: number
+  action: string
+  entity_type: string
+  entity_id: number | null
+  metadata_json: Record<string, unknown> | null
+  created_at: string
 }
 
 export type GoalProgress = {
@@ -895,6 +927,12 @@ export const api = {
     files.forEach((file) => data.append("screenshots", file))
     return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
   },
+  uploadCsv: (file: File, sourceApp = "csv") => {
+    const data = new FormData()
+    data.append("csv_file", file)
+    data.append("source_app", sourceApp)
+    return request<CsvImportResult>("/imports/csv", { method: "POST", body: data })
+  },
   analytics: (params = "") => request<AnalyticsSummary>(`/analytics/summary${params}`),
   analyticsTimeseries: (params = "") => request<AnalyticsTimeseries>(`/analytics/timeseries${params}`),
   analyticsInsights: (params = "") => request<AnalyticsInsight[]>(`/analytics/insights${params}`),
@@ -955,6 +993,10 @@ export const api = {
   setDefaultProvider: (id: number) => request<LlmProvider>(`/settings/llm-providers/${id}/default`, { method: "POST", body: "{}" }),
   testProvider: (id: number) => request<LlmProviderTest>(`/settings/llm-providers/${id}/test`, { method: "POST", body: "{}" }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
+  integrations: () => request<Integration[]>("/settings/integrations"),
+  exportData: () => request<Record<string, unknown>>("/export"),
+  deleteAccountData: (confirmation: "DELETE") => request<{ deleted: boolean; counts: Record<string, number>; audit_id: number | null }>("/account/data", { method: "DELETE", body: JSON.stringify({ confirmation }) }),
+  auditLog: (limit = 100, offset = 0) => request<AuditLogEntry[]>(`/audit-log?limit=${limit}&offset=${offset}`),
   previewPlan: (payload: Record<string, unknown>) => request<PlanBuilderPreview>("/planning/preview", { method: "POST", body: JSON.stringify(payload) }),
   generatePlan: (payload: Record<string, unknown>) => request<Plan>("/planning/generate", { method: "POST", body: JSON.stringify(payload) }),
 }

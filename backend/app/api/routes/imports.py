@@ -3,20 +3,24 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
 from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
+from app.schemas.common import CsvImportOut
+from app.services.audit import log_audit_event
 from app.services.auth import get_current_user
+from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
 from app.services.planning import auto_match_activity_to_plan
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
 
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_CSV_EXTENSIONS = {".csv", ".txt"}
 
 
 def safe_filename(filename: str) -> str:
@@ -183,6 +187,11 @@ def upload_screenshots(
         batch.recognition_engine = "unknown"
         batch.recognition_message = "Recognition failed unexpectedly. Check provider settings or uploaded screenshots."
 
+    log_audit_event(db, user.id, "import.screenshots", "import_batch", batch.id, {
+        "status": batch.status,
+        "created_activity_id": batch.created_activity_id,
+        "recognition_engine": batch.recognition_engine,
+    })
     db.commit()
     matched_workout_id = matched_workout.id if matched_workout else matched_workout_id_for_activity(db, user, batch.created_activity_id)
     match_status = "auto_matched" if matched_workout else "already_matched" if matched_workout_id else "unmatched"
@@ -196,3 +205,84 @@ def upload_screenshots(
         "match_status": match_status,
         "auto_matched": bool(matched_workout),
     }
+
+
+@router.post("/csv", response_model=CsvImportOut)
+def upload_csv(
+    csv_file: UploadFile = File(...),
+    source_app: str = Form(default="csv"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    filename = safe_filename(csv_file.filename or "activities.csv")
+    if Path(filename).suffix.lower() not in ALLOWED_CSV_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename}")
+    raw = csv_file.file.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="CSV file is too large; limit is 5 MB")
+    try:
+        rows = iter_csv_rows(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}") from exc
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV file has no data rows")
+
+    source_label = (source_app or "csv")[:100]
+    batch = ImportBatch(user_id=user.id, status="processing", source_app=source_label, recognition_engine="csv")
+    db.add(batch)
+    db.flush()
+
+    created_ids: list[int] = []
+    skipped_duplicates = 0
+    matched_workouts = 0
+    errors: list[str] = []
+    for row_number, row in enumerate(rows, start=2):
+        try:
+            payload = activity_payload_from_csv_row(row, row_number, filename)
+        except Exception as exc:
+            errors.append(str(exc)[:250])
+            continue
+        created_activity_id = None
+        duplicate = False
+        matched = False
+        try:
+            with db.begin_nested():
+                activity, created = create_activity_from_csv_payload(db, user, payload)
+                if created:
+                    matched = bool(auto_match_activity_to_plan(db, user, activity))
+                    created_activity_id = activity.id
+                else:
+                    duplicate = True
+        except Exception as exc:
+            errors.append(str(exc)[:250])
+            continue
+        if created_activity_id is not None:
+            created_ids.append(created_activity_id)
+            if matched:
+                matched_workouts += 1
+        elif duplicate:
+            skipped_duplicates += 1
+
+    batch.created_activity_id = created_ids[0] if len(created_ids) == 1 else None
+    batch.status = "failed" if not created_ids and not skipped_duplicates else "partial_failed" if errors else "imported"
+    batch.recognition_message = f"CSV import: {len(created_ids)} created, {skipped_duplicates} duplicates, {len(errors)} failed, {matched_workouts} matched."
+    log_audit_event(db, user.id, "import.csv", "import_batch", batch.id, {
+        "source_app": source_label,
+        "created_activities": len(created_ids),
+        "skipped_duplicates": skipped_duplicates,
+        "failed_rows": len(errors),
+        "matched_workouts": matched_workouts,
+    })
+    db.commit()
+    return CsvImportOut(
+        id=batch.id,
+        status=batch.status,
+        source_app=source_label,
+        created_activities=len(created_ids),
+        skipped_duplicates=skipped_duplicates,
+        failed_rows=len(errors),
+        matched_workouts=matched_workouts,
+        created_activity_ids=created_ids,
+        errors=errors[:50],
+        recognition_message=batch.recognition_message,
+    )

@@ -4,6 +4,7 @@ from app.models.entities import (  # noqa: F401
     ActivityScreenshot,
     ActivitySplitBlock,
     ActivityWorkoutBlock,
+    AuditLog,
     AthleteMeasurement,
     AthleteProfile,
     AuthSession,

@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.db.session import get_db
 from app.models import LlmProviderSetting, User
-from app.schemas.common import LlmProviderCreate, LlmProviderOut, LlmProviderTestOut, LlmProviderUpdate
+from app.schemas.common import IntegrationOut, LlmProviderCreate, LlmProviderOut, LlmProviderTestOut, LlmProviderUpdate
+from app.services.audit import log_audit_event
 from app.services.auth import get_current_user
 from app.services.llm_providers import provider_endpoint_url, provider_supports_vision
 from app.services.secrets import decrypt_secret, encrypt_secret
@@ -143,6 +144,60 @@ def list_llm_providers(user: User = Depends(get_current_user), db: Session = Dep
     return [provider_out(provider) for provider in providers]
 
 
+@router.get("/integrations", response_model=list[IntegrationOut])
+def list_integrations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    settings = get_settings()
+    providers = list(db.scalars(select(LlmProviderSetting).where(LlmProviderSetting.user_id == user.id, LlmProviderSetting.is_active.is_(True))))
+    vision_count = sum(1 for provider in providers if provider_supports_vision(provider))
+    return [
+        IntegrationOut(
+            id="screenshots",
+            name="Screenshot recognition",
+            category="import",
+            status="available",
+            configured=True,
+            description="Upload running app screenshots and create activities through deterministic templates or vision LLM recognition.",
+            details={"max_files_per_batch": 6, "vision_providers": vision_count},
+        ),
+        IntegrationOut(
+            id="csv",
+            name="CSV activity import",
+            category="import",
+            status="available",
+            configured=True,
+            description="Import activity history from CSV files with date, distance, duration, pace and heart-rate columns.",
+            details={"formats": ["utf-8", "cp1251"], "dedupe": "started_at+distance+duration"},
+        ),
+        IntegrationOut(
+            id="llm-providers",
+            name="User LLM providers",
+            category="ai",
+            status="configured" if providers else "needs_configuration",
+            configured=bool(providers),
+            description="OpenAI-compatible and Anthropic providers for recognition and coaching explanations.",
+            details={"active_count": len(providers), "vision_count": vision_count},
+        ),
+        IntegrationOut(
+            id="telegram",
+            name="Telegram login",
+            category="auth",
+            status="configured" if settings.telegram_bot_token else "development_only",
+            configured=bool(settings.telegram_bot_token),
+            description="Telegram authentication is supported when RUNFORFAN_TELEGRAM_BOT_TOKEN is configured.",
+            details={"demo_login": True},
+        ),
+        IntegrationOut(
+            id="garmin-strava",
+            name="Garmin / Strava connectors",
+            category="sync",
+            status="planned",
+            configured=False,
+            description="Direct OAuth sync is planned; use CSV import for external activity history today.",
+            details={},
+        ),
+    ]
+
+
 @router.post("/llm-providers", response_model=LlmProviderOut)
 def create_llm_provider(payload: LlmProviderCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     has_active_provider = db.scalar(select(LlmProviderSetting.id).where(LlmProviderSetting.user_id == user.id, LlmProviderSetting.is_active.is_(True)).limit(1)) is not None
@@ -159,6 +214,8 @@ def create_llm_provider(payload: LlmProviderCreate, user: User = Depends(get_cur
         is_default=is_default,
     )
     db.add(provider)
+    db.flush()
+    log_audit_event(db, user.id, "provider.created", "llm_provider", provider.id, {"provider": provider.provider, "model": provider.model})
     db.commit()
     db.refresh(provider)
     return provider_out(provider)
@@ -169,6 +226,7 @@ def set_default_provider(provider_id: int, user: User = Depends(get_current_user
     provider = provider_for_user(db, user, provider_id)
     db.execute(update(LlmProviderSetting).where(LlmProviderSetting.user_id == user.id).values(is_default=False))
     provider.is_default = True
+    log_audit_event(db, user.id, "provider.default_set", "llm_provider", provider.id, {"display_name": provider.display_name})
     db.commit()
     db.refresh(provider)
     return provider_out(provider)
@@ -193,6 +251,7 @@ def update_llm_provider(provider_id: int, payload: LlmProviderUpdate, user: User
     elif updates.get("is_default") is False:
         provider.is_default = False
         ensure_default_provider(db, user.id, exclude_provider_id=provider.id)
+    log_audit_event(db, user.id, "provider.updated", "llm_provider", provider.id, {"fields": sorted(updates.keys())})
     db.commit()
     db.refresh(provider)
     return provider_out(provider)
@@ -201,7 +260,10 @@ def update_llm_provider(provider_id: int, payload: LlmProviderUpdate, user: User
 @router.post("/llm-providers/{provider_id}/test", response_model=LlmProviderTestOut)
 def test_llm_provider(provider_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     provider = provider_for_user(db, user, provider_id)
-    return test_provider_connection(provider)
+    result = test_provider_connection(provider)
+    log_audit_event(db, user.id, "provider.tested", "llm_provider", provider.id, {"ok": result.ok, "status": result.status})
+    db.commit()
+    return result
 
 
 @router.delete("/llm-providers/{provider_id}")
@@ -210,5 +272,6 @@ def delete_llm_provider(provider_id: int, user: User = Depends(get_current_user)
     provider.is_active = False
     provider.is_default = False
     ensure_default_provider(db, user.id, exclude_provider_id=provider.id)
+    log_audit_event(db, user.id, "provider.deleted", "llm_provider", provider.id, {"display_name": provider.display_name})
     db.commit()
     return {"deleted": True, "id": provider_id}
