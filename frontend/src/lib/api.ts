@@ -291,11 +291,17 @@ export type PlannedWorkoutBlock = {
 export type PlanWorkoutFeedback = {
   id: number
   workout_id: number
+  activity_id: number | null
+  completion_status: string | null
   rpe: number | null
+  soreness_0_10: number | null
   fatigue: number | null
   pain: boolean
   pain_level: number | null
+  sleep_quality_0_10: number | null
   sleep_quality: number | null
+  pain_notes: string | null
+  user_notes: string | null
   weather_notes: string | null
   notes: string | null
   created_at: string

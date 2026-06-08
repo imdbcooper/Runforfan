@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime
 
 try:
     from app.models import TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
-    from app.schemas.common import PlanWorkoutCompleteIn, PlanWorkoutFeedbackPatchIn
-    from app.services.planning import complete_workout, patch_workout_feedback, workout_execution_score
+    from app.schemas.common import PlanWorkoutCompleteIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
+    from app.services.planning import complete_workout, feedback_to_dict, patch_workout_feedback, update_workout, workout_execution_score
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         raise unittest.SkipTest("Backend dependencies are required for workout completion tests") from exc
@@ -78,10 +78,11 @@ class WorkoutCompletionTests(unittest.TestCase):
             actual_duration_seconds=3300,
             completed_at=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
             rpe=4,
-            fatigue=3,
-            sleep_quality=7,
+            soreness_0_10=3,
+            sleep_quality_0_10=7,
+            pain_notes="none",
+            user_notes="felt good",
             weather_notes="warm",
-            notes="felt good",
         ))
 
         self.assertEqual(workout.status, "done")
@@ -90,30 +91,70 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertEqual(workout.completed_activity.duration_seconds, 3300)
         self.assertEqual(workout.completed_activity.activity_type, "manual_workout")
         self.assertEqual(workout.feedback.rpe, 4)
+        self.assertEqual(workout.feedback.soreness_0_10, 3)
+        self.assertEqual(workout.feedback.fatigue, 3)
+        self.assertEqual(workout.feedback.sleep_quality_0_10, 7)
+        self.assertEqual(workout.feedback.sleep_quality, 7)
+        self.assertEqual(workout.feedback.pain_notes, "none")
+        self.assertEqual(workout.feedback.user_notes, "felt good")
+        self.assertEqual(workout.feedback.notes, "felt good")
+        self.assertEqual(workout.feedback.activity_id, workout.completed_activity_id)
+        self.assertEqual(workout.feedback.completion_status, "done")
         self.assertEqual(workout.feedback.weather_notes, "warm")
         self.assertTrue(db.committed)
 
     def test_patch_feedback_preserves_unset_values(self):
         workout = make_workout(status="done")
-        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, rpe=7, fatigue=6, weather_notes="rain", notes="old")
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, rpe=7, soreness_0_10=6, fatigue=6, weather_notes="rain", user_notes="old", notes="old")
         db = FakeDb()
 
-        feedback = patch_workout_feedback(db, make_user(), workout, PlanWorkoutFeedbackPatchIn(notes="new"))
+        feedback = patch_workout_feedback(db, make_user(), workout, PlanWorkoutFeedbackPatchIn(user_notes="new"))
 
         self.assertEqual(feedback.rpe, 7)
         self.assertEqual(feedback.fatigue, 6)
+        self.assertEqual(feedback.soreness_0_10, 6)
         self.assertEqual(feedback.weather_notes, "rain")
+        self.assertEqual(feedback.user_notes, "new")
         self.assertEqual(feedback.notes, "new")
         self.assertTrue(db.committed)
 
+    def test_feedback_dict_returns_spec_fields_with_workout_fallbacks(self):
+        workout = make_workout(status="done")
+        workout.completed_activity_id = 44
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, rpe=5, fatigue=4, sleep_quality=8, notes="legacy")
+
+        feedback = feedback_to_dict(workout.feedback, workout)
+
+        self.assertEqual(feedback["activity_id"], 44)
+        self.assertEqual(feedback["completion_status"], "done")
+        self.assertEqual(feedback["soreness_0_10"], 4)
+        self.assertEqual(feedback["sleep_quality_0_10"], 8)
+        self.assertEqual(feedback["user_notes"], "legacy")
+
     def test_complete_workout_can_clear_existing_pain_feedback(self):
         workout = make_workout(status="missed")
-        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, pain=True, pain_level=6)
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, soreness_0_10=6, fatigue=6, pain=True, pain_level=6, sleep_quality_0_10=3, sleep_quality=3, user_notes="old", notes="old")
 
-        complete_workout(FakeDb(), make_user(), workout, PlanWorkoutCompleteIn(actual_duration_seconds=3000, pain=False))
+        complete_workout(FakeDb(), make_user(), workout, PlanWorkoutCompleteIn(actual_duration_seconds=3000, soreness_0_10=None, pain=False, sleep_quality_0_10=None, user_notes=None))
 
+        self.assertIsNone(workout.feedback.soreness_0_10)
+        self.assertIsNone(workout.feedback.fatigue)
         self.assertFalse(workout.feedback.pain)
         self.assertIsNone(workout.feedback.pain_level)
+        self.assertIsNone(workout.feedback.sleep_quality_0_10)
+        self.assertIsNone(workout.feedback.sleep_quality)
+        self.assertIsNone(workout.feedback.user_notes)
+        self.assertIsNone(workout.feedback.notes)
+
+    def test_update_workout_syncs_feedback_context_on_unlink(self):
+        workout = make_workout(status="done")
+        workout.completed_activity_id = 123
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=10, activity_id=123, completion_status="done")
+
+        update_workout(FakeDb(), make_user(), workout, PlanWorkoutUpdate(completed_activity_id=None))
+
+        self.assertIsNone(workout.feedback.activity_id)
+        self.assertEqual(workout.feedback.completion_status, "planned")
 
     def test_execution_score_marks_overdone_volume(self):
         workout = make_workout(status="planned", distance_km=10.0, workout_type="interval")

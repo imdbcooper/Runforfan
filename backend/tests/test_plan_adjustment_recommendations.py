@@ -272,22 +272,29 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         workout = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
         make_plan(workout)
 
-        feedback = save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, fatigue=7, pain=False, sleep_quality=5))
+        feedback = save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, soreness_0_10=7, pain=False, sleep_quality_0_10=5, user_notes="heavy"))
 
         self.assertEqual(feedback.rpe, 8)
+        self.assertEqual(feedback.soreness_0_10, 7)
         self.assertEqual(workout.feedback.fatigue, 7)
+        self.assertEqual(workout.feedback.sleep_quality, 5)
+        self.assertEqual(workout.feedback.notes, "heavy")
+        self.assertEqual(workout.feedback.activity_id, 101)
+        self.assertEqual(workout.feedback.completion_status, "done")
 
     def test_feedback_put_replaces_old_values_and_clears_pain_level(self):
         workout = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
         make_plan(workout)
-        save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, fatigue=9, pain=True, pain_level=5, notes="old"))
+        save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=8, soreness_0_10=9, pain=True, pain_level=5, user_notes="old"))
 
         feedback = save_workout_feedback(FakeDb(), make_user(), workout, PlanWorkoutFeedbackIn(rpe=4, pain=False))
 
         self.assertEqual(feedback.rpe, 4)
         self.assertIsNone(feedback.fatigue)
+        self.assertIsNone(feedback.soreness_0_10)
         self.assertFalse(feedback.pain)
         self.assertIsNone(feedback.pain_level)
+        self.assertIsNone(feedback.user_notes)
         self.assertIsNone(feedback.notes)
 
     def test_feedback_rejected_on_planned_workout(self):

@@ -696,17 +696,31 @@ def create_workout_block_from_dict(block: dict[str, object]) -> TrainingPlanWork
     )
 
 
-def feedback_to_dict(feedback: TrainingPlanWorkoutFeedback | None) -> dict[str, object] | None:
+def feedback_to_dict(feedback: TrainingPlanWorkoutFeedback | None, workout: TrainingPlanWorkout | None = None) -> dict[str, object] | None:
     if feedback is None:
         return None
+    activity_id = feedback.activity_id
+    completion_status = feedback.completion_status
+    if workout is not None:
+        activity_id = workout.completed_activity_id or (workout.completed_activity.id if workout.completed_activity else None)
+        completion_status = workout.status
+    soreness = feedback.soreness_0_10 if feedback.soreness_0_10 is not None else feedback.fatigue
+    sleep_quality = feedback.sleep_quality_0_10 if feedback.sleep_quality_0_10 is not None else feedback.sleep_quality
+    user_notes = feedback.user_notes if feedback.user_notes is not None else feedback.notes
     return {
         "id": feedback.id,
         "workout_id": feedback.workout_id,
+        "activity_id": activity_id,
+        "completion_status": completion_status,
         "rpe": feedback.rpe,
+        "soreness_0_10": soreness,
         "fatigue": feedback.fatigue,
         "pain": feedback.pain,
         "pain_level": feedback.pain_level,
+        "sleep_quality_0_10": sleep_quality,
         "sleep_quality": feedback.sleep_quality,
+        "pain_notes": feedback.pain_notes,
+        "user_notes": user_notes,
         "weather_notes": feedback.weather_notes,
         "notes": feedback.notes,
         "created_at": feedback.created_at,
@@ -833,7 +847,7 @@ def workout_to_dict(workout: TrainingPlanWorkout) -> dict[str, object]:
         "intensity": workout.intensity,
         "description": workout.description,
         "blocks": [block_to_dict(block) for block in blocks],
-        "feedback": feedback_to_dict(workout.feedback),
+        "feedback": feedback_to_dict(workout.feedback, workout),
         "execution_score": workout_execution_score(workout),
     }
 
@@ -1643,6 +1657,8 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"
+    if workout.feedback:
+        sync_feedback_context(workout.feedback, workout)
     sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
@@ -1675,6 +1691,8 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"
+    if workout.feedback:
+        sync_feedback_context(workout.feedback, workout)
     db.flush()
     sync_daily_training_loads_for_activity(db, user, activity)
     return workout
@@ -2277,6 +2295,8 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         if updates["status"] != "done" and next_completed_activity_id is not None:
             raise ValueError("Linked workout status must be done")
         workout.status = updates["status"]
+    if workout.feedback:
+        sync_feedback_context(workout.feedback, workout)
     if version_summary and workout.plan is not None:
         create_plan_version(db, user, workout.plan, "manual_edit", version_summary)
     try:
@@ -2289,13 +2309,50 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
 
 
 def normalize_feedback(feedback: TrainingPlanWorkoutFeedback) -> None:
+    if feedback.soreness_0_10 is not None:
+        feedback.fatigue = feedback.soreness_0_10
+    elif feedback.fatigue is not None:
+        feedback.soreness_0_10 = feedback.fatigue
+    if feedback.sleep_quality_0_10 is not None:
+        feedback.sleep_quality = feedback.sleep_quality_0_10
+    elif feedback.sleep_quality is not None:
+        feedback.sleep_quality_0_10 = feedback.sleep_quality
+    if feedback.user_notes is not None:
+        feedback.notes = feedback.user_notes
+    elif feedback.notes is not None:
+        feedback.user_notes = feedback.notes
     if feedback.pain_level is not None and feedback.pain_level > 0:
         feedback.pain = True
     elif not feedback.pain:
         feedback.pain_level = None
 
 
-def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, updates: dict[str, object]) -> TrainingPlanWorkoutFeedback:
+def normalize_feedback_updates(updates: dict[str, object], explicit_fields: set[str] | None = None) -> dict[str, object]:
+    normalized = dict(updates)
+    explicit = explicit_fields or set(normalized)
+
+    def sync_alias(spec_field: str, legacy_field: str) -> None:
+        if spec_field in explicit:
+            normalized[legacy_field] = normalized.get(spec_field)
+        elif legacy_field in explicit:
+            normalized[spec_field] = normalized.get(legacy_field)
+        elif normalized.get(spec_field) is not None:
+            normalized[legacy_field] = normalized.get(spec_field)
+        elif normalized.get(legacy_field) is not None:
+            normalized[spec_field] = normalized.get(legacy_field)
+
+    sync_alias("soreness_0_10", "fatigue")
+    sync_alias("sleep_quality_0_10", "sleep_quality")
+    sync_alias("user_notes", "notes")
+    return normalized
+
+
+def sync_feedback_context(feedback: TrainingPlanWorkoutFeedback, workout: TrainingPlanWorkout) -> None:
+    feedback.activity_id = workout.completed_activity_id or (workout.completed_activity.id if workout.completed_activity else None)
+    feedback.completion_status = workout.status
+
+
+def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, updates: dict[str, object], explicit_fields: set[str] | None = None) -> TrainingPlanWorkoutFeedback:
     if workout.status not in {"done", "missed", "skipped"}:
         raise ValueError("Workout feedback requires completed, missed or skipped workout")
     if workout.plan.user_id != user.id:
@@ -2305,14 +2362,15 @@ def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkou
         feedback = TrainingPlanWorkoutFeedback(user_id=user.id, workout_id=workout.id)
         db.add(feedback)
         workout.feedback = feedback
-    for field, value in updates.items():
+    for field, value in normalize_feedback_updates(updates, explicit_fields).items():
         setattr(feedback, field, value)
+    sync_feedback_context(feedback, workout)
     normalize_feedback(feedback)
     return feedback
 
 
 def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
-    feedback = upsert_workout_feedback(db, user, workout, payload.model_dump())
+    feedback = upsert_workout_feedback(db, user, workout, payload.model_dump(), set(payload.model_fields_set))
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     db.commit()
@@ -2324,7 +2382,7 @@ def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise ValueError("Feedback patch is empty")
-    feedback = upsert_workout_feedback(db, user, workout, updates)
+    feedback = upsert_workout_feedback(db, user, workout, updates, set(payload.model_fields_set))
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     db.commit()
@@ -2370,14 +2428,16 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
     workout.completed_activity = activity
     workout.status = "done"
     feedback_updates = payload.model_dump(
-        include={"rpe", "fatigue", "pain", "pain_level", "sleep_quality", "weather_notes", "notes"},
-        exclude_none=True,
+        include={"rpe", "soreness_0_10", "fatigue", "pain", "pain_level", "sleep_quality_0_10", "sleep_quality", "pain_notes", "user_notes", "weather_notes", "notes"},
+        exclude_unset=True,
     )
     feedback_updates["pain"] = payload.pain
+    feedback_fields_set = set(payload.model_fields_set) | {"pain"}
     if not payload.pain and payload.pain_level is None:
         feedback_updates["pain_level"] = None
+        feedback_fields_set.add("pain_level")
     if feedback_updates:
-        upsert_workout_feedback(db, user, workout, feedback_updates)
+        upsert_workout_feedback(db, user, workout, feedback_updates, feedback_fields_set)
     sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()

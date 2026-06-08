@@ -10,7 +10,7 @@ import { api, type Activity as ActivityType, type AnalyticsInsight, type Analyti
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
-type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
+type FeedbackDraft = { rpe: string; soreness_0_10: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality_0_10: string; sleep_quality: string; pain_notes: string; user_notes: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
   | { mode: "workout_to_activity"; candidates: PlanActivityMatchCandidate[] }
@@ -167,14 +167,21 @@ function planBuilderPayload(form: HTMLFormElement, activate = false) {
 }
 
 function feedbackDraftFromWorkout(workout: PlanWorkout): FeedbackDraft {
+  const soreness = workout.feedback?.soreness_0_10 ?? workout.feedback?.fatigue
+  const sleep = workout.feedback?.sleep_quality_0_10 ?? workout.feedback?.sleep_quality
+  const userNotes = workout.feedback?.user_notes || workout.feedback?.notes || ""
   return {
     rpe: workout.feedback?.rpe?.toString() || "",
-    fatigue: workout.feedback?.fatigue?.toString() || "",
+    soreness_0_10: soreness?.toString() || "",
+    fatigue: soreness?.toString() || "",
     pain: workout.feedback?.pain || false,
     pain_level: workout.feedback?.pain_level?.toString() || "",
-    sleep_quality: workout.feedback?.sleep_quality?.toString() || "",
+    sleep_quality_0_10: sleep?.toString() || "",
+    sleep_quality: sleep?.toString() || "",
+    pain_notes: workout.feedback?.pain_notes || "",
+    user_notes: userNotes,
     weather_notes: workout.feedback?.weather_notes || "",
-    notes: workout.feedback?.notes || "",
+    notes: userNotes,
   }
 }
 
@@ -195,7 +202,7 @@ function feedbackNumber(value: string) {
 }
 
 function feedbackValidationError(draft: FeedbackDraft) {
-  const fields: [keyof FeedbackDraft, string][] = [["rpe", "RPE"], ["fatigue", "fatigue"], ["pain_level", "pain"], ["sleep_quality", "sleep"]]
+  const fields: [keyof FeedbackDraft, string][] = [["rpe", "RPE"], ["soreness_0_10", "soreness"], ["pain_level", "pain"], ["sleep_quality_0_10", "sleep"]]
   for (const [field, label] of fields) {
     const value = feedbackNumber(String(draft[field]))
     if (value !== null && (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 10)) return `${label} должен быть целым числом 0-10`
@@ -204,14 +211,21 @@ function feedbackValidationError(draft: FeedbackDraft) {
 }
 
 function feedbackPayload(draft: FeedbackDraft) {
+  const soreness = feedbackNumber(draft.soreness_0_10 || draft.fatigue)
+  const sleep = feedbackNumber(draft.sleep_quality_0_10 || draft.sleep_quality)
+  const userNotes = draft.user_notes || draft.notes || null
   return {
     rpe: feedbackNumber(draft.rpe),
-    fatigue: feedbackNumber(draft.fatigue),
+    soreness_0_10: soreness,
+    fatigue: soreness,
     pain: draft.pain,
     pain_level: feedbackNumber(draft.pain_level),
-    sleep_quality: feedbackNumber(draft.sleep_quality),
+    sleep_quality_0_10: sleep,
+    sleep_quality: sleep,
+    pain_notes: draft.pain_notes || null,
+    user_notes: userNotes,
     weather_notes: draft.weather_notes || null,
-    notes: draft.notes || null,
+    notes: userNotes,
   }
 }
 
@@ -2895,23 +2909,23 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
             <Input type="number" min="30" max="240" step="1" placeholder="avg HR" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} />
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-4">
-            <Input type="number" min="0" max="10" placeholder="fatigue" value={completionDraft.fatigue} onChange={(event) => onCompletionDraft(workout, { fatigue: event.target.value })} />
+            <Input type="number" min="0" max="10" placeholder="soreness" value={completionDraft.soreness_0_10} onChange={(event) => onCompletionDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} />
             <Input type="number" min="0" max="10" placeholder="pain" value={completionDraft.pain_level} onChange={(event) => onCompletionDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} />
-            <Input type="number" min="0" max="10" placeholder="sleep" value={completionDraft.sleep_quality} onChange={(event) => onCompletionDraft(workout, { sleep_quality: event.target.value })} />
+            <Input type="number" min="0" max="10" placeholder="sleep" value={completionDraft.sleep_quality_0_10} onChange={(event) => onCompletionDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
             <Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} />
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]"><Input placeholder="weather" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="completion notes" value={completionDraft.notes} onChange={(event) => onCompletionDraft(workout, { notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Complete</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Complete</Button></div>
         </div> : null}
         {canGiveFeedback ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Workout feedback</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}</div>
           <div className="grid gap-2 md:grid-cols-5">
             <Input type="number" min="0" max="10" placeholder="RPE" value={draft.rpe} onChange={(event) => onFeedbackDraft(workout, { rpe: event.target.value })} />
-            <Input type="number" min="0" max="10" placeholder="fatigue" value={draft.fatigue} onChange={(event) => onFeedbackDraft(workout, { fatigue: event.target.value })} />
+            <Input type="number" min="0" max="10" placeholder="soreness" value={draft.soreness_0_10} onChange={(event) => onFeedbackDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} />
             <Input type="number" min="0" max="10" placeholder="pain" value={draft.pain_level} onChange={(event) => onFeedbackDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} />
-            <Input type="number" min="0" max="10" placeholder="sleep" value={draft.sleep_quality} onChange={(event) => onFeedbackDraft(workout, { sleep_quality: event.target.value })} />
+            <Input type="number" min="0" max="10" placeholder="sleep" value={draft.sleep_quality_0_10} onChange={(event) => onFeedbackDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
             <label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> pain</label>
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]"><Input placeholder="weather" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="notes" value={draft.notes} onChange={(event) => onFeedbackDraft(workout, { notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
         </div> : null}
         {canReschedule ? <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
         <div className="mt-2 flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>

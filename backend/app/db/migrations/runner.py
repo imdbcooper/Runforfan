@@ -325,6 +325,20 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_daily_training_loads_computed_at ON daily_training_loads (computed_at)",
         ),
     ),
+    (
+        "20260608_0015_workout_feedback_spec_fields",
+        (
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL",
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS completion_status VARCHAR(32)",
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS soreness_0_10 INTEGER",
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS sleep_quality_0_10 INTEGER",
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS pain_notes TEXT",
+            "ALTER TABLE training_plan_workout_feedback ADD COLUMN IF NOT EXISTS user_notes TEXT",
+            "CREATE INDEX IF NOT EXISTS ix_training_plan_workout_feedback_activity_id ON training_plan_workout_feedback (activity_id)",
+            "UPDATE training_plan_workout_feedback SET soreness_0_10 = COALESCE(soreness_0_10, fatigue), sleep_quality_0_10 = COALESCE(sleep_quality_0_10, sleep_quality), user_notes = COALESCE(user_notes, notes)",
+            "UPDATE training_plan_workout_feedback AS feedback SET activity_id = workouts.completed_activity_id, completion_status = workouts.status FROM training_plan_workouts AS workouts WHERE feedback.workout_id = workouts.id AND (feedback.activity_id IS NULL OR feedback.completion_status IS NULL)",
+        ),
+    ),
 )
 
 

@@ -807,20 +807,28 @@ class PlanWorkoutUpdate(BaseModel):
 
 class PlanWorkoutFeedbackIn(BaseModel):
     rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    soreness_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
     pain: bool = False
     pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain_notes: str | None = Field(default=None, max_length=1000)
+    user_notes: str | None = Field(default=None, max_length=1000)
     weather_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=1000)
 
 
 class PlanWorkoutFeedbackPatchIn(BaseModel):
     rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    soreness_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
     pain: bool | None = None
     pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain_notes: str | None = Field(default=None, max_length=1000)
+    user_notes: str | None = Field(default=None, max_length=1000)
     weather_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -831,10 +839,14 @@ class PlanWorkoutCompleteIn(BaseModel):
     completed_at: datetime | None = None
     average_heart_rate_bpm: StrictInt | None = Field(default=None, ge=30, le=240)
     rpe: StrictInt | None = Field(default=None, ge=0, le=10)
+    soreness_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     fatigue: StrictInt | None = Field(default=None, ge=0, le=10)
     pain: bool = False
     pain_level: StrictInt | None = Field(default=None, ge=0, le=10)
+    sleep_quality_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
     sleep_quality: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain_notes: str | None = Field(default=None, max_length=1000)
+    user_notes: str | None = Field(default=None, max_length=1000)
     weather_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -842,6 +854,8 @@ class PlanWorkoutCompleteIn(BaseModel):
 class PlanWorkoutFeedbackOut(PlanWorkoutFeedbackIn):
     id: int
     workout_id: int
+    activity_id: int | None = None
+    completion_status: str | None = None
     created_at: datetime
     updated_at: datetime
 
