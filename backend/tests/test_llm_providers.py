@@ -7,7 +7,9 @@ from unittest.mock import patch
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.api.routes.settings import delete_llm_provider, provider_out, test_provider_connection, update_llm_provider
+    from fastapi import HTTPException
+
+    from app.api.routes.settings import delete_llm_provider, normalized_base_url, provider_out, test_provider_connection, update_llm_provider
     from app.models import LlmProviderSetting, User
     from app.schemas.common import LlmProviderUpdate
     from app.services.llm_providers import provider_endpoint_url, provider_supports_vision
@@ -140,6 +142,12 @@ class LlmProviderTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             provider_endpoint_url(provider, type("Settings", (), {"allow_private_llm_base_urls": False})())
+
+    def test_provider_base_url_is_rejected_before_storage(self):
+        with self.assertRaises(HTTPException) as ctx:
+            normalized_base_url("http://127.0.0.1:8080/api/not-a-llm")
+
+        self.assertEqual(ctx.exception.status_code, 400)
 
 
 if __name__ == "__main__":

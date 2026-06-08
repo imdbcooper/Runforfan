@@ -75,7 +75,25 @@ export type ImportBatch = {
   matched_workout_id: number | null
   match_status: "auto_matched" | "already_matched" | "matched" | "unmatched" | string
   auto_matched: boolean
+  requires_confirmation: boolean
+  candidate: ImportCandidate | null
   created_at: string
+}
+
+export type ImportCandidate = {
+  activity: {
+    title: string | null
+    started_at: string | null
+    distance_km: number | null
+    duration_seconds: number | null
+    average_pace_seconds_per_km: number | null
+    average_heart_rate_bpm: number | null
+  }
+  confidence: "low" | "medium" | "high" | string | null
+  uncertainty_notes: string[]
+  estimated_fields: string[]
+  segments_count: number
+  workout_blocks_count: number
 }
 
 export type ImportUploadResult = Omit<ImportBatch, "source_app" | "created_at"> & {
@@ -1032,6 +1050,8 @@ export const api = {
     files.forEach((file) => data.append("screenshots", file))
     return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
   },
+  confirmImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/confirm`, { method: "POST", body: "{}" }),
+  rejectImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/reject`, { method: "POST", body: "{}" }),
   uploadCsv: (file: File, sourceApp = "csv") => {
     const data = new FormData()
     data.append("csv_file", file)

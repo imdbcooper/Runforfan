@@ -782,6 +782,43 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     }
   }
 
+  async function confirmImport(batchId: number) {
+    setBusy(true)
+    setLinkError("")
+    try {
+      await devLogin()
+      const result = await api.confirmImport(batchId)
+      setUploadResult(result)
+      setMessage(result.recognition_message || "Import confirmed")
+      await loadCandidatesForResult(result)
+      await loadImports()
+      await onChanged()
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? error.message : "Не удалось подтвердить import candidate")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function rejectImport(batchId: number) {
+    setBusy(true)
+    try {
+      await devLogin()
+      const result = await api.rejectImport(batchId)
+      setUploadResult(result)
+      setMatchCandidates([])
+      setMessage(result.recognition_message || "Import rejected")
+      await loadImports()
+      await onChanged()
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? error.message : "Не удалось отклонить import candidate")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => { void loadImports() }, [])
 
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
@@ -825,6 +862,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
           </div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">{uploadResult.recognition_message || "No recognition message"}</div>
+          {uploadResult.requires_confirmation && uploadResult.candidate ? <ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} /> : null}
           {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
           {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
         </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
@@ -835,13 +873,25 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
         {importHistoryError ? <p className="px-4 pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Date</th></tr></thead>
-            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td className="text-zinc-500">{batch.created_at ? new Date(batch.created_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+            <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Action</th><th>Date</th></tr></thead>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500">{batch.created_at ? new Date(batch.created_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
           </table>
           {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
         </div>
       </Card>
     </div>
+  </div>
+}
+
+function ImportCandidateReview({ batch, busy, onConfirm, onReject }: { batch: ImportUploadResult; busy: boolean; onConfirm: (batchId: number) => Promise<void>; onReject: (batchId: number) => Promise<void> }) {
+  const candidate = batch.candidate
+  if (!candidate) return null
+  return <div className="grid gap-3 rounded-md border border-orange-400/25 bg-orange-400/10 p-3 text-xs">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">Review required before analytics</p><p className="mt-1 text-orange-100/70">LLM output passed validation but will not create an activity until confirmed.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{candidate.confidence || "unknown"} confidence</Badge></div>
+    <div className="grid gap-2 md:grid-cols-4"><Stat label="title" value={candidate.activity.title || "--"} /><Stat label="distance" value={candidate.activity.distance_km ? `${candidate.activity.distance_km} км` : "--"} /><Stat label="duration" value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label="pace" value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
+    {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
+    {candidate.estimated_fields.length ? <p className="text-[11px] text-orange-100/70">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
+    <div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={() => onConfirm(batch.id)}>Confirm and create activity</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onReject(batch.id)}>Reject candidate</Button></div>
   </div>
 }
 

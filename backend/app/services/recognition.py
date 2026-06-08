@@ -1,9 +1,11 @@
 import base64
 import json
 import mimetypes
+from datetime import datetime
 from pathlib import Path
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,82 @@ class RecognitionValidationError(ValueError):
     def __init__(self, errors: list[str]):
         super().__init__("; ".join(errors))
         self.errors = errors
+
+
+RECOGNITION_PROMPT = """
+Extract running workout data from the screenshots.
+Return JSON only, with no markdown, comments, or prose.
+Use this exact top-level schema: activity, segments, split_blocks, workout_blocks, confidence, uncertainty_notes, estimated_fields.
+Use metric units only: kilometers, seconds, seconds per kilometer, bpm, kcal, meters, spm, centimeters.
+Include confidence as one of: low, medium, high.
+Include uncertainty_notes as an array of short strings for unclear or partially visible data.
+Do not infer invisible fields. If a value is estimated from visible data, include its dotted path in estimated_fields.
+For intervals, populate workout_blocks with warmup, work, recovery, cooldown when visible.
+""".strip()
+
+
+class StrictRecognitionModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RecognitionActivityPayload(StrictRecognitionModel):
+    title: str | None = Field(default=None, max_length=255)
+    started_at: datetime | None = None
+    distance_km: float = Field(gt=0)
+    duration_seconds: int = Field(gt=0)
+    calories_kcal: int | None = Field(default=None, ge=0)
+    average_pace_seconds_per_km: int | None = Field(default=None, gt=0)
+    fastest_pace_seconds_per_km: int | None = Field(default=None, gt=0)
+    average_speed_kmh: float | None = Field(default=None, gt=0)
+    average_cadence_spm: int | None = Field(default=None, ge=0)
+    average_stride_cm: int | None = Field(default=None, ge=0)
+    steps_count: int | None = Field(default=None, ge=0)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=0)
+    elevation_gain_m: float | None = None
+    elevation_loss_m: float | None = None
+    aerobic_training_stress: float | None = Field(default=None, ge=0)
+    aerobic_training_effect: str | None = Field(default=None, max_length=255)
+
+
+class RecognitionSegmentPayload(StrictRecognitionModel):
+    segment_index: int = Field(ge=1)
+    distance_km: float = Field(gt=0)
+    duration_seconds: int = Field(gt=0)
+    pace_seconds_per_km: int = Field(gt=0)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=0)
+    average_cadence_spm: int | None = Field(default=None, ge=0)
+
+
+class RecognitionSplitBlockPayload(StrictRecognitionModel):
+    block_index: int = Field(ge=1)
+    start_km: float = Field(ge=0)
+    end_km: float = Field(gt=0)
+    distance_km: float = Field(gt=0)
+    duration_seconds: int = Field(gt=0)
+    cumulative_duration_seconds: int | None = Field(default=None, gt=0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class RecognitionWorkoutBlockPayload(StrictRecognitionModel):
+    block_index: int = Field(ge=1)
+    block_type: str = Field(max_length=64)
+    title: str | None = Field(default=None, max_length=255)
+    distance_km: float | None = Field(default=None, gt=0)
+    duration_seconds: int = Field(gt=0)
+    pace_seconds_per_km: int | None = Field(default=None, gt=0)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=0)
+    average_cadence_spm: int | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class LlmRecognitionPayload(StrictRecognitionModel):
+    activity: RecognitionActivityPayload
+    segments: list[RecognitionSegmentPayload]
+    split_blocks: list[RecognitionSplitBlockPayload]
+    workout_blocks: list[RecognitionWorkoutBlockPayload]
+    confidence: str = Field(pattern="^(low|medium|high)$")
+    uncertainty_notes: list[str]
+    estimated_fields: list[str]
 
 
 def validate_activity_payload(payload: dict) -> None:
@@ -52,9 +130,22 @@ def validate_activity_payload(payload: dict) -> None:
 
 
 def _json_from_text(text: str) -> dict:
-    start = text.find("{")
-    end = text.rfind("}")
-    return json.loads(text[start:end + 1])
+    stripped = text.strip()
+    if not stripped.startswith("{") or not stripped.endswith("}"):
+        raise RecognitionValidationError(["LLM output must be a JSON object with no surrounding text"])
+    return json.loads(stripped)
+
+
+def parse_llm_recognition_payload(text: str) -> dict:
+    try:
+        parsed = _json_from_text(text)
+        payload = LlmRecognitionPayload.model_validate(parsed).model_dump(mode="json")
+    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, RecognitionValidationError):
+            raise
+        raise RecognitionValidationError([f"LLM output does not match strict recognition schema: {exc}"]) from exc
+    validate_activity_payload(payload)
+    return payload
 
 
 def _default_provider(db: Session, user: User) -> LlmProviderSetting | None:
@@ -122,7 +213,7 @@ def _huawei_interval_training3_payload(files: list[Path]) -> dict | None:
 
 
 def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
-    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, kilometer segments, split_blocks and workout_blocks for intervals such as warmup, work, recovery and cooldown."}]
+    content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
         media_type, _ = mimetypes.guess_type(file.name)
         encoded = base64.b64encode(file.read_bytes()).decode("ascii")
@@ -143,7 +234,7 @@ def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings:
 
 
 def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
-    content = [{"type": "text", "text": "Extract running workout data. Return strict JSON with activity, kilometer segments, split_blocks and workout_blocks for intervals such as warmup, work, recovery and cooldown."}]
+    content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
         media_type, _ = mimetypes.guess_type(file.name)
         content.append({
@@ -190,6 +281,7 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "engine": "template:huawei-interval-training3",
             "message": "Скриншоты Huawei интервальной тренировки распознаны по поддержанному шаблону.",
             "payload": template_payload,
+            "requires_confirmation": False,
         }
     provider = _default_provider(db, user)
     if not provider:
@@ -206,6 +298,7 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "engine": "template-fallback",
             "message": "LLM provider не настроен. Без LLM принимаются только поддержанные шаблонные приложения; для этого скрина шаблона пока нет.",
             "payload": None,
+            "requires_confirmation": False,
         }
     if provider.provider == "openai":
         raw, text = _recognize_openai(provider, files, settings)
@@ -213,12 +306,14 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
         raw, text = _recognize_anthropic(provider, files, settings)
     else:
         raise RecognitionValidationError([f"Unsupported provider: {provider.provider}"])
-    payload = _json_from_text(text)
+    raw_payload = None
     try:
-        validate_activity_payload(payload)
-        status = "validated"
+        payload = parse_llm_recognition_payload(text)
+        raw_payload = payload
+        status = "validated_pending_confirmation"
         errors = None
     except RecognitionValidationError as exc:
+        payload = None
         status = "validation_failed"
         errors = exc.errors
 
@@ -227,10 +322,16 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
         engine=f"{provider.provider}:{provider.model}",
         status=status,
         raw_response=raw,
-        parsed_payload=payload,
+        parsed_payload=raw_payload,
         validation_errors=errors,
     ))
     db.flush()
     if errors:
         raise RecognitionValidationError(errors)
-    return {"status": "validated", "engine": f"{provider.provider}:{provider.model}", "message": "LLM распознал и данные прошли sanity-check.", "payload": payload}
+    return {
+        "status": "pending_confirmation",
+        "engine": f"{provider.provider}:{provider.model}",
+        "message": "LLM распознал данные и они прошли schema/unit validation. Подтвердите импорт перед созданием activity.",
+        "payload": payload,
+        "requires_confirmation": True,
+    }

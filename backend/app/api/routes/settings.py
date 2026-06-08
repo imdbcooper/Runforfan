@@ -11,7 +11,7 @@ from app.models import LlmProviderSetting, User
 from app.schemas.common import IntegrationOut, LlmProviderCreate, LlmProviderOut, LlmProviderTestOut, LlmProviderUpdate
 from app.services.audit import log_audit_event
 from app.services.auth import get_current_user
-from app.services.llm_providers import provider_endpoint_url, provider_supports_vision
+from app.services.llm_providers import provider_endpoint_url, provider_supports_vision, validate_provider_base_url
 from app.services.secrets import decrypt_secret, encrypt_secret
 
 
@@ -134,6 +134,15 @@ def test_provider_connection(provider: LlmProviderSetting) -> LlmProviderTestOut
     )
 
 
+def normalized_base_url(raw_url: str | None) -> str | None:
+    if not raw_url:
+        return None
+    try:
+        return validate_provider_base_url(raw_url, allow_private=get_settings().allow_private_llm_base_urls)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/llm-providers", response_model=list[LlmProviderOut])
 def list_llm_providers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     providers = list(db.scalars(
@@ -208,7 +217,7 @@ def create_llm_provider(payload: LlmProviderCreate, user: User = Depends(get_cur
         user_id=user.id,
         provider=payload.provider,
         display_name=payload.display_name,
-        base_url=payload.base_url,
+        base_url=normalized_base_url(payload.base_url),
         model=payload.model,
         encrypted_api_key=encrypt_secret(payload.api_key),
         is_default=is_default,
@@ -240,7 +249,7 @@ def update_llm_provider(provider_id: int, payload: LlmProviderUpdate, user: User
         if updates["display_name"] is not None:
             provider.display_name = updates["display_name"]
     if "base_url" in updates:
-        provider.base_url = updates["base_url"] or None
+        provider.base_url = normalized_base_url(updates["base_url"])
     if "model" in updates and updates["model"]:
         provider.model = updates["model"]
     if "api_key" in updates:

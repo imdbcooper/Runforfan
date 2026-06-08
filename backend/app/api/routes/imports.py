@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
-from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, ImportBatch, ImportBatchSource, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, ImportBatch, ImportBatchSource, ImportRecognitionAttempt, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
 from app.schemas.common import CsvImportOut
 from app.services.audit import log_audit_event
 from app.services.activity_metrics import sync_derived_activity_metrics
@@ -117,22 +117,80 @@ def matched_workout_id_for_activity(db: Session, user: User, activity_id: int | 
     return matched_workout_ids_for_activities(db, user, [activity_id]).get(activity_id)
 
 
-@router.get("")
-def list_imports(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    batches = list(db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc())))
-    matched_by_activity = matched_workout_ids_for_activities(db, user, [batch.created_activity_id for batch in batches if batch.created_activity_id is not None])
-    return [{
+def latest_recognition_attempt(db: Session, batch_id: int) -> ImportRecognitionAttempt | None:
+    return db.scalar(
+        select(ImportRecognitionAttempt)
+        .where(ImportRecognitionAttempt.batch_id == batch_id)
+        .order_by(ImportRecognitionAttempt.created_at.desc(), ImportRecognitionAttempt.id.desc())
+        .limit(1)
+    )
+
+
+def candidate_from_payload(payload: dict | None) -> dict[str, object] | None:
+    if not payload:
+        return None
+    activity = payload.get("activity") or {}
+    return {
+        "activity": {
+            "title": activity.get("title"),
+            "started_at": activity.get("started_at"),
+            "distance_km": activity.get("distance_km"),
+            "duration_seconds": activity.get("duration_seconds"),
+            "average_pace_seconds_per_km": activity.get("average_pace_seconds_per_km"),
+            "average_heart_rate_bpm": activity.get("average_heart_rate_bpm"),
+        },
+        "confidence": payload.get("confidence"),
+        "uncertainty_notes": payload.get("uncertainty_notes") or [],
+        "estimated_fields": payload.get("estimated_fields") or [],
+        "segments_count": len(payload.get("segments") or []),
+        "workout_blocks_count": len(payload.get("workout_blocks") or []),
+    }
+
+
+def import_result(db: Session, user: User, batch: ImportBatch, matched_workout=None, include_candidate: bool = False) -> dict[str, object]:
+    matched_workout_id = matched_workout.id if matched_workout else matched_workout_id_for_activity(db, user, batch.created_activity_id)
+    match_status = "auto_matched" if matched_workout else "already_matched" if matched_workout_id else "unmatched"
+    attempt = latest_recognition_attempt(db, batch.id) if include_candidate or batch.status == "pending_confirmation" else None
+    candidate = candidate_from_payload(attempt.parsed_payload if attempt else None)
+    return {
         "id": batch.id,
         "status": batch.status,
         "source_app": batch.source_app,
         "recognition_engine": batch.recognition_engine,
         "recognition_message": batch.recognition_message,
         "created_activity_id": batch.created_activity_id,
-        "matched_workout_id": matched_by_activity.get(batch.created_activity_id),
-        "match_status": "matched" if matched_by_activity.get(batch.created_activity_id) else "unmatched",
-        "auto_matched": False,
+        "matched_workout_id": matched_workout_id,
+        "match_status": match_status,
+        "auto_matched": bool(matched_workout),
+        "requires_confirmation": batch.status == "pending_confirmation",
+        "candidate": candidate,
         "created_at": batch.created_at,
-    } for batch in batches]
+    }
+
+
+def import_batch_for_user(db: Session, user: User, batch_id: int, for_update: bool = False) -> ImportBatch:
+    query = select(ImportBatch).where(ImportBatch.id == batch_id, ImportBatch.user_id == user.id)
+    if for_update:
+        query = query.with_for_update()
+    batch = db.scalar(query)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Import batch not found")
+    return batch
+
+
+@router.get("")
+def list_imports(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    batches = list(db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc())))
+    matched_by_activity = matched_workout_ids_for_activities(db, user, [batch.created_activity_id for batch in batches if batch.created_activity_id is not None])
+    results = []
+    for batch in batches:
+        result = import_result(db, user, batch, include_candidate=batch.status == "pending_confirmation")
+        matched_id = matched_by_activity.get(batch.created_activity_id)
+        result["matched_workout_id"] = matched_id
+        result["match_status"] = "matched" if matched_id else "unmatched"
+        result["auto_matched"] = False
+        results.append(result)
+    return results
 
 
 @router.post("/screenshots")
@@ -175,7 +233,9 @@ def upload_screenshots(
     matched_workout = None
     try:
         recognition = llm_or_template_recognize(db, batch.id, files, settings, user)
-        activity = create_activity_from_payload(db, user, recognition["payload"], source_ids) if recognition.get("payload") else None
+        activity = None
+        if recognition.get("payload") and not recognition.get("requires_confirmation"):
+            activity = create_activity_from_payload(db, user, recognition["payload"], source_ids)
         if activity:
             matched_workout = auto_match_activity_to_plan(db, user, activity)
             sync_daily_training_loads_for_activity(db, user, activity)
@@ -198,18 +258,55 @@ def upload_screenshots(
         "recognition_engine": batch.recognition_engine,
     })
     db.commit()
-    matched_workout_id = matched_workout.id if matched_workout else matched_workout_id_for_activity(db, user, batch.created_activity_id)
-    match_status = "auto_matched" if matched_workout else "already_matched" if matched_workout_id else "unmatched"
-    return {
-        "id": batch.id,
-        "status": batch.status,
-        "recognition_engine": batch.recognition_engine,
-        "recognition_message": batch.recognition_message,
+    return import_result(db, user, batch, matched_workout, include_candidate=True)
+
+
+@router.post("/{batch_id}/confirm")
+def confirm_import(batch_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    batch = import_batch_for_user(db, user, batch_id, for_update=True)
+    if batch.status != "pending_confirmation":
+        if batch.created_activity_id is not None:
+            return import_result(db, user, batch, include_candidate=True)
+        raise HTTPException(status_code=409, detail="Import batch is not pending confirmation")
+    attempt = latest_recognition_attempt(db, batch.id)
+    if not attempt or not attempt.parsed_payload:
+        raise HTTPException(status_code=409, detail="Import candidate payload is missing")
+    source_ids = [link.source_id for link in batch.sources]
+    batch.status = "confirming"
+    db.flush()
+    try:
+        with db.begin_nested():
+            activity = create_activity_from_payload(db, user, attempt.parsed_payload, source_ids)
+    except Exception as exc:
+        batch.status = "validation_failed"
+        batch.recognition_message = f"Could not create activity from confirmed candidate: {exc}"
+        db.commit()
+        raise HTTPException(status_code=400, detail=batch.recognition_message) from exc
+    matched_workout = None
+    if activity:
+        matched_workout = auto_match_activity_to_plan(db, user, activity)
+        sync_daily_training_loads_for_activity(db, user, activity)
+        batch.created_activity_id = activity.id
+    batch.status = "recognized" if activity else "validation_failed"
+    batch.recognition_message = "Import candidate confirmed by user and activity was created." if activity else "Confirmed candidate did not contain activity data."
+    log_audit_event(db, user.id, "import.confirmed", "import_batch", batch.id, {
         "created_activity_id": batch.created_activity_id,
-        "matched_workout_id": matched_workout_id,
-        "match_status": match_status,
-        "auto_matched": bool(matched_workout),
-    }
+        "recognition_engine": batch.recognition_engine,
+    })
+    db.commit()
+    return import_result(db, user, batch, matched_workout, include_candidate=True)
+
+
+@router.post("/{batch_id}/reject")
+def reject_import(batch_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    batch = import_batch_for_user(db, user, batch_id, for_update=True)
+    if batch.status != "pending_confirmation":
+        raise HTTPException(status_code=409, detail="Import batch is not pending confirmation")
+    batch.status = "rejected_by_user"
+    batch.recognition_message = "Import candidate rejected by user; no activity was created."
+    log_audit_event(db, user.id, "import.rejected", "import_batch", batch.id, {"recognition_engine": batch.recognition_engine})
+    db.commit()
+    return import_result(db, user, batch, include_candidate=True)
 
 
 @router.post("/csv", response_model=CsvImportOut)
