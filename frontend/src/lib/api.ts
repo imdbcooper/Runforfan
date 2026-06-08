@@ -385,8 +385,11 @@ export type PlanRecommendationsMetrics = {
   unlinked_done_workouts: number
   planned_distance_km: number
   completed_distance_km: number
+  elapsed_workouts: number
   recent_completed_distance_km: number
   upcoming_planned_distance_km: number
+  low_adherence_weeks: number
+  upcoming_hard_workouts: number
 }
 
 export type PlanRecommendations = {
@@ -394,6 +397,9 @@ export type PlanRecommendations = {
   status: "ok" | "watch" | "adjust" | string
   generated_at: string
   summary: string
+  adaptation_summary: string | null
+  risk_before: Record<string, unknown> | null
+  risk_after: Record<string, unknown> | null
   metrics: PlanRecommendationsMetrics
   recommendations: PlanRecommendation[]
 }
@@ -409,6 +415,9 @@ export type PlanRecommendationChange = {
 export type PlanRecommendationPreview = {
   plan_id: number
   generated_at: string
+  adaptation_summary: string | null
+  risk_before: Record<string, unknown> | null
+  risk_after: Record<string, unknown> | null
   changes: PlanRecommendationChange[]
   skipped: Record<string, unknown>[]
   recommendations: PlanRecommendation[]
@@ -543,6 +552,11 @@ export type PlanBuilderPreview = {
 export type PlanRecommendationApplyResult = {
   plan_id: number
   audit_id: number
+  plan_version_id: number | null
+  plan_version_number: number | null
+  adaptation_summary: string | null
+  risk_before: Record<string, unknown> | null
+  risk_after: Record<string, unknown> | null
   changes: PlanRecommendationChange[]
   skipped: Record<string, unknown>[]
   plan: Plan

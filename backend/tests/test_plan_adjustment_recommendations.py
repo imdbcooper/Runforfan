@@ -5,7 +5,7 @@ from unittest.mock import patch
 try:
     from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutFeedbackIn
-    from app.services.planning import AUTO_MATCH_MIN_SCORE, adherence_summary, apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, score_activity_workout_match, workout_execution_score
+    from app.services.planning import AUTO_MATCH_MIN_SCORE, adherence_summary, apply_plan_recommendations, payload_bool, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, score_activity_workout_match, workout_execution_score, workout_is_hard
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("SQLAlchemy is required for planning recommendation tests") from exc
@@ -130,6 +130,17 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertEqual(result["recommendations"][0]["severity"], "warning")
         self.assertEqual(result["metrics"]["planned_distance_km"], 5.0)
 
+    def test_recommendations_include_adaptation_summary_and_risk_snapshots(self):
+        plan = make_plan(make_workout(1, TODAY))
+
+        result = self.recommendations(plan)
+
+        self.assertIsInstance(result["adaptation_summary"], str)
+        self.assertIn("level", result["risk_before"])
+        self.assertEqual(result["risk_before"], result["risk_after"])
+        self.assertIn("low_adherence_weeks", result["metrics"])
+        self.assertIn("upcoming_hard_workouts", result["metrics"])
+
     def test_missed_recent_key_workouts_trigger_hold_and_move(self):
         plan = make_plan(
             make_workout(1, date(2026, 6, 2), status="missed", workout_type="easy"),
@@ -149,6 +160,55 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
         self.assertIn("move_workout", self.recommendation_types(self.recommendations(hill_plan)))
         self.assertIn("move_workout", self.recommendation_types(self.recommendations(race_pace_plan)))
+
+    def test_missed_easy_run_is_skipped_not_stacked(self):
+        missed_easy = make_workout(1, date(2026, 6, 6), status="missed", workout_type="easy", intensity="easy")
+        plan = make_plan(missed_easy)
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+        changes = {(change["workout_id"], change["field"], change["after"]) for change in preview["changes"]}
+
+        self.assertEqual(result["status"], "watch")
+        self.assertIn("skip_workout", self.recommendation_types(result))
+        self.assertIn((1, "status", "skipped"), changes)
+
+    def test_applied_missed_easy_skip_is_not_recommended_again(self):
+        missed_easy = make_workout(1, date(2026, 6, 6), status="missed", workout_type="easy", intensity="easy")
+        plan = make_plan(missed_easy)
+
+        self.apply(plan)
+        result = self.recommendations(plan)
+
+        self.assertEqual(missed_easy.status, "skipped")
+        self.assertNotIn("skip_workout", self.recommendation_types(result))
+        self.assertEqual(result["metrics"]["missed_recent_workouts"], 0)
+
+    def test_missed_quality_with_nearby_quality_is_skipped_not_moved(self):
+        missed_quality = make_workout(1, date(2026, 6, 5), status="missed", workout_type="interval", intensity="threshold")
+        upcoming_quality = make_workout(2, date(2026, 6, 8), workout_type="tempo", intensity="threshold", day_index=2)
+        plan = make_plan(missed_quality, upcoming_quality)
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+        changes = {(change["workout_id"], change["field"], change["after"]) for change in preview["changes"]}
+
+        self.assertIn("skip_quality", self.recommendation_types(result))
+        self.assertNotIn("move_workout", self.recommendation_types(result))
+        self.assertIn((1, "status", "skipped"), changes)
+
+    def test_missed_key_reschedule_checks_proposed_date_for_quality_stack(self):
+        missed_quality = make_workout(1, date(2026, 6, 1), status="missed", workout_type="interval", intensity="threshold")
+        upcoming_quality = make_workout(2, date(2026, 6, 9), workout_type="tempo", intensity="threshold", day_index=2)
+        plan = make_plan(missed_quality, upcoming_quality)
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+        changes = {(change["workout_id"], change["field"], change["after"]) for change in preview["changes"]}
+
+        self.assertIn("skip_quality", self.recommendation_types(result))
+        self.assertNotIn("move_workout", self.recommendation_types(result))
+        self.assertIn((1, "status", "skipped"), changes)
 
     def test_done_workout_without_activity_recommends_linking(self):
         plan = make_plan(
@@ -213,6 +273,17 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertNotIn("reduce_volume", self.recommendation_types(result))
         self.assertFalse([change for change in preview["changes"] if change["field"] == "distance_km"])
 
+    def test_support_only_low_session_adherence_still_raises_risk(self):
+        plan = make_plan(
+            make_workout(1, TODAY, status="missed", workout_type="strength", distance_km=None, duration_seconds=1800),
+        )
+
+        result = self.recommendations(plan)
+
+        self.assertEqual(result["metrics"]["planned_distance_km"], 0)
+        self.assertEqual(result["metrics"]["elapsed_workouts"], 1)
+        self.assertEqual(result["risk_before"]["level"], "high")
+
     def test_markerless_duration_activity_does_not_auto_match_support_workout(self):
         activity = Activity(
             id=202,
@@ -255,6 +326,107 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         result = self.recommendations(plan)
 
         self.assertIn("review_zones", self.recommendation_types(result))
+
+    def test_low_adherence_two_weeks_triggers_regenerate_recommendation(self):
+        plan = make_plan(
+            make_workout(1, date(2026, 5, 26), status="done", completed_activity=make_activity(101, 5.0), week_index=1, day_index=1),
+            make_workout(2, date(2026, 5, 28), status="missed", week_index=1, day_index=2),
+            make_workout(3, date(2026, 5, 30), status="missed", week_index=1, day_index=3),
+            make_workout(4, date(2026, 6, 2), status="done", completed_activity=make_activity(102, 5.0), week_index=2, day_index=1),
+            make_workout(5, date(2026, 6, 4), status="missed", week_index=2, day_index=2),
+            make_workout(6, date(2026, 6, 6), status="skipped", week_index=2, day_index=3),
+        )
+
+        result = self.recommendations(plan)
+
+        self.assertEqual(result["metrics"]["low_adherence_weeks"], 2)
+        self.assertIn("regenerate_plan", self.recommendation_types(result))
+
+    def test_pain_feedback_triggers_critical_safety_recommendation(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5)
+        plan = make_plan(completed, make_workout(2, date(2026, 6, 9), workout_type="interval", intensity="threshold", day_index=2))
+
+        result = self.recommendations(plan)
+        pain = next(item for item in result["recommendations"] if item["type"] == "pain_safety")
+
+        self.assertEqual(result["status"], "adjust")
+        self.assertEqual(pain["severity"], "critical")
+        self.assertEqual(pain["suggested_payload"], {"action": "reduce_intensity", "days": 7, "first_only": False})
+
+    def test_duplicate_intensity_recommendations_resolve_on_preview_state(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5, fatigue=9)
+        plan = make_plan(completed, make_workout(2, date(2026, 6, 9), workout_type="interval", intensity="threshold", day_index=2))
+
+        preview = self.preview(plan)
+
+        intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
+        self.assertEqual(len(intensity_changes), 1)
+        self.assertNotIn("reduce_intensity", [item.get("recommendation_type") for item in preview["skipped"]])
+
+    def test_payload_bool_parses_string_false(self):
+        self.assertFalse(payload_bool({"first_only": "false"}, "first_only", True))
+        self.assertTrue(payload_bool({"first_only": "true"}, "first_only", False))
+
+    def test_critical_pain_recommendation_is_not_truncated(self):
+        painful = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0), week_index=2)
+        painful.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5)
+        plan = make_plan(
+            make_workout(2, None, week_index=1),
+            make_workout(3, date(2026, 6, 2), status="missed", workout_type="easy", week_index=1, day_index=1),
+            make_workout(4, date(2026, 6, 3), status="missed", workout_type="easy", week_index=1, day_index=2),
+            painful,
+            make_workout(5, date(2026, 6, 8), workout_type="interval", intensity="threshold", week_index=2, day_index=2),
+            make_workout(6, date(2026, 6, 10), workout_type="tempo", intensity="threshold", week_index=2, day_index=3),
+            make_workout(7, date(2026, 6, 12), workout_type="hill", intensity="threshold", week_index=2, day_index=4),
+        )
+
+        result = self.recommendations(plan)
+
+        self.assertLessEqual(len(result["recommendations"]), 6)
+        self.assertEqual(result["recommendations"][0]["type"], "pain_safety")
+        self.assertIn("pain_safety", self.recommendation_types(result))
+
+    def test_unresolved_critical_pain_keeps_risk_after_critical(self):
+        painful = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0), week_index=2)
+        painful.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5)
+        missed_easy = make_workout(2, date(2026, 6, 6), status="missed", workout_type="easy", intensity="easy", week_index=2, day_index=2)
+        plan = make_plan(painful, missed_easy)
+
+        preview = self.preview(plan)
+
+        self.assertTrue(preview["changes"])
+        self.assertEqual(preview["risk_before"]["level"], "critical")
+        self.assertEqual(preview["risk_after"]["level"], "critical")
+
+    def test_upcoming_hard_concentration_triggers_training_load_risk(self):
+        plan = make_plan(
+            make_workout(1, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=1),
+            make_workout(2, date(2026, 6, 10), workout_type="tempo", intensity="threshold", day_index=2),
+            make_workout(3, date(2026, 6, 12), workout_type="hill", intensity="threshold", day_index=3),
+        )
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+        intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
+
+        self.assertEqual(result["metrics"]["upcoming_hard_workouts"], 3)
+        self.assertIn("training_load_risk", self.recommendation_types(result))
+        self.assertEqual(len(intensity_changes), 3)
+        self.assertGreater(result["risk_before"]["score"], preview["risk_after"]["score"])
+
+    def test_upcoming_hard_concentration_ignores_non_actionable_workouts(self):
+        plan = make_plan(
+            make_workout(1, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=1),
+            make_workout(2, date(2026, 6, 10), status="skipped", workout_type="tempo", intensity="threshold", day_index=2),
+            make_workout(3, date(2026, 6, 12), status="done", completed_activity=make_activity(103, 5.0), workout_type="hill", intensity="threshold", day_index=3),
+        )
+
+        result = self.recommendations(plan)
+
+        self.assertEqual(result["metrics"]["upcoming_hard_workouts"], 1)
+        self.assertNotIn("training_load_risk", self.recommendation_types(result))
 
     def test_execution_score_uses_linked_distance(self):
         workout = make_workout(1, TODAY, status="done", distance_km=5.0, completed_activity=make_activity(101, 5.0))
@@ -354,6 +526,17 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
         self.assertIn("reduce_intensity", self.recommendation_types(result))
 
+    def test_duplicate_volume_recommendations_resolve_on_preview_state(self):
+        completed = make_workout(1, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
+        plan = make_plan(completed, make_workout(2, date(2026, 6, 9), distance_km=6.0, day_index=2))
+
+        preview = self.preview(plan)
+
+        self.assertEqual(self.recommendation_types(self.recommendations(plan)).count("reduce_volume"), 2)
+        self.assertEqual([change["after"] for change in preview["changes"] if change["field"] == "distance_km"], [5.1])
+        self.assertNotIn("reduce_volume", [item.get("recommendation_type") for item in preview["skipped"]])
+
     def test_overdone_hard_workout_triggers_reduce_intensity_without_aggregate_overvolume(self):
         overdone_interval = make_workout(1, TODAY, status="done", workout_type="interval", intensity="threshold", distance_km=10.0, completed_activity=make_activity(101, 13.0))
         partial_easy = make_workout(2, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(102, 5.0), day_index=2)
@@ -377,7 +560,7 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
         self.assertEqual(self.recommendation_types(result).count("reduce_intensity"), 1)
 
-    def test_reduce_intensity_eases_only_first_hard_workout_in_window(self):
+    def test_high_fatigue_removes_multiple_hard_workouts_in_window(self):
         completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
         completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
         first_hard = make_workout(2, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=2)
@@ -387,8 +570,18 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         preview = self.preview(plan)
         intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
 
-        self.assertEqual(len(intensity_changes), 1)
-        self.assertEqual(intensity_changes[0]["workout_id"], 2)
+        self.assertEqual([change["workout_id"] for change in intensity_changes], [2, 3])
+
+    def test_applied_easy_intensity_no_longer_counts_as_hard(self):
+        completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9)
+        hard = make_workout(2, date(2026, 6, 8), workout_type="interval", intensity="threshold", day_index=2)
+        plan = make_plan(completed, hard)
+
+        self.apply(plan)
+
+        self.assertEqual(hard.intensity, "easy")
+        self.assertFalse(workout_is_hard(hard))
 
     def test_reduce_intensity_treats_race_pace_as_hard(self):
         completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))
@@ -440,6 +633,10 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         result, db = self.apply(plan)
 
         self.assertEqual(result["audit_id"], 77)
+        self.assertEqual(result["plan_version_id"], 77)
+        self.assertEqual(result["plan_version_number"], 1)
+        self.assertIn("Applied", result["adaptation_summary"])
+        self.assertNotIn("review before applying", result["adaptation_summary"])
         self.assertEqual(upcoming.distance_km, 4.7)
         self.assertTrue(db.committed)
         self.assertEqual(len(db.added), 2)
@@ -465,11 +662,11 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
         self.apply(plan)
         first_distance = upcoming.distance_km
-        second_result, _db = self.apply(plan)
 
         self.assertEqual(first_distance, 4.7)
         self.assertEqual(upcoming.distance_km, first_distance)
-        self.assertFalse([change for change in second_result["changes"] if change["field"] == "distance_km"])
+        with self.assertRaises(ValueError):
+            self.apply(plan)
 
     def test_cap_growth_can_tighten_volume_after_reduction(self):
         upcoming = make_workout(2, date(2026, 6, 9), distance_km=10.0, day_index=2)
@@ -507,7 +704,7 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.apply(plan, FakeDb(), preview["changes"])
 
-    def test_apply_does_not_mutate_completed_upcoming_workouts(self):
+    def test_apply_rejects_zero_change_preview_for_completed_upcoming_workouts(self):
         completed_upcoming = make_workout(
             2,
             date(2026, 6, 9),
@@ -527,11 +724,12 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
             completed_upcoming,
         )
 
-        result, _db = self.apply(plan)
-
+        preview = self.preview(plan)
         self.assertEqual(completed_upcoming.distance_km, 5.5)
-        self.assertEqual(result["changes"], [])
-        self.assertTrue(any(item["action"] == "reduce_next_week_volume" for item in result["skipped"]))
+        self.assertEqual(preview["changes"], [])
+        self.assertTrue(any(item["action"] == "reduce_next_week_volume" for item in preview["skipped"]))
+        with self.assertRaises(ValueError):
+            self.apply(plan)
 
     def test_apply_reschedules_missed_key_workout(self):
         missed_long = make_workout(2, date(2026, 6, 5), status="missed", workout_type="long", day_index=2)

@@ -128,6 +128,8 @@ def preview_training_plan_recommendations(plan_id: int, user: User = Depends(get
 
 @router.post("/plans/{plan_id}/recommendations/apply", response_model=PlanRecommendationApplyOut)
 def apply_training_plan_recommendations(plan_id: int, payload: PlanRecommendationApplyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not payload.changes:
+        raise HTTPException(status_code=409, detail="Recommendation preview is required before applying recommendations")
     try:
         result = apply_plan_recommendations(db, user, get_user_plan(db, user, plan_id), payload.changes)
     except ValueError as error:

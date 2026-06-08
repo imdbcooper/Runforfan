@@ -1010,8 +1010,11 @@ class PlanRecommendationsMetricsOut(BaseModel):
     unlinked_done_workouts: int
     planned_distance_km: float
     completed_distance_km: float
+    elapsed_workouts: int = 0
     recent_completed_distance_km: float
     upcoming_planned_distance_km: float
+    low_adherence_weeks: int = 0
+    upcoming_hard_workouts: int = 0
 
 
 class PlanRecommendationsOut(BaseModel):
@@ -1019,6 +1022,9 @@ class PlanRecommendationsOut(BaseModel):
     status: str
     generated_at: datetime
     summary: str
+    adaptation_summary: str | None = None
+    risk_before: dict | None = None
+    risk_after: dict | None = None
     metrics: PlanRecommendationsMetricsOut
     recommendations: list[PlanRecommendationOut]
 
@@ -1034,6 +1040,9 @@ class PlanRecommendationChangeOut(BaseModel):
 class PlanRecommendationPreviewOut(BaseModel):
     plan_id: int
     generated_at: datetime
+    adaptation_summary: str | None = None
+    risk_before: dict | None = None
+    risk_after: dict | None = None
     changes: list[PlanRecommendationChangeOut]
     skipped: list[dict] = Field(default_factory=list)
     recommendations: list[PlanRecommendationOut]
@@ -1204,6 +1213,11 @@ class CalendarOut(BaseModel):
 class PlanRecommendationApplyOut(BaseModel):
     plan_id: int
     audit_id: int
+    plan_version_id: int | None = None
+    plan_version_number: int | None = None
+    adaptation_summary: str | None = None
+    risk_before: dict | None = None
+    risk_after: dict | None = None
     changes: list[PlanRecommendationChangeOut]
     skipped: list[dict] = Field(default_factory=list)
     plan: PlanOut

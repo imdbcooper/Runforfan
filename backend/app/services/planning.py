@@ -35,6 +35,8 @@ TEMPO_WORK_CAP_SECONDS = {"beginner": 20 * 60, "intermediate": 30 * 60, "advance
 HILL_WORK_CAP_SECONDS = {"beginner": 12 * 60, "intermediate": 16 * 60, "advanced": 20 * 60}
 HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
 HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
+LOW_PLAN_INTENSITIES = {"easy", "recovery", "strides"}
+SKIP_MISSED_WORKOUT_NOTE = "Coach adjustment: skip this missed workout; do not stack it into the next training window."
 SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
 STRENGTH_WORKOUT_TYPES = {"strength", "ofp", "core"}
 MOBILITY_WORKOUT_TYPES = {"mobility", "prehab"}
@@ -44,6 +46,8 @@ APPLICABLE_RECOMMENDATION_ACTIONS = {
     "reduce_intensity",
     "cap_next_week_growth",
     "review_or_move_key_workout",
+    "skip_missed_key_workout",
+    "skip_missed_easy_workout",
 }
 
 
@@ -1313,7 +1317,29 @@ def format_duration_label(seconds: int | None) -> str:
 
 
 def workout_is_hard(workout: TrainingPlanWorkout) -> bool:
+    if (workout.intensity or "") in LOW_PLAN_INTENSITIES:
+        return False
     return (workout.workout_type or "") in HARD_PLAN_WORKOUT_TYPES or (workout.intensity or "") in HARD_PLAN_INTENSITIES
+
+
+def workout_is_easy_run(workout: TrainingPlanWorkout) -> bool:
+    workout_type = workout.workout_type or ""
+    if workout_type == "long" or workout_is_hard(workout) or is_support_workout_type(workout_type):
+        return False
+    return workout_type in {"easy", "recovery", "strides"} or (workout.intensity or "") in {"easy", "recovery", "strides"}
+
+
+def hard_workout_near_date(workouts: list[TrainingPlanWorkout], target_date: date, days: int = 3, exclude_id: int | None = None) -> TrainingPlanWorkout | None:
+    for workout in workouts:
+        if exclude_id is not None and workout.id == exclude_id:
+            continue
+        if workout.scheduled_date and workout_is_hard(workout) and abs((workout.scheduled_date - target_date).days) <= days:
+            return workout
+    return None
+
+
+def coach_skip_note_present(workout: TrainingPlanWorkout) -> bool:
+    return SKIP_MISSED_WORKOUT_NOTE in (workout.description or "")
 
 
 def plan_week_summaries(plan: TrainingPlan) -> list[dict[str, object]]:
@@ -1377,6 +1403,70 @@ def recommendation_item(
     }
 
 
+def adaptation_risk_snapshot(status: str, metrics: dict[str, object], recommendations: list[dict[str, object]], changes_count: int = 0) -> dict[str, object]:
+    severity_score = {"info": 1, "warning": 2, "critical": 3}
+    score = 0 if status == "ok" else 1
+    reasons: list[str] = []
+    for recommendation in recommendations:
+        severity = str(recommendation.get("severity") or "info")
+        score = max(score, severity_score.get(severity, 1))
+        if recommendation.get("title"):
+            reasons.append(str(recommendation["title"]))
+    has_elapsed_workouts = bool(metrics.get("elapsed_workouts") or metrics.get("planned_distance_km") or metrics.get("missed_recent_workouts") or metrics.get("low_adherence_weeks"))
+    if float(metrics.get("completion_rate") or 0) < 0.7 and has_elapsed_workouts:
+        score = max(score, 2)
+        reasons.append("plan adherence below threshold")
+    if changes_count:
+        reasons.append(f"{changes_count} safe automatic changes available")
+    level = "low" if score <= 0 else "moderate" if score == 1 else "high" if score == 2 else "critical"
+    return {"level": level, "score": score, "reasons": reasons[:5]}
+
+
+def adaptation_summary_text(summary: str, changes_count: int | None = None, skipped_count: int = 0) -> str:
+    if changes_count is None:
+        return summary
+    if changes_count:
+        return f"{summary} Preview proposes {changes_count} safe automatic change(s); review before applying."
+    if skipped_count:
+        return f"{summary} No automatic changes were applied; {skipped_count} recommendation(s) need manual review."
+    return f"{summary} No automatic adaptation changes are needed."
+
+
+def applied_adaptation_summary_text(summary: str, changes_count: int, skipped_count: int = 0) -> str:
+    suffix = f"Applied {changes_count} coach recommendation change(s)."
+    if skipped_count:
+        suffix = f"{suffix} {skipped_count} recommendation(s) still need manual review."
+    return f"{summary} {suffix}"
+
+
+def prioritize_recommendations(recommendations: list[dict[str, object]]) -> list[dict[str, object]]:
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    return [
+        item
+        for _index, item in sorted(
+            enumerate(recommendations),
+            key=lambda pair: (severity_rank.get(str(pair[1].get("severity") or "info"), 2), pair[0]),
+        )
+    ]
+
+
+def recommendation_status(recommendations: list[dict[str, object]]) -> str:
+    if any(item.get("severity") == "critical" for item in recommendations):
+        return "adjust"
+    if any(item.get("severity") == "warning" for item in recommendations):
+        return "watch"
+    return "ok"
+
+
+def payload_bool(payload: dict[str, object], key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def today_for_user(db: Session, user: User) -> date:
     timezone_name = db.scalar(select(AthleteProfile.timezone).where(AthleteProfile.user_id == user.id)) or "Europe/Moscow"
     try:
@@ -1385,7 +1475,7 @@ def today_for_user(db: Session, user: User) -> date:
         return datetime.now(UTC).date()
 
 
-def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan) -> dict[str, object]:
+def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan, limit: int | None = 6) -> dict[str, object]:
     workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
     today = today_for_user(db, user)
     recent_start = today - timedelta(days=14)
@@ -1398,8 +1488,13 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
     recommendations: list[dict[str, object]] = []
 
     missed_recent = [workout for workout in recent if workout.status in {"missed", "skipped"}]
-    missed_key = [workout for workout in missed_recent if workout.workout_type == "long" or workout_is_hard(workout)]
+    unresolved_missed_recent = [workout for workout in missed_recent if not (workout.status == "skipped" and coach_skip_note_present(workout))]
+    missed_key = [workout for workout in unresolved_missed_recent if workout.workout_type == "long" or workout_is_hard(workout)]
+    missed_easy = [workout for workout in unresolved_missed_recent if workout.id not in {item.id for item in missed_key} and workout_is_easy_run(workout)]
     recent_linked = [workout for workout in recent if workout.status == "done" and workout.completed_activity]
+    actionable_upcoming = [workout for workout in upcoming if workout.status in MATCHABLE_WORKOUT_STATUSES and workout.completed_activity_id is None]
+    weekly_elapsed = weekly_adherence_summary(elapsed)
+    recent_low_adherence_weeks = [week for week in weekly_elapsed[-2:] if int(week.get("planned_workouts") or 0) > 0 and float(week.get("session_adherence") or 0) < 0.7]
     risky_feedback = [
         workout
         for workout in recent
@@ -1410,10 +1505,24 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             or (workout.feedback.fatigue is not None and workout.feedback.fatigue >= 8)
         )
     ]
+    high_fatigue_feedback = [
+        workout
+        for workout in recent
+        if workout.feedback and (
+            (workout.feedback.rpe is not None and workout.feedback.rpe >= 8)
+            or (workout.feedback.fatigue is not None and workout.feedback.fatigue >= 8)
+        )
+    ]
+    pain_feedback = [
+        workout
+        for workout in recent
+        if workout.feedback and (workout.feedback.pain or (workout.feedback.pain_level is not None and workout.feedback.pain_level >= 4))
+    ]
     risky_feedback_ids = {workout.id for workout in risky_feedback}
     overdone_hard = [workout for workout in recent if workout.id not in risky_feedback_ids and workout_is_hard(workout) and workout_execution_score(workout)["adherence_status"] == "overdone"]
     recent_completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in recent_linked)
-    upcoming_planned_distance = sum(workout.distance_km or 0 for workout in upcoming)
+    upcoming_planned_distance = sum(workout.distance_km or 0 for workout in actionable_upcoming)
+    upcoming_hard = [workout for workout in actionable_upcoming if workout_is_hard(workout)]
     safety_gated = bool(plan.explanation and "Safety gates:" in plan.explanation and "Safety gates: no active safety gates" not in plan.explanation)
 
     if plan.status != "active":
@@ -1453,28 +1562,70 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             [f"{summary['unlinked_done_workouts']} done workouts are unlinked"],
         ))
 
-    if len(missed_recent) >= 2:
+    if len(unresolved_missed_recent) >= 2:
         recommendations.append(recommendation_item(
             "hold_volume",
             "warning",
             "Hold next-week volume",
             "Several recent workouts were missed or skipped. Do not try to catch up; keep the next week controlled.",
-            [f"{len(missed_recent)} missed/skipped workouts in the last 14 days"],
-            week_index=missed_recent[-1].week_index if missed_recent else None,
+            [f"{len(unresolved_missed_recent)} missed/skipped workouts in the last 14 days"],
+            week_index=unresolved_missed_recent[-1].week_index if unresolved_missed_recent else None,
             suggested_payload={"action": "hold_next_week_volume"},
+        ))
+
+    if missed_easy:
+        workout = missed_easy[-1]
+        recommendations.append(recommendation_item(
+            "skip_workout",
+            "warning",
+            "Missed easy run should not be stacked",
+            "Skip the missed easy run rather than adding it to the next training window.",
+            [f"missed {workout.workout_type} workout"],
+            workout_id=workout.id,
+            week_index=workout.week_index,
+            suggested_payload={"action": "skip_missed_easy_workout", "workout_id": workout.id},
         ))
 
     if missed_key:
         workout = missed_key[-1]
+        proposed_target_date = next_available_workout_date(today, workouts)
+        original_nearby_quality = next((item for item in upcoming_hard if workout.scheduled_date and item.scheduled_date and 0 <= (item.scheduled_date - workout.scheduled_date).days <= 3), None)
+        target_nearby_quality = hard_workout_near_date(upcoming_hard, proposed_target_date, days=3, exclude_id=workout.id)
+        next_quality = original_nearby_quality or target_nearby_quality
+        if next_quality:
+            recommendations.append(recommendation_item(
+                "skip_quality",
+                "warning",
+                "Missed quality should not be stacked",
+                "Another hard workout is within 72 hours of the missed or proposed move date, so do not move this key session into the same window.",
+                [f"missed {workout.workout_type} workout", f"nearby quality: {next_quality.scheduled_date}"],
+                workout_id=workout.id,
+                week_index=workout.week_index,
+                suggested_payload={"action": "skip_missed_key_workout", "workout_id": workout.id},
+            ))
+        else:
+            recommendations.append(recommendation_item(
+                "move_workout",
+                "warning",
+                "Key workout was missed",
+                "Treat the next hard session cautiously. Prefer moving the key session only if recovery is good.",
+                [f"missed {workout.workout_type} workout"],
+                workout_id=workout.id,
+                week_index=workout.week_index,
+                suggested_payload={"action": "review_or_move_key_workout", "workout_id": workout.id, "target_date": proposed_target_date.isoformat()},
+            ))
+
+    if pain_feedback:
+        workout = pain_feedback[-1]
         recommendations.append(recommendation_item(
-            "move_workout",
-            "warning",
-            "Key workout was missed",
-            "Treat the next hard session cautiously. Prefer moving the key session only if recovery is good.",
-            [f"missed {workout.workout_type} workout"],
+            "pain_safety",
+            "critical",
+            "Pain note requires safety-first adjustment",
+            "Keep the next run easy or rest, and avoid high-intensity work until pain is resolved.",
+            [f"pain reported on workout #{workout.id}"],
             workout_id=workout.id,
             week_index=workout.week_index,
-            suggested_payload={"action": "review_or_move_key_workout", "workout_id": workout.id},
+            suggested_payload={"action": "reduce_intensity", "days": 7, "first_only": False},
         ))
 
     if risky_feedback:
@@ -1486,7 +1637,20 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             [f"{len(risky_feedback)} recent workouts with high subjective risk"],
             workout_id=risky_feedback[-1].id,
             week_index=risky_feedback[-1].week_index,
-            suggested_payload={"action": "reduce_intensity", "days": 3},
+            suggested_payload={"action": "reduce_intensity", "days": 7, "first_only": False},
+        ))
+
+    if high_fatigue_feedback:
+        workout = high_fatigue_feedback[-1]
+        recommendations.append(recommendation_item(
+            "reduce_volume",
+            "warning",
+            "High fatigue score reported",
+            "Reduce next-week volume 15% and remove high-intensity until fatigue normalizes.",
+            [f"fatigue/RPE risk on workout #{workout.id}"],
+            workout_id=workout.id,
+            week_index=workout.week_index,
+            suggested_payload={"action": "reduce_next_week_volume", "percent": 15},
         ))
 
     if overdone_hard:
@@ -1499,7 +1663,7 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             [f"overdone {workout.workout_type} workout"],
             workout_id=workout.id,
             week_index=workout.week_index,
-            suggested_payload={"action": "reduce_intensity", "days": 7},
+            suggested_payload={"action": "reduce_intensity", "days": 7, "first_only": True},
         ))
 
     if summary["planned_distance_km"] and summary["distance_completion_rate"] >= 1.2:
@@ -1532,6 +1696,27 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             suggested_payload={"action": "cap_next_week_growth", "max_growth_percent": 25},
         ))
 
+    if len(upcoming_hard) >= 3:
+        recommendations.append(recommendation_item(
+            "training_load_risk",
+            "warning",
+            "Upcoming intensity concentration is high",
+            "Several hard sessions are scheduled in the next week; reduce intensity concentration to lower monotony/strain risk.",
+            [f"{len(upcoming_hard)} hard workouts in next 7 days"],
+            week_index=upcoming_hard[0].week_index if upcoming_hard else None,
+            suggested_payload={"action": "reduce_intensity", "days": 7, "first_only": False},
+        ))
+
+    if len(recent_low_adherence_weeks) >= 2:
+        recommendations.append(recommendation_item(
+            "regenerate_plan",
+            "warning",
+            "Adherence is low for two weeks",
+            "Regenerate the plan from the current baseline instead of repeatedly patching the old workload.",
+            [f"week {week['week_index']} adherence {float(week['session_adherence']):.0%}" for week in recent_low_adherence_weeks],
+            suggested_payload={"action": "regenerate_from_current_baseline"},
+        ))
+
     if safety_gated:
         recommendations.append(recommendation_item(
             "review_zones",
@@ -1550,32 +1735,38 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             ["completion and distance rates are within expected range"],
         ))
 
-    highest = "ok"
-    if any(item["severity"] == "critical" for item in recommendations):
-        highest = "adjust"
-    elif any(item["severity"] == "warning" for item in recommendations):
-        highest = "watch"
+    highest = recommendation_status(recommendations)
     plan_summary = {
         "ok": "Plan looks stable based on current linked activities.",
         "watch": "Coach recommends watching the next week before increasing load.",
         "adjust": "Coach recommends adjusting the plan before the next hard workout.",
     }[highest]
+    metrics = {
+        "completion_rate": summary["completion_rate"],
+        "distance_completion_rate": summary["distance_completion_rate"],
+        "missed_recent_workouts": len(unresolved_missed_recent),
+        "unlinked_done_workouts": summary["unlinked_done_workouts"],
+        "planned_distance_km": summary["planned_distance_km"],
+        "completed_distance_km": summary["completed_distance_km"],
+        "elapsed_workouts": len(elapsed),
+        "recent_completed_distance_km": round(recent_completed_distance, 1),
+        "upcoming_planned_distance_km": round(upcoming_planned_distance, 1),
+        "low_adherence_weeks": len(recent_low_adherence_weeks),
+        "upcoming_hard_workouts": len(upcoming_hard),
+    }
+    ordered_recommendations = prioritize_recommendations(recommendations)
+    returned_recommendations = ordered_recommendations if limit is None else ordered_recommendations[:limit]
+    risk_before = adaptation_risk_snapshot(highest, metrics, ordered_recommendations)
     return {
         "plan_id": plan.id,
         "status": highest,
         "generated_at": datetime.now(UTC),
         "summary": plan_summary,
-        "metrics": {
-            "completion_rate": summary["completion_rate"],
-            "distance_completion_rate": summary["distance_completion_rate"],
-            "missed_recent_workouts": len(missed_recent),
-            "unlinked_done_workouts": summary["unlinked_done_workouts"],
-            "planned_distance_km": summary["planned_distance_km"],
-            "completed_distance_km": summary["completed_distance_km"],
-            "recent_completed_distance_km": round(recent_completed_distance, 1),
-            "upcoming_planned_distance_km": round(upcoming_planned_distance, 1),
-        },
-        "recommendations": recommendations[:6],
+        "adaptation_summary": adaptation_summary_text(plan_summary, None),
+        "risk_before": risk_before,
+        "risk_after": risk_before,
+        "metrics": metrics,
+        "recommendations": returned_recommendations,
     }
 
 
@@ -1623,7 +1814,7 @@ def next_available_workout_date(today: date, workouts: list[TrainingPlanWorkout]
 
 
 def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingPlan) -> dict[str, object]:
-    recommendation_result = plan_adjustment_recommendations(db, user, plan)
+    recommendation_result = plan_adjustment_recommendations(db, user, plan, limit=None)
     recommendations = list(recommendation_result["recommendations"])
     workouts = sorted(plan.workouts, key=lambda workout: (workout.week_index, workout.day_index, workout.id))
     today = today_for_user(db, user)
@@ -1632,11 +1823,20 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
     preview_values: dict[tuple[int, str], Any] = {}
     changes: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
+    resolved_recommendation_indexes: set[int] = set()
     reduce_volume_note = "Coach adjustment: reduce volume until adherence stabilizes."
     cap_growth_note = "Coach adjustment: cap next-week growth until recent volume catches up."
+    skip_note = SKIP_MISSED_WORKOUT_NOTE
 
     def current_value(workout: TrainingPlanWorkout, field: str) -> Any:
         return preview_values.get((workout.id, field), getattr(workout, field))
+
+    def preview_workout_is_hard(workout: TrainingPlanWorkout) -> bool:
+        intensity = str(current_value(workout, "intensity") or "")
+        workout_type = str(current_value(workout, "workout_type") or workout.workout_type or "")
+        if intensity in LOW_PLAN_INTENSITIES:
+            return False
+        return workout_type in HARD_PLAN_WORKOUT_TYPES or intensity in HARD_PLAN_INTENSITIES
 
     def add_change(workout: TrainingPlanWorkout, field: str, after: Any, reason: str) -> bool:
         before = current_value(workout, field)
@@ -1659,39 +1859,44 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
             "reason": reason,
         })
 
-    def scale_upcoming_distances(percent: float, reason: str, note: str) -> bool:
+    def scale_upcoming_distances(percent: float, reason: str, note: str) -> tuple[bool, bool]:
         changed = False
         factor = max(0.0, 1 - percent / 100)
+        eligible = [workout for workout in upcoming if current_value(workout, "distance_km")]
+        covered = bool(eligible)
         for workout in upcoming:
             if note in (current_value(workout, "description") or ""):
                 continue
             current_distance = current_value(workout, "distance_km")
             if not current_distance:
                 continue
+            covered = False
             after = round(max(1.0, float(current_distance) * factor), 1)
             changed = add_change(workout, "distance_km", after, reason) or changed
             changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
-        return changed
+        return changed, covered
 
-    def ease_upcoming_hard_workouts(reason: str, days: int = 7, first_only: bool = False) -> bool:
+    def ease_upcoming_hard_workouts(reason: str, days: int = 7, first_only: bool = False) -> tuple[bool, bool]:
         changed = False
         note = "Coach adjustment: keep this session easy until adherence stabilizes."
         window_end = today + timedelta(days=max(1, days))
-        hard_workouts = [
+        original_hard_workouts = [
             workout
             for workout in upcoming
             if workout.scheduled_date and workout.scheduled_date <= window_end
             and workout_is_hard(workout)
         ]
-        hard_workouts.sort(key=lambda workout: (workout.scheduled_date or today, workout.week_index, workout.day_index, workout.id))
+        original_hard_workouts.sort(key=lambda workout: (workout.scheduled_date or today, workout.week_index, workout.day_index, workout.id))
         if first_only:
-            hard_workouts = hard_workouts[:1]
+            original_hard_workouts = original_hard_workouts[:1]
+        hard_workouts = [workout for workout in original_hard_workouts if preview_workout_is_hard(workout)]
         for workout in hard_workouts:
             changed = add_change(workout, "intensity", "easy", reason) or changed
             changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), note), reason) or changed
-        return changed
+        covered_by_existing_preview = bool(original_hard_workouts) and not hard_workouts
+        return changed, covered_by_existing_preview
 
-    for recommendation in recommendations:
+    for index, recommendation in enumerate(recommendations):
         payload = recommendation.get("suggested_payload") or {}
         action = payload.get("action") if isinstance(payload, dict) else None
         if not action:
@@ -1701,15 +1906,25 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
             skip(str(action), recommendation, "manual flow required")
             continue
         if action == "hold_next_week_volume":
-            if not ease_upcoming_hard_workouts("hold volume after recent missed or skipped workouts"):
+            changed, covered = ease_upcoming_hard_workouts("hold volume after recent missed or skipped workouts")
+            if changed or covered:
+                resolved_recommendation_indexes.add(index)
+            else:
                 skip(action, recommendation, "no upcoming hard workouts to ease")
         elif action == "reduce_next_week_volume":
             percent = float(payload.get("percent") or 15)
-            if not scale_upcoming_distances(percent, f"reduce next 7 days by {percent:g}%", reduce_volume_note):
+            changed, covered = scale_upcoming_distances(percent, f"reduce next 7 days by {percent:g}%", reduce_volume_note)
+            if changed or covered:
+                resolved_recommendation_indexes.add(index)
+            else:
                 skip(action, recommendation, "no mutable upcoming distance to reduce")
         elif action == "reduce_intensity":
             days = int(payload.get("days") or 3)
-            if not ease_upcoming_hard_workouts("reduce intensity while safety or recovery risk is active", days=days, first_only=True):
+            first_only = payload_bool(payload, "first_only", True)
+            changed, covered = ease_upcoming_hard_workouts("reduce intensity while safety or recovery risk is active", days=days, first_only=first_only)
+            if changed or covered:
+                resolved_recommendation_indexes.add(index)
+            else:
                 skip(action, recommendation, f"no hard workout in the next {days} days")
         elif action == "cap_next_week_growth":
             max_growth_percent = float(payload.get("max_growth_percent") or 25)
@@ -1735,22 +1950,49 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
                 changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), cap_growth_note), f"cap next 7 days growth at {max_growth_percent:g}%") or changed
             if not changed:
                 skip(action, recommendation, "no mutable upcoming distance to cap")
+            else:
+                resolved_recommendation_indexes.add(index)
         elif action == "review_or_move_key_workout":
             workout_id = payload.get("workout_id")
             workout = workouts_by_id.get(workout_id) if isinstance(workout_id, int) else None
             if not workout or workout.status not in {"missed", "skipped"} or workout.completed_activity_id is not None:
                 skip(action, recommendation, "key workout cannot be safely rescheduled")
                 continue
-            target_date = next_available_workout_date(today, workouts)
+            payload_target = payload.get("target_date")
+            target_date = date.fromisoformat(payload_target) if isinstance(payload_target, str) else next_available_workout_date(today, workouts)
+            nearby_quality = hard_workout_near_date(upcoming, target_date, days=3, exclude_id=workout.id)
+            if nearby_quality:
+                skip(action, recommendation, "proposed reschedule would stack hard workouts within 72 hours")
+                continue
             add_change(workout, "scheduled_date", target_date, "reschedule missed key workout cautiously")
             add_change(workout, "status", "rescheduled", "reschedule missed key workout cautiously")
+            resolved_recommendation_indexes.add(index)
+        elif action in {"skip_missed_key_workout", "skip_missed_easy_workout"}:
+            workout_id = payload.get("workout_id")
+            workout = workouts_by_id.get(workout_id) if isinstance(workout_id, int) else None
+            if not workout or workout.status not in {"missed", "skipped"} or workout.completed_activity_id is not None:
+                skip(action, recommendation, "missed workout cannot be safely skipped")
+                continue
+            reason = "skip missed key workout to avoid quality stacking" if action == "skip_missed_key_workout" else "skip missed easy workout; do not stack volume"
+            changed = add_change(workout, "status", "skipped", reason)
+            changed = add_change(workout, "description", append_coach_note(current_value(workout, "description"), skip_note), reason) or changed
+            if not changed:
+                skip(action, recommendation, "missed workout is already marked skipped")
+            else:
+                resolved_recommendation_indexes.add(index)
 
+    unresolved_recommendations = [recommendation for index, recommendation in enumerate(recommendations) if index not in resolved_recommendation_indexes]
+    risk_after = adaptation_risk_snapshot(recommendation_status(unresolved_recommendations), dict(recommendation_result["metrics"]), unresolved_recommendations, len(changes))
     return {
         "plan_id": plan.id,
         "generated_at": datetime.now(UTC),
+        "summary": recommendation_result["summary"],
+        "adaptation_summary": adaptation_summary_text(str(recommendation_result["summary"]), len(changes), len(skipped)),
+        "risk_before": recommendation_result["risk_before"],
+        "risk_after": risk_after,
         "changes": changes,
         "skipped": skipped,
-        "recommendations": recommendations,
+        "recommendations": recommendations[:6],
     }
 
 
@@ -1770,11 +2012,14 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
     preview = plan_recommendation_preview_changes(db, user, plan)
     changes = list(preview["changes"])
     skipped = list(preview["skipped"])
+    if not changes:
+        raise ValueError("No automatic recommendation changes to apply")
     expected = normalize_preview_changes(expected_changes)
     if expected is not None and expected != json_safe(changes):
         raise ValueError("Recommendation preview is stale; refresh preview before applying")
     workouts_by_id = {workout.id: workout for workout in plan.workouts}
     allowed_fields = {"distance_km", "intensity", "description", "scheduled_date", "status"}
+    applied_summary = applied_adaptation_summary_text(str(preview.get("summary") or "Coach recommendations applied."), len(changes), len(skipped))
     try:
         for change in changes:
             workout_id = change.get("workout_id")
@@ -1794,6 +2039,9 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
             status="applied",
             recommendations_snapshot=json_safe({
                 "recommendations": preview["recommendations"],
+                "adaptation_summary": applied_summary,
+                "risk_before": preview.get("risk_before"),
+                "risk_after": preview.get("risk_after"),
             }),
             preview_changes={"changes": json_safe(changes), "skipped": json_safe(preview["skipped"])},
             applied_changes={"changes": json_safe(changes), "skipped": json_safe(skipped)},
@@ -1801,7 +2049,8 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
         db.add(audit)
         db.flush()
         audit_id = audit.id
-        create_plan_version(db, user, plan, "auto_adaptation", f"Applied {len(changes)} coach recommendation changes")
+        version = create_plan_version(db, user, plan, "auto_adaptation", f"Applied {len(changes)} coach recommendation changes")
+        db.flush()
         db.commit()
     except Exception:
         db.rollback()
@@ -1809,6 +2058,11 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
     return {
         "plan_id": plan.id,
         "audit_id": audit_id,
+        "plan_version_id": version.id,
+        "plan_version_number": version.version_number,
+        "adaptation_summary": applied_summary,
+        "risk_before": preview.get("risk_before"),
+        "risk_after": preview.get("risk_after"),
         "changes": changes,
         "skipped": skipped,
     }

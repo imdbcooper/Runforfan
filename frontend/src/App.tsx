@@ -2869,6 +2869,10 @@ function PlanVersions({ versions }: { versions: PlanVersion[] }) {
   </div>
 }
 
+function riskLevel(risk: Record<string, unknown> | null | undefined) {
+  return typeof risk?.level === "string" ? risk.level : "--"
+}
+
 function CoachRecommendations({ recommendations, preview, audits, error, actionError, loading, previewing, applying, onRefresh, onPreview, onApply }: { recommendations: PlanRecommendations | null; preview: PlanRecommendationPreview | null; audits: PlanRecommendationAudit[]; error: string; actionError: string; loading: boolean; previewing: boolean; applying: boolean; onRefresh: () => void; onPreview: () => void; onApply: () => void }) {
   const statusClass = recommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : recommendations?.status === "adjust" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"
   const statusLabel = recommendations?.status || (loading ? "loading" : error ? "error" : "idle")
@@ -2881,12 +2885,14 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
     {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100">{error}</div> : null}
     {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100">{actionError}</div> : null}
     {recommendations ? <>
-      <p className="mt-3 leading-5 text-zinc-300">{recommendations.summary}</p>
-      <div className="mt-3 grid gap-2 md:grid-cols-4">
+      <p className="mt-3 leading-5 text-zinc-300">{recommendations.adaptation_summary || recommendations.summary}</p>
+      <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-6">
         <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
         <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
         <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
         <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
+        <Stat label="risk" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
+        <Stat label="hard 7d" value={recommendations.metrics.upcoming_hard_workouts || 0} />
       </div>
       <div className="mt-3 grid gap-2">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
       {preview ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 p-2">
