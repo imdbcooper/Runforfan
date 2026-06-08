@@ -703,6 +703,8 @@ export type AnalyticsInsight = {
   severity: "info" | "warning" | "critical" | string
   title: string
   message: string
+  confidence: "low" | "medium" | "high" | string
+  evidence: Record<string, unknown>[]
   reasons: string[]
 }
 

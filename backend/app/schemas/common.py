@@ -310,6 +310,8 @@ class AnalyticsInsightOut(BaseModel):
     severity: str
     title: str
     message: str
+    confidence: str = "medium"
+    evidence: list[dict[str, object]] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
 

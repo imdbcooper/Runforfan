@@ -86,7 +86,7 @@ def load_planned_workouts(db: Session, user: User, from_date: date | None = None
         select(TrainingPlanWorkout)
         .join(TrainingPlan)
         .where(TrainingPlan.user_id == user.id, TrainingPlan.status == "active")
-        .options(selectinload(TrainingPlanWorkout.completed_activity))
+        .options(selectinload(TrainingPlanWorkout.completed_activity), selectinload(TrainingPlanWorkout.feedback))
         .order_by(TrainingPlanWorkout.scheduled_date.asc().nullslast(), TrainingPlanWorkout.id.asc())
     )
     if from_date:
@@ -384,7 +384,31 @@ def analytics_timeseries(db: Session, user: User, metric: str = "distance", gran
     return timeseries_from_activities(load_activities(db, user, from_date, to_date, timezone), metric, granularity, timezone)
 
 
-def insights_from_summary(summary: dict[str, object]) -> list[dict[str, object]]:
+def insight(severity: str, title: str, message: str, evidence: list[dict[str, object]], confidence: str = "medium", reasons: list[str] | None = None) -> dict[str, object]:
+    return {
+        "severity": severity,
+        "title": title,
+        "message": message,
+        "confidence": confidence,
+        "evidence": evidence,
+        "reasons": reasons if reasons is not None else [str(item.get("label") or item.get("metric") or item.get("source") or "evidence") for item in evidence],
+    }
+
+
+def prioritized_insights(insights: list[dict[str, object]], limit: int = 8) -> list[dict[str, object]]:
+    unique: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in insights:
+        title = str(item["title"])
+        if title in seen:
+            continue
+        seen.add(title)
+        unique.append(item)
+    unique.sort(key=lambda item: 0 if item.get("severity") == "warning" else 1)
+    return unique[:limit]
+
+
+def summary_based_insights(summary: dict[str, object]) -> list[dict[str, object]]:
     insights: list[dict[str, object]] = []
     activity_count = int(summary["activity_count"])
     distance = float(summary["total_distance_km"])
@@ -392,22 +416,178 @@ def insights_from_summary(summary: dict[str, object]) -> list[dict[str, object]]
     consistency = summary["consistency"] or {}
     adherence = summary.get("adherence")
     if activity_count == 0:
-        return [{"severity": "info", "title": "Недостаточно данных", "message": "За выбранный период нет активностей для надежной аналитики.", "reasons": ["activity_count = 0"]}]
-    insights.append({"severity": "info", "title": "Объем периода", "message": f"За период выполнено {activity_count} тренировок, {distance:.1f} км и {round(duration / 3600, 1)} ч работы.", "reasons": ["distance and duration are aggregated from activities"]})
+        return [insight("info", "Недостаточно данных", "За выбранный период нет активностей для надежной аналитики.", [{"metric": "activity_count", "value": 0, "source": "activities"}], "high")]
+    insights.append(insight("info", "Объем периода", f"За период выполнено {activity_count} тренировок, {distance:.1f} км и {round(duration / 3600, 1)} ч работы.", [{"metric": "activity_count", "value": activity_count, "source": "activities"}, {"metric": "distance_km", "value": round(distance, 1), "source": "activities"}, {"metric": "duration_seconds", "value": duration, "source": "activities"}], "high"))
     if summary.get("weighted_average_pace_seconds_per_km"):
-        insights.append({"severity": "info", "title": "Средний темп взвешен", "message": "Средний темп считается через общий объем и время, а не простым средним по тренировкам.", "reasons": ["duration / distance weighting"]})
+        insights.append(insight("info", "Средний темп взвешен", "Средний темп считается через общий объем и время, а не простым средним по тренировкам.", [{"metric": "weighted_average_pace_seconds_per_km", "value": summary["weighted_average_pace_seconds_per_km"], "method": "duration / distance weighting"}], "high"))
     if summary.get("estimated_vdot"):
         vdot = summary["estimated_vdot"]
-        insights.append({"severity": "info", "title": "Есть оценка VO2max/VDOT", "message": f"VDOT estimate: {vdot['value']} ({vdot['confidence']} confidence) по лучшему подходящему усилию.", "reasons": [str(vdot["source_reference"])]})
+        insights.append(insight("info", "Есть оценка VO2max/VDOT", f"VDOT estimate: {vdot['value']} ({vdot['confidence']} confidence) по лучшему подходящему усилию.", [{"metric": "vdot", "value": vdot["value"], "confidence": vdot["confidence"], "source": vdot["source_reference"]}], str(vdot["confidence"])))
     if adherence and (adherence.get("missed_workouts") or adherence.get("skipped_workouts")):
         missed = int(adherence.get("missed_workouts") or 0) + int(adherence.get("skipped_workouts") or 0)
-        insights.append({"severity": "warning", "title": "Есть пропуски плана", "message": f"За период {missed} planned sessions были missed/skipped.", "reasons": adherence.get("warnings") or []})
+        insights.append(insight("warning", "Есть пропуски плана", f"За период {missed} planned sessions были missed/skipped.", [{"metric": "missed_or_skipped_workouts", "value": missed, "source": "active_plan_workouts"}], "high", adherence.get("warnings") or []))
     if consistency.get("training_days_per_week") is not None:
-        insights.append({"severity": "info", "title": "Стабильность", "message": f"Средняя частота: {consistency['training_days_per_week']} тренировочных дней в неделю.", "reasons": ["unique activity dates / selected weeks"]})
+        insights.append(insight("info", "Стабильность", f"Средняя частота: {consistency['training_days_per_week']} тренировочных дней в неделю.", [{"metric": "training_days_per_week", "value": consistency["training_days_per_week"], "method": "unique activity dates / selected weeks"}], "medium"))
     if summary.get("training_load") is None:
-        insights.append({"severity": "info", "title": "Load пока ограничен", "message": "Training load не рассчитан, потому что у активностей нет aerobic training stress.", "reasons": ["missing aerobic_training_stress"]})
-    return insights[:5]
+        insights.append(insight("info", "Load пока ограничен", "Training load не рассчитан, потому что у активностей нет aerobic training stress.", [{"metric": "aerobic_training_stress_count", "value": 0, "source": "activities"}], "high", ["missing aerobic_training_stress"]))
+    return insights
+
+
+def activity_pace_seconds(activity: Activity) -> int | None:
+    if activity.average_pace_seconds_per_km:
+        return activity.average_pace_seconds_per_km
+    if activity.distance_km and activity.duration_seconds:
+        return round(activity.duration_seconds / activity.distance_km)
+    return None
+
+
+def week_distance_buckets(activities: list[Activity], timezone: ZoneInfo = ZoneInfo("UTC"), from_date: date | None = None, to_date: date | None = None) -> list[dict[str, object]]:
+    buckets: dict[date, float] = defaultdict(float)
+    if from_date and to_date:
+        current = bucket_start(from_date, "week")
+        end = bucket_start(to_date, "week")
+        while current <= end:
+            buckets[current] = 0.0
+            current += timedelta(days=7)
+    for activity in activities:
+        activity_date = activity_local_date(activity, timezone)
+        if activity_date and activity.distance_km:
+            buckets[bucket_start(activity_date, "week")] += float(activity.distance_km)
+    return [{"week_start": start, "distance_km": round(distance, 1)} for start, distance in sorted(buckets.items())]
+
+
+def hard_workout(workout: TrainingPlanWorkout) -> bool:
+    markers = {workout.workout_type or "", workout.intensity or "", workout.title or ""}
+    haystack = " ".join(markers).lower()
+    return any(marker in haystack for marker in ("interval", "tempo", "threshold", "hill", "race", "hard"))
+
+
+def hard_activity_signal(activity: Activity) -> bool:
+    markers = {activity.title or "", activity.activity_type or "", activity.aerobic_training_effect or ""}
+    haystack = " ".join(markers).lower().replace("_", " ").replace("-", " ")
+    return any(marker in haystack for marker in ("interval", "tempo", "threshold", "hill", "race", "time trial", "hard", "anaerobic", "забег", "соревн", "тест"))
+
+
+def hard_session_count(activities: list[Activity], workouts: list[TrainingPlanWorkout]) -> int:
+    linked = {workout.completed_activity_id: workout for workout in workouts if workout.completed_activity_id is not None}
+    count = 0
+    for activity in activities:
+        workout = linked.get(activity.id)
+        if (workout and hard_workout(workout)) or hard_activity_signal(activity):
+            count += 1
+    return count
+
+
+def activity_is_run_like(activity: Activity) -> bool:
+    value = (activity.activity_type or "").lower().replace("_", " ").replace("-", " ")
+    return any(marker in value for marker in ("run", "бег"))
+
+
+def easy_running_activities(activities: list[Activity], workouts: list[TrainingPlanWorkout]) -> list[Activity]:
+    linked = {workout.completed_activity_id: workout for workout in workouts if workout.completed_activity_id is not None}
+    result = []
+    for activity in activities:
+        if not activity.distance_km or not activity.duration_seconds:
+            continue
+        if not activity_is_run_like(activity):
+            continue
+        workout = linked.get(activity.id)
+        if workout:
+            if hard_workout(workout) or (workout.intensity and workout.intensity not in {"easy", "recovery", "strides"}):
+                continue
+        elif hard_activity_signal(activity):
+            continue
+        result.append(activity)
+    return result
+
+
+def weighted_pace_and_hr(activities: list[Activity]) -> tuple[int | None, int | None]:
+    return weighted_average_pace(activities), weighted_average_hr(activities)
+
+
+def chronological_activities(activities: list[Activity]) -> list[Activity]:
+    def started_key(activity: Activity) -> datetime:
+        started_at = activity.started_at
+        if started_at is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if started_at.tzinfo is None:
+            return started_at.replace(tzinfo=UTC)
+        return started_at.astimezone(UTC)
+
+    return sorted(activities, key=started_key)
+
+
+def insights_from_data(summary: dict[str, object], activities: list[Activity], workouts: list[TrainingPlanWorkout] | None = None, timezone: ZoneInfo = ZoneInfo("UTC")) -> list[dict[str, object]]:
+    workouts = workouts or []
+    activity_count = int(summary["activity_count"])
+    adherence = summary.get("adherence")
+    insights = summary_based_insights(summary)
+    if activity_count == 0:
+        return insights
+
+    period = summary.get("period") if isinstance(summary.get("period"), dict) else {}
+    period_from = period.get("from_date") if isinstance(period.get("from_date"), date) else None
+    period_to = period.get("to_date") if isinstance(period.get("to_date"), date) else None
+    weekly = week_distance_buckets(activities, timezone, period_from, period_to)
+    if len(weekly) >= 3:
+        last_three = weekly[-3:]
+        distances = [float(item["distance_km"]) for item in last_three]
+        growth_rates = [(distances[index] - distances[index - 1]) / distances[index - 1] for index in range(1, len(distances)) if distances[index - 1] > 0]
+        consecutive_weeks = all(last_three[index]["week_start"] == last_three[index - 1]["week_start"] + timedelta(days=7) for index in range(1, len(last_three)))
+        if consecutive_weeks and all(distance > 0 for distance in distances) and growth_rates and all(0 <= rate <= 0.12 for rate in growth_rates) and (not adherence or float(adherence.get("completion_rate") or 0) >= 0.8):
+            insights.append(insight("info", "Объем растет стабильно", "Недельный объем растет в безопасном диапазоне, а adherence остается высоким.", [{"metric": "weekly_distance_km", "value": item["distance_km"], "week_start": item["week_start"].isoformat(), "source": "activities"} for item in last_three], "medium"))
+
+    hard_count = hard_session_count(activities, workouts)
+    hard_share = hard_count / activity_count if activity_count else 0
+    if activity_count >= 3 and hard_share > 0.4:
+        insights.append(insight("warning", "Слишком много интенсивности", "Доля интенсивных тренировок выше 40% за выбранный период; это сигнал к более спокойному распределению нагрузки.", [{"metric": "hard_session_share", "value": round(hard_share, 2), "threshold": 0.4, "source": "linked_workouts_and_training_effect"}, {"metric": "hard_sessions", "value": hard_count, "source": "linked_workouts_and_training_effect"}], "medium"))
+
+    ordered_activities = chronological_activities(activities)
+    easy_runs = easy_running_activities(ordered_activities, workouts)
+    if len(easy_runs) >= 4:
+        midpoint = len(easy_runs) // 2
+        early_pace, early_hr = weighted_pace_and_hr(easy_runs[:midpoint])
+        recent_pace, recent_hr = weighted_pace_and_hr(easy_runs[midpoint:])
+        if early_pace and recent_pace and recent_pace <= early_pace * 0.97 and (early_hr is None or recent_hr is None or recent_hr <= early_hr + 2):
+            insights.append(insight("info", "Темп на easy runs улучшился", "Easy-run weighted pace стал быстрее, при этом средний пульс не вырос существенно.", [{"metric": "early_easy_pace_seconds_per_km", "value": early_pace, "source": "easy_runs"}, {"metric": "recent_easy_pace_seconds_per_km", "value": recent_pace, "source": "easy_runs"}, {"metric": "early_easy_hr_bpm", "value": early_hr, "source": "easy_runs"}, {"metric": "recent_easy_hr_bpm", "value": recent_hr, "source": "easy_runs"}], "medium" if early_hr and recent_hr else "low"))
+
+    feedback_reference_date = period_to or max((activity_local_date(activity, timezone) for activity in activities if activity_local_date(activity, timezone)), default=None)
+    feedback_cutoff = feedback_reference_date - timedelta(days=14) if feedback_reference_date else None
+    recent_feedback = [
+        workout.feedback
+        for workout in workouts
+        if workout.feedback
+        and (workout.feedback.rpe is not None or workout.feedback.fatigue is not None)
+        and (feedback_cutoff is None or (workout.scheduled_date is not None and workout.scheduled_date >= feedback_cutoff))
+    ]
+    high_feedback = [feedback for feedback in recent_feedback if (feedback.rpe is not None and feedback.rpe >= 8) or (feedback.fatigue is not None and feedback.fatigue >= 8)]
+    recent_load_window = ordered_activities[-4:]
+    recent_window_loads = [float(activity.aerobic_training_stress) for activity in recent_load_window if activity.aerobic_training_stress is not None]
+    load_spike = len(recent_load_window) == 4 and len(recent_window_loads) == 4 and sum(recent_window_loads[-2:]) > sum(recent_window_loads[:2]) * 1.35
+    if high_feedback or load_spike:
+        evidence = []
+        if high_feedback:
+            evidence.append({"metric": "high_fatigue_or_rpe_feedback", "value": len(high_feedback), "source": "workout_feedback"})
+        if load_spike:
+            evidence.append({"metric": "recent_load_spike_ratio", "value": round(sum(recent_window_loads[-2:]) / max(sum(recent_window_loads[:2]), 1), 2), "source": "aerobic_training_stress"})
+        insights.append(insight("warning", "Возможная усталость", "Нагрузка или субъективная обратная связь указывает на возможную усталость; держи ближайшие тренировки контролируемыми.", evidence, "medium" if high_feedback else "low"))
+
+    missing_hr = len([activity for activity in activities if activity.average_heart_rate_bpm is None])
+    missing_load = len([activity for activity in activities if activity.aerobic_training_stress is None])
+    if missing_hr or missing_load:
+        insights.append(insight("info", "Данные неполные", "Часть аналитики имеет ограниченную точность из-за отсутствующих HR/load данных.", [{"metric": "activities_missing_hr", "value": missing_hr, "source": "activities"}, {"metric": "activities_missing_training_load", "value": missing_load, "source": "activities"}], "high"))
+
+    return prioritized_insights(insights)
+
+
+def insights_from_summary(summary: dict[str, object]) -> list[dict[str, object]]:
+    """Compatibility helper for insights derivable from the supplied summary only."""
+    return prioritized_insights(summary_based_insights(summary))
 
 
 def analytics_insights(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> list[dict[str, object]]:
-    return insights_from_summary(user_analytics(db, user, from_date, to_date))
+    timezone = profile_timezone(db, user)
+    activities = load_activities(db, user, from_date, to_date, timezone)
+    workouts = load_planned_workouts(db, user, from_date, to_date)
+    summary = analytics_summary_from_data(activities, workouts, from_date, to_date, latest_manual_vo2max(db, user, from_date, to_date, timezone), timezone)
+    return insights_from_data(summary, activities, workouts, timezone)

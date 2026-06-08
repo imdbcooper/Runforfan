@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 try:
-    from app.models import Activity, ActivitySegment, AthleteMeasurement, TrainingPlan, TrainingPlanWorkout
-    from app.services.analytics import activity_local_date, analytics_summary_from_data, best_efforts, insights_from_summary, measurement_local_date, timeseries_from_activities
+    from app.models import Activity, ActivitySegment, AthleteMeasurement, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback
+    from app.services.analytics import activity_local_date, analytics_summary_from_data, best_efforts, insights_from_data, insights_from_summary, measurement_local_date, timeseries_from_activities
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         raise unittest.SkipTest("Backend dependencies are required for analytics tests") from exc
@@ -17,6 +17,7 @@ def make_activity(activity_id: int, started_at: datetime, distance_km: float, du
         user_id=1,
         title=f"Activity {activity_id}",
         started_at=started_at,
+        activity_type="outdoor_run",
         distance_km=distance_km,
         duration_seconds=duration_seconds,
         average_pace_seconds_per_km=round(duration_seconds / distance_km),
@@ -24,19 +25,20 @@ def make_activity(activity_id: int, started_at: datetime, distance_km: float, du
     )
 
 
-def make_workout(workout_id: int, scheduled_date: date, status: str = "planned") -> TrainingPlanWorkout:
+def make_workout(workout_id: int, scheduled_date: date, status: str = "planned", *, activity_id: int | None = None, workout_type: str = "easy", intensity: str = "easy") -> TrainingPlanWorkout:
     workout = TrainingPlanWorkout(
         id=workout_id,
         plan_id=10,
         scheduled_date=scheduled_date,
         status=status,
+        completed_activity_id=activity_id,
         week_index=1,
         day_index=1,
-        workout_type="easy",
+        workout_type=workout_type,
         title=f"Workout {workout_id}",
         distance_km=5.0,
         duration_seconds=1800,
-        intensity="easy",
+        intensity=intensity,
         description=None,
     )
     TrainingPlan(id=10, user_id=1, title="Plan", goal_type="10k", available_days_per_week=3, status="active", workouts=[workout])
@@ -151,6 +153,189 @@ class AnalyticsTests(unittest.TestCase):
         insights = insights_from_summary(summary)
 
         self.assertTrue(any("VO2max" in insight["title"] for insight in insights))
+
+    def test_insights_include_evidence_and_confidence(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 145)
+        summary = analytics_summary_from_data([activity], [], date(2026, 6, 1), date(2026, 6, 7))
+
+        insights = insights_from_data(summary, [activity], [])
+
+        self.assertTrue(insights)
+        self.assertTrue(all(insight["evidence"] for insight in insights))
+        self.assertTrue(all(insight["confidence"] in {"low", "medium", "high"} for insight in insights))
+
+    def test_insights_detect_too_much_intensity(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 150),
+            make_activity(2, datetime(2026, 6, 2, 8, tzinfo=UTC), 5.0, 1450, 155),
+            make_activity(3, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1800, 140),
+        ]
+        workouts = [
+            make_workout(1, date(2026, 6, 1), "done", activity_id=1, workout_type="interval", intensity="threshold"),
+            make_workout(2, date(2026, 6, 2), "done", activity_id=2, workout_type="tempo", intensity="threshold"),
+            make_workout(3, date(2026, 6, 3), "done", activity_id=3, workout_type="easy", intensity="easy"),
+        ]
+        summary = analytics_summary_from_data(activities, workouts, date(2026, 6, 1), date(2026, 6, 7))
+
+        insights = insights_from_data(summary, activities, workouts)
+
+        insight = next(item for item in insights if item["title"] == "Слишком много интенсивности")
+        self.assertEqual(insight["severity"], "warning")
+        self.assertTrue(any(item["metric"] == "hard_session_share" for item in insight["evidence"]))
+
+    def test_insights_detect_easy_pace_improvement_with_stable_hr(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1800, 145),
+            make_activity(2, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1780, 145),
+            make_activity(3, datetime(2026, 6, 8, 8, tzinfo=UTC), 5.0, 1680, 146),
+            make_activity(4, datetime(2026, 6, 10, 8, tzinfo=UTC), 5.0, 1660, 146),
+        ]
+        workouts = [make_workout(index, activity_local_date(activity, ZoneInfo("UTC")) or date(2026, 6, 1), "done", activity_id=activity.id) for index, activity in enumerate(activities, start=1)]
+        summary = analytics_summary_from_data(activities, workouts, date(2026, 6, 1), date(2026, 6, 14))
+
+        insights = insights_from_data(summary, activities, workouts)
+
+        self.assertTrue(any(item["title"] == "Темп на easy runs улучшился" for item in insights))
+
+    def test_easy_pace_insight_excludes_non_run_linked_to_easy_workout(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1800, 145),
+            make_activity(2, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1780, 145),
+            make_activity(3, datetime(2026, 6, 8, 8, tzinfo=UTC), 5.0, 1500, 146),
+            make_activity(4, datetime(2026, 6, 10, 8, tzinfo=UTC), 5.0, 1480, 146),
+        ]
+        for activity in activities[2:]:
+            activity.activity_type = "ride"
+        workouts = [make_workout(index, activity_local_date(activity, ZoneInfo("UTC")) or date(2026, 6, 1), "done", activity_id=activity.id) for index, activity in enumerate(activities, start=1)]
+        summary = analytics_summary_from_data(activities, workouts, date(2026, 6, 1), date(2026, 6, 14))
+
+        insights = insights_from_data(summary, activities, workouts)
+
+        self.assertFalse(any(item["title"] == "Темп на easy runs улучшился" for item in insights))
+
+    def test_easy_pace_insight_excludes_unlinked_hard_runs(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1800, 145),
+            make_activity(2, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1780, 145),
+            make_activity(3, datetime(2026, 6, 8, 8, tzinfo=UTC), 5.0, 1500, 146),
+            make_activity(4, datetime(2026, 6, 10, 8, tzinfo=UTC), 5.0, 1480, 146),
+        ]
+        activities[2].title = "Tempo run"
+        activities[3].title = "5K race"
+        summary = analytics_summary_from_data(activities, [], date(2026, 6, 1), date(2026, 6, 14))
+
+        insights = insights_from_data(summary, activities, [])
+
+        self.assertFalse(any(item["title"] == "Темп на easy runs улучшился" for item in insights))
+
+    def test_stable_volume_insight_requires_no_zero_week_gap(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 10.0, 3600),
+            make_activity(2, datetime(2026, 6, 15, 8, tzinfo=UTC), 11.0, 3900),
+            make_activity(3, datetime(2026, 6, 22, 8, tzinfo=UTC), 12.0, 4200),
+        ]
+        summary = analytics_summary_from_data(activities, [], date(2026, 6, 1), date(2026, 6, 28))
+
+        insights = insights_from_data(summary, activities, [])
+
+        self.assertFalse(any(item["title"] == "Объем растет стабильно" for item in insights))
+
+    def test_stable_volume_insight_requires_consecutive_weeks_for_all_time(self):
+        activities = [
+            make_activity(1, datetime(2026, 1, 5, 8, tzinfo=UTC), 10.0, 3600),
+            make_activity(2, datetime(2026, 3, 2, 8, tzinfo=UTC), 11.0, 3900),
+            make_activity(3, datetime(2026, 6, 1, 8, tzinfo=UTC), 12.0, 4200),
+        ]
+        summary = analytics_summary_from_data(activities, [], None, None)
+
+        insights = insights_from_data(summary, activities, [])
+
+        self.assertFalse(any(item["title"] == "Объем растет стабильно" for item in insights))
+
+    def test_insights_detect_fatigue_without_medical_advice(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 155)
+        workout = make_workout(1, date(2026, 6, 1), "done", activity_id=1)
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9, pain=False)
+        summary = analytics_summary_from_data([activity], [workout], date(2026, 6, 1), date(2026, 6, 7))
+
+        insights = insights_from_data(summary, [activity], [workout])
+        fatigue = next(item for item in insights if item["title"] == "Возможная усталость")
+
+        self.assertEqual(fatigue["severity"], "warning")
+        self.assertNotIn("doctor", fatigue["message"].lower())
+        self.assertNotIn("medical", fatigue["message"].lower())
+
+    def test_fatigue_insight_ignores_stale_feedback_in_long_period(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 155)
+        workout = make_workout(1, date(2026, 3, 1), "done", activity_id=1)
+        workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, fatigue=9, pain=False)
+        summary = analytics_summary_from_data([activity], [workout], date(2026, 3, 1), date(2026, 6, 8))
+
+        insights = insights_from_data(summary, [activity], [workout])
+
+        self.assertFalse(any(item["title"] == "Возможная усталость" for item in insights))
+
+    def test_warning_insights_are_prioritized_before_cap(self):
+        activities = [
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1200, 175),
+            make_activity(2, datetime(2026, 6, 2, 8, tzinfo=UTC), 5.0, 1500, 155),
+            make_activity(3, datetime(2026, 6, 8, 8, tzinfo=UTC), 6.0, 1800, 156),
+            make_activity(4, datetime(2026, 6, 9, 8, tzinfo=UTC), 5.0, 1700, 145),
+            make_activity(5, datetime(2026, 6, 15, 8, tzinfo=UTC), 6.0, 2000, 145),
+            make_activity(6, datetime(2026, 6, 16, 8, tzinfo=UTC), 6.0, 1980, 145),
+        ]
+        activities[0].title = "5K race"
+        workouts = [
+            make_workout(1, date(2026, 6, 1), "done", activity_id=1, workout_type="race", intensity="threshold"),
+            make_workout(2, date(2026, 6, 2), "done", activity_id=2, workout_type="tempo", intensity="threshold"),
+            make_workout(3, date(2026, 6, 8), "done", activity_id=3, workout_type="interval", intensity="threshold"),
+            make_workout(4, date(2026, 6, 9), "done", activity_id=4),
+            make_workout(5, date(2026, 6, 15), "done", activity_id=5),
+            make_workout(6, date(2026, 6, 16), "done", activity_id=6),
+            make_workout(7, date(2026, 6, 17), "missed"),
+        ]
+        workouts[5].feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=6, rpe=9, pain=False)
+        summary = analytics_summary_from_data(activities, workouts, date(2026, 6, 1), date(2026, 6, 21))
+
+        insights = insights_from_data(summary, activities, workouts)
+        titles = [item["title"] for item in insights]
+
+        self.assertLessEqual(len(insights), 8)
+        self.assertIn("Слишком много интенсивности", titles)
+        self.assertIn("Возможная усталость", titles)
+
+    def test_load_spike_uses_chronological_recent_activities(self):
+        activities = [
+            make_activity(4, datetime(2026, 6, 4, 8, tzinfo=UTC), 5.0, 1500, 155),
+            make_activity(3, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1500, 155),
+            make_activity(2, datetime(2026, 6, 2, 8, tzinfo=UTC), 5.0, 1500, 145),
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 145),
+        ]
+        for activity, load in zip(activities, [90, 80, 20, 20]):
+            activity.aerobic_training_stress = load
+        summary = analytics_summary_from_data(activities, [], date(2026, 6, 1), date(2026, 6, 4))
+
+        insights = insights_from_data(summary, activities, [])
+        fatigue = next(item for item in insights if item["title"] == "Возможная усталость")
+
+        self.assertTrue(any(item["metric"] == "recent_load_spike_ratio" for item in fatigue["evidence"]))
+
+    def test_load_spike_ignores_stale_loaded_sessions_when_recent_load_missing(self):
+        activities = [
+            make_activity(6, datetime(2026, 6, 6, 8, tzinfo=UTC), 5.0, 1500, 145),
+            make_activity(5, datetime(2026, 6, 5, 8, tzinfo=UTC), 5.0, 1500, 145),
+            make_activity(4, datetime(2026, 6, 4, 8, tzinfo=UTC), 5.0, 1500, 155),
+            make_activity(3, datetime(2026, 6, 3, 8, tzinfo=UTC), 5.0, 1500, 155),
+            make_activity(2, datetime(2026, 6, 2, 8, tzinfo=UTC), 5.0, 1500, 145),
+            make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1500, 145),
+        ]
+        for activity, load in zip(activities[2:], [90, 80, 20, 20]):
+            activity.aerobic_training_stress = load
+        summary = analytics_summary_from_data(activities, [], date(2026, 6, 1), date(2026, 6, 6))
+
+        insights = insights_from_data(summary, activities, [])
+
+        self.assertFalse(any(item["title"] == "Возможная усталость" for item in insights))
 
 
 if __name__ == "__main__":
