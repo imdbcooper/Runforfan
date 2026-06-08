@@ -74,6 +74,9 @@ class FakeDb:
     def refresh(self, _item):
         return None
 
+    def scalar(self, _query):
+        return None
+
 
 class PlanManagementTests(unittest.TestCase):
     def test_update_plan_changes_title_and_status(self):

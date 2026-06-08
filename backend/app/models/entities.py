@@ -358,6 +358,23 @@ class TrainingPlan(Base, TimestampMixin):
 
     workouts: Mapped[list["TrainingPlanWorkout"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
     goals: Mapped[list[RunningGoal]] = relationship(back_populates="training_plan")
+    versions: Mapped[list["TrainingPlanVersion"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+
+
+class TrainingPlanVersion(Base):
+    __tablename__ = "plan_versions"
+    __table_args__ = (UniqueConstraint("plan_id", "version_number", name="uq_plan_versions_plan_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(64))
+    summary: Mapped[str | None] = mapped_column(Text)
+    snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    plan: Mapped[TrainingPlan] = relationship(back_populates="versions")
 
 
 class TrainingPlanWorkout(Base):

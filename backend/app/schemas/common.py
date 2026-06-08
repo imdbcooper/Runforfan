@@ -951,6 +951,18 @@ class PlanRecommendationAuditOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlanVersionOut(BaseModel):
+    id: int
+    plan_id: int
+    version_number: int
+    reason: str
+    summary: str | None = None
+    snapshot_json: dict | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class PlanWorkoutLinkActivityRequest(BaseModel):
     activity_id: int
 

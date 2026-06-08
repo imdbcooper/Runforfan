@@ -237,6 +237,27 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_audit_log_created_at ON audit_log (created_at)",
         ),
     ),
+    (
+        "20260608_0012_plan_versions",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS plan_versions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                version_number INTEGER NOT NULL,
+                reason VARCHAR(64) NOT NULL,
+                summary TEXT,
+                snapshot_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT uq_plan_versions_plan_number UNIQUE (plan_id, version_number)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_plan_versions_user_id ON plan_versions (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_versions_plan_id ON plan_versions (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_versions_created_at ON plan_versions (created_at)",
+        ),
+    ),
 )
 
 

@@ -95,6 +95,9 @@ class FakeDb:
     def refresh(self, _item):
         return None
 
+    def scalar(self, _query):
+        return None
+
 
 class PlanAdjustmentRecommendationTests(unittest.TestCase):
     def recommendations(self, plan: TrainingPlan) -> dict[str, object]:
@@ -363,10 +366,13 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertEqual(result["audit_id"], 77)
         self.assertEqual(upcoming.distance_km, 4.7)
         self.assertTrue(db.committed)
-        self.assertEqual(len(db.added), 1)
+        self.assertEqual(len(db.added), 2)
         self.assertEqual(db.added[0].user_id, 1)
         self.assertEqual(db.added[0].plan_id, 10)
         self.assertEqual(db.added[0].action, "apply_recommendations")
+        self.assertEqual(db.added[1].user_id, 1)
+        self.assertEqual(db.added[1].plan_id, 10)
+        self.assertEqual(db.added[1].reason, "auto_adaptation")
 
     def test_repeat_apply_does_not_stack_volume_reduction(self):
         upcoming = make_workout(2, date(2026, 6, 9), distance_km=5.5, day_index=2)

@@ -3,8 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
+from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanVersion, TrainingPlanWorkout, User
+from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanVersionOut, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
 from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, complete_workout, delete_plan, duplicate_plan, generate_plan, link_activity_to_workout, patch_workout_feedback, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
@@ -138,6 +138,17 @@ def list_training_plan_recommendation_audits(plan_id: int, user: User = Depends(
         .where(TrainingPlanRecommendationAudit.plan_id == plan_id, TrainingPlanRecommendationAudit.user_id == user.id)
         .order_by(TrainingPlanRecommendationAudit.created_at.desc(), TrainingPlanRecommendationAudit.id.desc())
         .limit(20)
+    ))
+
+
+@router.get("/plans/{plan_id}/versions", response_model=list[PlanVersionOut])
+def list_training_plan_versions(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    get_user_plan(db, user, plan_id)
+    return list(db.scalars(
+        select(TrainingPlanVersion)
+        .where(TrainingPlanVersion.plan_id == plan_id, TrainingPlanVersion.user_id == user.id)
+        .order_by(TrainingPlanVersion.version_number.desc(), TrainingPlanVersion.id.desc())
+        .limit(50)
     ))
 
 

@@ -17,6 +17,7 @@ from app.models import (
     ScreenshotSource,
     TrainingPlan,
     TrainingPlanRecommendationAudit,
+    TrainingPlanVersion,
     TrainingPlanWorkout,
     TrainingPlanWorkoutFeedback,
     TrainingZone,
@@ -94,6 +95,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "activities": [activity_export(activity) for activity in activities],
         "goals": [model_to_dict(item) for item in db.scalars(select(RunningGoal).where(RunningGoal.user_id == user.id).order_by(RunningGoal.created_at.desc()))],
         "training_plans": [training_plan_export(plan) for plan in plans],
+        "plan_versions": [model_to_dict(item) for item in db.scalars(select(TrainingPlanVersion).where(TrainingPlanVersion.user_id == user.id).order_by(TrainingPlanVersion.plan_id.asc(), TrainingPlanVersion.version_number.asc()))],
         "performance_results": [model_to_dict(item) for item in db.scalars(select(PerformanceResult).where(PerformanceResult.user_id == user.id).order_by(PerformanceResult.result_date.desc()))],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -110,6 +112,7 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
     ("audit_log", AuditLog),
     ("training_plan_recommendation_audits", TrainingPlanRecommendationAudit),
+    ("plan_versions", TrainingPlanVersion),
     ("training_plan_workout_feedback", TrainingPlanWorkoutFeedback),
     ("running_goals", RunningGoal),
     ("performance_results", PerformanceResult),

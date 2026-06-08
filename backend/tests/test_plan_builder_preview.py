@@ -511,13 +511,29 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         new_plan = TrainingPlan(id=2, user_id=1, title="New", goal_type="10k", status="draft", available_days_per_week=3)
 
         class FakeDb:
+            def __init__(self):
+                self.added = []
+
             def scalars(self, _query):
                 return [existing_active]
 
-        apply_generated_plan_status(FakeDb(), User(id=1, display_name="Runner"), new_plan, activate=True)
+            def flush(self):
+                return None
+
+            def scalar(self, _query):
+                return None
+
+            def add(self, item):
+                self.added.append(item)
+
+        fake_db = FakeDb()
+
+        apply_generated_plan_status(fake_db, User(id=1, display_name="Runner"), new_plan, activate=True)
 
         self.assertEqual(existing_active.status, "archived")
         self.assertEqual(new_plan.status, "active")
+        self.assertEqual(len(fake_db.added), 1)
+        self.assertEqual(fake_db.added[0].reason, "manual_edit")
 
 
 if __name__ == "__main__":

@@ -384,6 +384,16 @@ export type PlanRecommendationAudit = {
   created_at: string
 }
 
+export type PlanVersion = {
+  id: number
+  plan_id: number
+  version_number: number
+  reason: "initial" | "manual_edit" | "auto_adaptation" | "user_request" | string
+  summary: string | null
+  snapshot_json: Record<string, unknown> | null
+  created_at: string
+}
+
 export type Plan = {
   id: number
   title: string
@@ -973,6 +983,7 @@ export const api = {
   previewPlanRecommendations: (id: number) => request<PlanRecommendationPreview>(`/planning/plans/${id}/recommendations/preview`, { method: "POST", body: "{}" }),
   applyPlanRecommendations: (id: number, changes: PlanRecommendationChange[]) => request<PlanRecommendationApplyResult>(`/planning/plans/${id}/recommendations/apply`, { method: "POST", body: JSON.stringify({ changes }) }),
   planRecommendationAudit: (id: number) => request<PlanRecommendationAudit[]>(`/planning/plans/${id}/recommendations/audit`),
+  planVersions: (id: number) => request<PlanVersion[]>(`/planning/plans/${id}/versions`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlan: (id: number, payload: Record<string, unknown>) => request<Plan>(`/planning/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   duplicatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/duplicate`, { method: "POST", body: "{}" }),

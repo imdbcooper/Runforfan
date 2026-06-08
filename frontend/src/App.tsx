@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -2179,6 +2179,7 @@ function Planning() {
   const [recommendations, setRecommendations] = useState<PlanRecommendations | null>(null)
   const [recommendationPreview, setRecommendationPreview] = useState<PlanRecommendationPreview | null>(null)
   const [recommendationAudits, setRecommendationAudits] = useState<PlanRecommendationAudit[]>([])
+  const [planVersions, setPlanVersions] = useState<PlanVersion[]>([])
   const [recommendationError, setRecommendationError] = useState("")
   const [recommendationActionError, setRecommendationActionError] = useState("")
   const [loadingRecommendations, setLoadingRecommendations] = useState(false)
@@ -2251,6 +2252,7 @@ function Planning() {
     setResult(plan)
     await loadPlans(plan.id)
     await loadRecommendations(plan.id)
+    await loadPlanVersions(plan.id)
   }
 
   async function updatePlanStatus(plan: Plan, status: "completed" | "archived") {
@@ -2261,6 +2263,7 @@ function Planning() {
       await loadPlans(updated.id)
       await loadRecommendations(updated.id)
       await loadRecommendationAudits(updated.id)
+      await loadPlanVersions(updated.id)
     } catch (error) {
       console.error(error)
       setPlanActionError(`Не удалось обновить план #${plan.id}`)
@@ -2277,6 +2280,7 @@ function Planning() {
     try {
       const updated = await api.updatePlan(plan.id, { title })
       await loadPlans(updated.id)
+      await loadPlanVersions(updated.id)
     } catch (error) {
       console.error(error)
       setPlanActionError(`Не удалось переименовать план #${plan.id}`)
@@ -2342,6 +2346,7 @@ function Planning() {
     await loadPlanWeeks(plan.id)
     await loadRecommendations(plan.id)
     await loadPlans(plan.id)
+    await loadPlanVersions(plan.id)
   }
 
   async function patchWorkout(workout: PlanWorkout, payload: Record<string, unknown>, errorMessage: string) {
@@ -2481,6 +2486,15 @@ function Planning() {
     }
   }
 
+  async function loadPlanVersions(planId: number) {
+    try {
+      setPlanVersions(await api.planVersions(planId))
+    } catch (error) {
+      console.error(error)
+      setPlanVersions([])
+    }
+  }
+
   async function previewRecommendations(planId: number) {
     setPreviewingRecommendations(true)
     setRecommendationActionError("")
@@ -2507,6 +2521,7 @@ function Planning() {
       await loadPlanWeeks(applied.plan.id)
       await loadRecommendations(applied.plan.id)
       await loadRecommendationAudits(applied.plan.id)
+      await loadPlanVersions(applied.plan.id)
     } catch (error) {
       console.error(error)
       setRecommendationActionError("Не удалось применить корректировки")
@@ -2521,6 +2536,7 @@ function Planning() {
       void loadPlanWeeks(result.id)
       void loadRecommendations(result.id)
       void loadRecommendationAudits(result.id)
+      void loadPlanVersions(result.id)
     }
     else {
       setPlanWeeks([])
@@ -2529,6 +2545,7 @@ function Planning() {
       setRecommendations(null)
       setRecommendationPreview(null)
       setRecommendationAudits([])
+      setPlanVersions([])
       setRecommendationError("")
       setRecommendationActionError("")
     }
@@ -2590,6 +2607,7 @@ function Planning() {
           </div>
           {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
           <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
+          <PlanVersions versions={planVersions} />
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="weeks" value={weekCount} />
             <Stat label="workouts" value={result.workouts.length} />
@@ -2698,6 +2716,20 @@ function PlanIntensitySplit({ split }: { split: { key: string; value: number; pe
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Intensity split</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">planned time</Badge></div>
     <div className="mt-3 grid gap-2 md:grid-cols-5">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)}</p></div>)}</div>
+  </div>
+}
+
+function PlanVersions({ versions }: { versions: PlanVersion[] }) {
+  return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">Plan versions</p><p className="mt-1 text-zinc-500">Immutable snapshots for generation, manual edits and adaptation.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{versions.length} saved</Badge></div>
+    {versions.length ? <div className="mt-3 grid gap-2">{versions.slice(0, 5).map((version) => {
+      const workoutCount = Array.isArray(version.snapshot_json?.workouts) ? version.snapshot_json.workouts.length : 0
+      return <div key={version.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-2 md:grid-cols-[5rem_1fr_auto] md:items-center">
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">v{version.version_number}</div>
+        <div><p className="font-medium text-white">{version.summary || version.reason}</p><p className="mt-1 text-zinc-500">{version.reason} · {workoutCount} workouts · {new Date(version.created_at).toLocaleString("ru-RU")}</p></div>
+        <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">snapshot</Badge>
+      </div>
+    })}</div> : <p className="mt-3 text-zinc-500">Versions will appear after generating or editing a plan.</p>}
   </div>
 }
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, TrainingZone, User
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
+from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.zones import calculated_zones, zone_type_for_unit
 
@@ -1261,6 +1262,7 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
         db.add(audit)
         db.flush()
         audit_id = audit.id
+        create_plan_version(db, user, plan, "auto_adaptation", f"Applied {len(changes)} coach recommendation changes")
         db.commit()
     except Exception:
         db.rollback()
@@ -1947,6 +1949,7 @@ def apply_generated_plan_status(db: Session, user: User, plan: TrainingPlan, act
     for active_plan in active_plans:
         if active_plan.id != plan.id:
             active_plan.status = "archived"
+            create_plan_version(db, user, active_plan, "manual_edit", "Archived because another plan was activated")
     plan.status = "active"
 
 
@@ -1969,7 +1972,7 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
     db.flush()
 
     for workout in preview["workouts"]:
-        db.add(TrainingPlanWorkout(
+        plan_workout = TrainingPlanWorkout(
             plan_id=plan.id,
             week_index=int(workout["week_index"]),
             day_index=int(workout["day_index"]),
@@ -1981,8 +1984,11 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
             duration_seconds=int(workout["duration_seconds"]) if workout.get("duration_seconds") is not None else None,
             intensity=str(workout["intensity"]) if workout["intensity"] is not None else None,
             description=str(workout["description"]) if workout["description"] is not None else None,
-        ))
+        )
+        plan.workouts.append(plan_workout)
+        db.add(plan_workout)
 
+    create_plan_version(db, user, plan, "initial", "Generated from Plan Builder")
     db.commit()
     db.refresh(plan)
     return plan
@@ -1993,7 +1999,9 @@ def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
     for active_plan in active_plans:
         if active_plan.id != plan.id:
             active_plan.status = "archived"
+            create_plan_version(db, user, active_plan, "manual_edit", f"Archived because plan #{plan.id} was activated")
     plan.status = "active"
+    create_plan_version(db, user, plan, "manual_edit", "Activated plan")
     db.commit()
     db.refresh(plan)
     return plan
@@ -2001,12 +2009,19 @@ def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
 
 def update_plan(db: Session, user: User, plan: TrainingPlan, payload: PlanUpdate) -> TrainingPlan:
     updates = payload.model_dump(exclude_unset=True)
+    changed_fields = []
     if "title" in updates and updates["title"] is not None:
-        plan.title = updates["title"]
+        if plan.title != updates["title"]:
+            plan.title = updates["title"]
+            changed_fields.append("title")
     if updates.get("status") == "active":
         return activate_plan(db, user, plan)
     if "status" in updates and updates["status"] is not None:
-        plan.status = updates["status"]
+        if plan.status != updates["status"]:
+            plan.status = updates["status"]
+            changed_fields.append("status")
+    if changed_fields:
+        create_plan_version(db, user, plan, "manual_edit", f"Updated {', '.join(changed_fields)}")
     db.commit()
     db.refresh(plan)
     return plan
@@ -2042,6 +2057,7 @@ def duplicate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
         )
         duplicate.workouts.append(copied_workout)
         db.add(copied_workout)
+    create_plan_version(db, user, duplicate, "user_request", f"Duplicated from plan #{plan.id}")
     db.commit()
     db.refresh(duplicate)
     return duplicate
@@ -2058,6 +2074,7 @@ def delete_plan(db: Session, user: User, plan: TrainingPlan) -> int:
 
 def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:
     updates = payload.model_dump(exclude_unset=True)
+    version_summary = None
     next_completed_activity_id = workout.completed_activity_id
     if "completed_activity_id" in updates:
         activity_id = updates["completed_activity_id"]
@@ -2087,6 +2104,8 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
     if "scheduled_date" in updates:
         if next_completed_activity_id is not None or workout.status == "done":
             raise ValueError("Linked or completed workout must be unlinked before rescheduling")
+        if workout.scheduled_date != updates["scheduled_date"]:
+            version_summary = f"Rescheduled workout #{workout.id}"
         workout.scheduled_date = updates["scheduled_date"]
         if workout.status in {"planned", "missed", "skipped"}:
             workout.status = "rescheduled"
@@ -2096,6 +2115,8 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         if updates["status"] != "done" and next_completed_activity_id is not None:
             raise ValueError("Linked workout status must be done")
         workout.status = updates["status"]
+    if version_summary and workout.plan is not None:
+        create_plan_version(db, user, workout.plan, "manual_edit", version_summary)
     try:
         db.commit()
     except IntegrityError as error:
