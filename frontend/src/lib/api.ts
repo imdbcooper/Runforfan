@@ -2,13 +2,25 @@ const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080/api"
 
 export type Activity = {
   id: number
+  activity_type: string
   title: string
   started_at: string | null
   distance_km: number | null
   duration_seconds: number
+  calories_kcal: number | null
   average_pace_seconds_per_km: number | null
+  fastest_pace_seconds_per_km: number | null
+  average_speed_kmh: number | null
+  average_cadence_spm: number | null
+  average_stride_cm: number | null
+  steps_count: number | null
   average_heart_rate_bpm: number | null
-  segments: unknown[]
+  elevation_gain_m: number | null
+  elevation_loss_m: number | null
+  aerobic_training_stress: number | null
+  aerobic_training_effect: string | null
+  segments: ActivitySegment[]
+  split_blocks: ActivitySplitBlock[]
   workout_blocks: {
     id: number
     block_index: number
@@ -20,6 +32,46 @@ export type Activity = {
     average_heart_rate_bpm: number | null
   }[]
   derived_metrics: DerivedActivityMetric[]
+}
+
+export type ActivitySegment = {
+  id: number
+  segment_index: number
+  distance_km: number
+  duration_seconds: number
+  pace_seconds_per_km: number
+  average_heart_rate_bpm: number | null
+  average_cadence_spm: number | null
+}
+
+export type ActivitySplitBlock = {
+  id: number
+  block_index: number
+  start_km: number
+  end_km: number
+  distance_km: number
+  duration_seconds: number
+  cumulative_duration_seconds: number | null
+  notes: string | null
+}
+
+export type ActivityValidationIssue = {
+  code: string
+  severity: "info" | "warning" | string
+  message: string
+  metric: string | null
+  expected: number | null
+  actual: number | null
+  unit: string | null
+}
+
+export type ActivityValidation = {
+  activity_id: number
+  status: "ok" | "warning" | string
+  weighted_pace_seconds_per_km: number | null
+  source_counts: Record<string, number>
+  checks: ActivityValidationIssue[]
+  issues: ActivityValidationIssue[]
 }
 
 export type DerivedActivityMetric = {
@@ -1044,6 +1096,8 @@ export async function devLogin() {
 
 export const api = {
   activities: () => request<Activity[]>("/activities"),
+  activity: (id: number) => request<Activity>(`/activities/${id}`),
+  activityValidation: (id: number) => request<ActivityValidation>(`/activities/${id}/validation`),
   imports: () => request<ImportBatch[]>("/imports"),
   uploadScreenshots: (files: File[]) => {
     const data = new FormData()

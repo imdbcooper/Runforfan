@@ -110,6 +110,25 @@ class ActivityOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ActivityValidationIssueOut(BaseModel):
+    code: str
+    severity: str
+    message: str
+    metric: str | None = None
+    expected: float | None = None
+    actual: float | None = None
+    unit: str | None = None
+
+
+class ActivityValidationOut(BaseModel):
+    activity_id: int
+    status: str
+    weighted_pace_seconds_per_km: int | None = None
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    checks: list[ActivityValidationIssueOut] = Field(default_factory=list)
+    issues: list[ActivityValidationIssueOut] = Field(default_factory=list)
+
+
 class GoalCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     goal_type: str = Field(default="custom_habit", pattern="^(race|weekly_consistency|monthly_distance|long_run|custom_habit|health|custom)$")

@@ -184,6 +184,18 @@ class ApiOwnershipTests(unittest.TestCase):
         self.assertIn("activities.id = 7", query)
         self.assertIn("activities.user_id = 42", query)
 
+    def test_activity_validation_lookup_is_user_scoped(self):
+        db = CapturingDb()
+        app = app_with_router(activities_routes.router, activities_routes.get_current_user, activities_routes.get_db, db)
+
+        response = TestClient(app).get("/api/activities/7/validation")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"code": "not_found", "message": "Activity not found", "details": None})
+        query = compiled_query(db.scalar_queries[0])
+        self.assertIn("activities.id = 7", query)
+        self.assertIn("activities.user_id = 42", query)
+
     def test_goal_update_lookup_is_user_scoped(self):
         db = CapturingDb()
         app = app_with_router(goals_routes.router, goals_routes.get_current_user, goals_routes.get_db, db)

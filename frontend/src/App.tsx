@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -336,6 +336,16 @@ function formatActivityMetric(metric: ActivityType["derived_metrics"][number]) {
   return `${Number.isInteger(metric.metric_value) ? Math.round(metric.metric_value) : metric.metric_value.toFixed(1)} ${metric.unit}`
 }
 
+function formatValidationValue(value?: number | null, unit?: string | null) {
+  if (value === null || value === undefined) return "--"
+  if (unit === "seconds_per_km") return `${formatPace(Math.round(value))}/км`
+  if (unit === "seconds") return formatDuration(Math.round(value))
+  if (unit === "km") return `${value.toFixed(2)} км`
+  if (unit === "bpm") return `${Math.round(value)} bpm`
+  if (unit === "spm") return `${Math.round(value)} spm`
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
 function primaryActivityMetrics(activity: ActivityType) {
   const priority = ["average_pace_seconds_per_km", "average_speed_kmh", "training_load_proxy", "estimated_energy_kcal", "pace_variability_seconds_per_km"]
   const metrics = activity.derived_metrics || []
@@ -648,6 +658,42 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
 }
 
 function Activities({ activities, compact = false, onImport }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void }) {
+  const [detail, setDetail] = useState<ActivityType | null>(null)
+  const [validation, setValidation] = useState<ActivityValidation | null>(null)
+  const [detailError, setDetailError] = useState("")
+  const [detailLoading, setDetailLoading] = useState(false)
+  const detailRequestId = useRef(0)
+
+  async function openActivityDetail(activityId: number) {
+    const requestId = detailRequestId.current + 1
+    detailRequestId.current = requestId
+    setDetail(activities.find((activity) => activity.id === activityId) || null)
+    setValidation(null)
+    setDetailError("")
+    setDetailLoading(true)
+    try {
+      await devLogin()
+      const [nextActivity, nextValidation] = await Promise.all([api.activity(activityId), api.activityValidation(activityId)])
+      if (detailRequestId.current !== requestId) return
+      setDetail(nextActivity)
+      setValidation(nextValidation)
+    } catch (error) {
+      if (detailRequestId.current !== requestId) return
+      console.error(error)
+      setDetailError(error instanceof Error ? error.message : "Не удалось загрузить detail")
+    } finally {
+      if (detailRequestId.current === requestId) setDetailLoading(false)
+    }
+  }
+
+  function closeActivityDetail() {
+    detailRequestId.current += 1
+    setDetail(null)
+    setValidation(null)
+    setDetailError("")
+    setDetailLoading(false)
+  }
+
   if (!compact) {
     const activityColumns: DataTableColumn<ActivityType>[] = [
       { key: "name", header: "Name", sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
@@ -665,6 +711,7 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
         return <>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{activity.derived_metrics.length} derived metrics</div> : null}</>
       } },
       { key: "id", header: "ID", sortValue: (activity) => activity.id, cell: (activity) => <span className="font-mono text-zinc-500">#{activity.id}</span> },
+      { key: "detail", header: "Detail", cell: (activity) => <Button size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>Inspect</Button> },
     ]
     return <Card>
       <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total · sortable, filterable, paginated</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
@@ -676,6 +723,7 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
         filterPlaceholder="Filter by title, date, id"
         emptyState={<div className="flex flex-wrap items-center gap-3"><span>No activities match this filter.</span><Button size="sm" variant="secondary" onClick={onImport}>Import activity</Button></div>}
       />
+      {detail ? <ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} /> : null}
       {activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
           <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
@@ -702,6 +750,76 @@ function Activities({ activities, compact = false, onImport }: { activities: Act
         <div className="grid gap-1">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}/км</span></div>)}</div>
       </div>)}
     </div>}
+  </Card>
+}
+
+function ActivityDetailPanel({ activity, validation, loading, error, onClose, onRefresh }: { activity: ActivityType; validation: ActivityValidation | null; loading: boolean; error: string; onClose: () => void; onRefresh: () => void }) {
+  const derived = [...(activity.derived_metrics || [])].sort((left, right) => left.metric_key.localeCompare(right.metric_key))
+  const segments = [...(activity.segments || [])].sort((left, right) => left.segment_index - right.segment_index)
+  const workoutBlocks = [...(activity.workout_blocks || [])].sort((left, right) => left.block_index - right.block_index)
+  const validationChecks = validation?.checks || []
+  const warnings = validation?.issues || []
+  return <Card className="border-orange-400/25 bg-zinc-950/70">
+    <CardHeader>
+      <div className="min-w-0">
+        <CardTitle>Activity detail</CardTitle>
+        <p className="mt-1 truncate text-xs text-zinc-500">{activity.title} · #{activity.id} · {activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className={signalClass(validation?.status)}>{loading ? "loading" : validation?.status || "validation"}</Badge>
+        <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>Refresh</Button>
+        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+      </div>
+    </CardHeader>
+    <div className="grid gap-4 border-t border-zinc-800 p-4 text-xs">
+      {error ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{error}</div> : null}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="distance" value={formatDistance(activity.distance_km)} hint={activity.activity_type} />
+        <MetricCard label="duration" value={formatDuration(activity.duration_seconds)} hint={activity.started_at ? new Date(activity.started_at).toLocaleDateString("ru-RU") : "no date"} />
+        <MetricCard label="weighted pace" value={validation?.weighted_pace_seconds_per_km ? `${formatPace(validation.weighted_pace_seconds_per_km)}/км` : `${formatPace(activity.average_pace_seconds_per_km)}/км`} hint={validation?.weighted_pace_seconds_per_km ? "from segments" : "imported activity pace"} explainer={<CalculationExplainer><p>Segment-weighted pace uses sum(duration_seconds) / sum(distance_km). If segments are missing, imported activity pace is shown.</p></CalculationExplainer>} />
+        <MetricCard label="training load" value={activity.aerobic_training_stress ?? primaryActivityMetrics(activity).find((metric) => metric.metric_key === "training_load_proxy")?.metric_value?.toFixed(0) ?? "--"} hint={activity.aerobic_training_stress ? "imported ATS" : "derived proxy when available"} />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Stat label="avg hr" value={activity.average_heart_rate_bpm ? `${activity.average_heart_rate_bpm} bpm` : "--"} />
+        <Stat label="cadence" value={activity.average_cadence_spm ? `${activity.average_cadence_spm} spm` : "--"} />
+        <Stat label="elevation" value={activity.elevation_gain_m || activity.elevation_loss_m ? `+${activity.elevation_gain_m || 0} / -${activity.elevation_loss_m || 0} m` : "--"} />
+        <Stat label="sources" value={`${validation?.source_counts.screenshots ?? 0} screenshots`} />
+      </div>
+
+      <div className="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Validation report</p><p className="mt-1 text-zinc-500">Data quality checks for pace, segments, blocks and physiological ranges.</p></div><Badge className={signalClass(validation?.status)}>{warnings.length} warnings</Badge></div>
+        {validationChecks.length ? <div className="grid gap-2">
+          {validationChecks.map((check) => <div key={`${check.code}-${check.metric || "metric"}`} className={cn("rounded-md border px-3 py-2", check.severity === "warning" ? "border-orange-400/25 bg-orange-400/10 text-orange-100" : "border-zinc-800 bg-zinc-900 text-zinc-300")}>
+            <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{check.message}</p><Badge className={signalClass(check.severity)}>{check.severity}</Badge></div>
+            <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{check.code} · expected {formatValidationValue(check.expected, check.unit)} · actual {formatValidationValue(check.actual, check.unit)}</p>
+          </div>)}
+        </div> : loading && !validation ? <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">Loading validation checks...</p> : !validation ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">Validation report is unavailable for this activity.</p> : <p className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-500">No validation issues detected for loaded data.</p>}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full min-w-[560px] text-left text-xs">
+            <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Split</th><th>Distance</th><th>Time</th><th>Pace</th><th>HR</th><th>Cadence</th></tr></thead>
+            <tbody>{segments.map((segment) => <tr key={segment.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-mono text-zinc-500">#{segment.segment_index}</td><td>{formatDistance(segment.distance_km)}</td><td>{formatDuration(segment.duration_seconds)}</td><td>{formatPace(segment.pace_seconds_per_km)}/км</td><td>{segment.average_heart_rate_bpm || "--"}</td><td>{segment.average_cadence_spm || "--"}</td></tr>)}</tbody>
+          </table>
+          {!segments.length ? <p className="p-3 text-zinc-500">No split rows.</p> : null}
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full min-w-[560px] text-left text-xs">
+            <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Block</th><th>Type</th><th>Distance</th><th>Time</th><th>Pace</th><th>HR</th></tr></thead>
+            <tbody>{workoutBlocks.map((block) => <tr key={block.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-medium text-white">{block.title}</td><td><Badge className={block.block_type === "work" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{block.block_type}</Badge></td><td>{formatDistance(block.distance_km)}</td><td>{formatDuration(block.duration_seconds)}</td><td>{block.pace_seconds_per_km ? `${formatPace(block.pace_seconds_per_km)}/км` : "--"}</td><td>{block.average_heart_rate_bpm || "--"}</td></tr>)}</tbody>
+          </table>
+          {!workoutBlocks.length ? <p className="p-3 text-zinc-500">No structured workout blocks.</p> : null}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Calculations and source metadata</p><Badge>{derived.length} metrics</Badge></div>
+        {derived.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p></div>)}
+        </div> : <p className="text-zinc-500">No derived metrics yet.</p>}
+      </div>
+    </div>
   </Card>
 }
 

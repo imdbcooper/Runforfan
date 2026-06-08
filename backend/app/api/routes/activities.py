@@ -4,13 +4,90 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, User
-from app.schemas.common import ActivityOut
+from app.schemas.common import ActivityOut, ActivityValidationOut
 from app.services.analytics import activity_local_date, profile_timezone
 from app.services.auth import get_current_user
 from app.services.training_load import sync_daily_training_loads_for_dates
 
 
 router = APIRouter(prefix="/activities", tags=["activities"])
+
+
+def validation_issue(code: str, severity: str, message: str, metric: str | None = None, expected: float | None = None, actual: float | None = None, unit: str | None = None) -> dict[str, object]:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "metric": metric,
+        "expected": expected,
+        "actual": actual,
+        "unit": unit,
+    }
+
+
+def activity_validation_report(activity: Activity) -> dict[str, object]:
+    checks: list[dict[str, object]] = []
+    weighted_pace = None
+    distance = float(activity.distance_km or 0)
+    duration = int(activity.duration_seconds or 0)
+    average_pace = activity.average_pace_seconds_per_km
+
+    if distance > 0 and duration > 0:
+        expected_pace = round(duration / distance)
+        if average_pace is None:
+            checks.append(validation_issue("missing_average_pace", "info", "Activity has distance and duration but no imported average pace.", "average_pace_seconds_per_km", expected_pace, None, "seconds_per_km"))
+        elif abs(int(average_pace) - expected_pace) > max(5, expected_pace * 0.02):
+            checks.append(validation_issue("pace_distance_duration_mismatch", "warning", "Imported average pace does not match distance and duration within tolerance.", "average_pace_seconds_per_km", expected_pace, int(average_pace), "seconds_per_km"))
+
+    if activity.average_heart_rate_bpm is not None and not 35 <= int(activity.average_heart_rate_bpm) <= 230:
+        checks.append(validation_issue("average_hr_out_of_range", "warning", "Average heart rate is outside the physiological validation range.", "average_heart_rate_bpm", None, int(activity.average_heart_rate_bpm), "bpm"))
+    if activity.average_cadence_spm is not None and not 120 <= int(activity.average_cadence_spm) <= 240:
+        checks.append(validation_issue("cadence_outlier", "info", "Average running cadence is outside the usual 120-240 spm range.", "average_cadence_spm", None, int(activity.average_cadence_spm), "spm"))
+
+    segments = sorted(activity.segments or [], key=lambda segment: segment.segment_index)
+    if segments:
+        segment_distance = sum(float(segment.distance_km or 0) for segment in segments)
+        segment_duration = sum(int(segment.duration_seconds or 0) for segment in segments)
+        if segment_distance > 0 and segment_duration > 0:
+            weighted_pace = round(segment_duration / segment_distance)
+            if average_pace is not None and abs(int(average_pace) - weighted_pace) > max(5, weighted_pace * 0.02):
+                checks.append(validation_issue("weighted_pace_mismatch", "warning", "Imported average pace differs from segment-weighted pace.", "weighted_pace_seconds_per_km", weighted_pace, int(average_pace), "seconds_per_km"))
+        if distance and abs(segment_distance - distance) > max(0.05, distance * 0.01):
+            checks.append(validation_issue("segment_distance_mismatch", "warning", "Segment distance sum differs from activity distance beyond tolerance.", "distance_km", distance, round(segment_distance, 3), "km"))
+        if duration and abs(segment_duration - duration) > max(10, duration * 0.01):
+            checks.append(validation_issue("segment_duration_mismatch", "warning", "Segment duration sum differs from activity duration beyond tolerance.", "duration_seconds", duration, segment_duration, "seconds"))
+        if len(segments) >= 2:
+            last_segment = segments[-1]
+            previous_paces = sorted(int(segment.pace_seconds_per_km) for segment in segments[:-1] if segment.pace_seconds_per_km)
+            if previous_paces and last_segment.distance_km < 0.3:
+                median_pace = previous_paces[len(previous_paces) // 2]
+                if last_segment.pace_seconds_per_km and int(last_segment.pace_seconds_per_km) < median_pace * 0.85:
+                    checks.append(validation_issue("short_fast_final_segment", "info", "Fastest pace may be inflated by a short final partial segment.", "pace_seconds_per_km", median_pace, int(last_segment.pace_seconds_per_km), "seconds_per_km"))
+
+    workout_blocks = list(activity.workout_blocks or [])
+    if workout_blocks:
+        block_distance = sum(float(block.distance_km or 0) for block in workout_blocks)
+        block_duration = sum(int(block.duration_seconds or 0) for block in workout_blocks)
+        if distance and block_distance and abs(block_distance - distance) > max(0.08, distance * 0.02):
+            checks.append(validation_issue("workout_block_distance_mismatch", "warning", "Workout block distance sum differs from activity distance.", "distance_km", distance, round(block_distance, 3), "km"))
+        if duration and block_duration and abs(block_duration - duration) > max(15, duration * 0.02):
+            checks.append(validation_issue("workout_block_duration_mismatch", "warning", "Workout block duration sum differs from activity duration.", "duration_seconds", duration, block_duration, "seconds"))
+
+    issues = [check for check in checks if check["severity"] == "warning"]
+    return {
+        "activity_id": activity.id,
+        "status": "warning" if issues else "ok",
+        "weighted_pace_seconds_per_km": weighted_pace,
+        "source_counts": {
+            "segments": len(segments),
+            "split_blocks": len(activity.split_blocks or []),
+            "workout_blocks": len(workout_blocks),
+            "derived_metrics": len(activity.derived_metrics or []),
+            "screenshots": len(activity.screenshots or []),
+        },
+        "checks": checks,
+        "issues": issues,
+    }
 
 
 @router.get("", response_model=list[ActivityOut])
@@ -33,6 +110,18 @@ def get_activity(activity_id: int, user: User = Depends(get_current_user), db: S
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     return activity
+
+
+@router.get("/{activity_id}/validation", response_model=ActivityValidationOut)
+def get_activity_validation(activity_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    activity = db.scalar(
+        select(Activity)
+        .where(Activity.id == activity_id, Activity.user_id == user.id)
+        .options(selectinload(Activity.segments), selectinload(Activity.split_blocks), selectinload(Activity.workout_blocks), selectinload(Activity.derived_metrics), selectinload(Activity.screenshots))
+    )
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return activity_validation_report(activity)
 
 
 @router.delete("/{activity_id}")
