@@ -207,6 +207,25 @@ def calculate_srpe_load(duration_minutes: float, rpe_0_10: float) -> Calculation
     return CalculationResult(round(duration_minutes * rpe_0_10, 1), "au", "session_rpe", "medium", FOSTER_REF)
 
 
+def calculate_hr_trimp(duration_minutes: float, average_hr_bpm: float, resting_hr_bpm: float, max_hr_bpm: float, sex: str | None) -> CalculationResult:
+    if not duration_minutes or duration_minutes <= 0 or not average_hr_bpm or not resting_hr_bpm or not max_hr_bpm:
+        return CalculationResult(None, "au", "hr_trimp", "low", BANISTER_REF)
+    hrr = max_hr_bpm - resting_hr_bpm
+    if hrr <= 0:
+        return CalculationResult(None, "au", "hr_trimp", "low", BANISTER_REF)
+    normalized_sex = (sex or "").lower()
+    factors = {
+        "male": (0.64, 1.92),
+        "female": (0.86, 1.67),
+    }
+    if normalized_sex not in factors:
+        return CalculationResult(None, "au", "hr_trimp", "low", BANISTER_REF)
+    coefficient, exponent = factors[normalized_sex]
+    hr_ratio = min(max((average_hr_bpm - resting_hr_bpm) / hrr, 0), 1)
+    value = duration_minutes * hr_ratio * coefficient * exp(exponent * hr_ratio)
+    return CalculationResult(round(value, 1), "au", "hr_trimp", "medium", BANISTER_REF)
+
+
 def ewma_load(previous: float, load_today: float, tau_days: int) -> float:
     alpha = 1 - exp(-1 / tau_days)
     return previous + alpha * (load_today - previous)

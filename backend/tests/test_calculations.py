@@ -4,6 +4,7 @@ from datetime import date
 from app.services.calculations import (
     age_from_birthdate,
     calculate_ctl_atl_tsb,
+    calculate_hr_trimp,
     calculate_hrr_zones,
     calculate_monotony_strain,
     calculate_pace_seconds_per_km,
@@ -76,6 +77,19 @@ class CalculationTests(unittest.TestCase):
         flat = calculate_monotony_strain([50, 50, 50])
         self.assertIsNone(flat["monotony"].value)
         self.assertIsNone(flat["strain"].value)
+
+    def test_hr_trimp_uses_banister_sex_specific_formula(self):
+        male = calculate_hr_trimp(60, average_hr_bpm=160, resting_hr_bpm=50, max_hr_bpm=190, sex="male")
+        female = calculate_hr_trimp(60, average_hr_bpm=160, resting_hr_bpm=50, max_hr_bpm=190, sex="female")
+
+        self.assertEqual(male.value, 136.4)
+        self.assertEqual(male.method, "hr_trimp")
+        self.assertEqual(male.confidence, "medium")
+        self.assertEqual(female.value, 150.6)
+
+    def test_hr_trimp_requires_valid_sex_and_hr_reserve(self):
+        self.assertIsNone(calculate_hr_trimp(60, 160, 50, 190, sex="unspecified").value)
+        self.assertIsNone(calculate_hr_trimp(60, 160, 190, 190, sex="male").value)
 
 
 if __name__ == "__main__":

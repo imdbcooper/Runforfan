@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlan, TrainingPlanWorkout, User
 from app.services.analytics import activity_local_date, date_range_label, load_activities, profile_timezone
-from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_REF, calculate_monotony_strain, calculate_srpe_load, ewma_load
+from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_REF, calculate_hr_trimp, calculate_monotony_strain, calculate_srpe_load, ewma_load
 
 
 LOAD_LOOKBACK_DAYS = 84
@@ -71,13 +71,14 @@ def load_planned_workouts_with_feedback(db: Session, user: User, activity_ids: l
 def hr_trimp_load(activity: Activity, profile: AthleteProfile | None) -> float | None:
     if not profile or not activity.average_heart_rate_bpm or not activity.duration_seconds:
         return None
-    if not profile.resting_heart_rate_bpm or not profile.max_heart_rate_bpm:
-        return None
-    hrr = profile.max_heart_rate_bpm - profile.resting_heart_rate_bpm
-    if hrr <= 0:
-        return None
-    ratio = min(max((activity.average_heart_rate_bpm - profile.resting_heart_rate_bpm) / hrr, 0), 1)
-    return round((activity.duration_seconds / 60) * ratio * ratio * 2.0, 1)
+    result = calculate_hr_trimp(
+        activity.duration_seconds / 60,
+        activity.average_heart_rate_bpm,
+        profile.resting_heart_rate_bpm,
+        profile.max_heart_rate_bpm,
+        profile.sex,
+    )
+    return float(result.value) if result.value is not None else None
 
 
 def activity_pace_seconds(activity: Activity) -> int | None:

@@ -198,7 +198,7 @@ class TrainingLoadTests(unittest.TestCase):
         self.assertIn("Hard sessions too close", titles)
 
     def test_hr_profile_enables_hr_trimp_fallback(self):
-        profile = AthleteProfile(user_id=1, resting_heart_rate_bpm=50, max_heart_rate_bpm=190, lactate_threshold_pace_seconds_per_km=300)
+        profile = AthleteProfile(user_id=1, sex="male", resting_heart_rate_bpm=50, max_heart_rate_bpm=190, lactate_threshold_pace_seconds_per_km=300)
         activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), duration_seconds=3600, stress=None)
         activity.average_heart_rate_bpm = 160
 
@@ -206,7 +206,18 @@ class TrainingLoadTests(unittest.TestCase):
         point = result["daily"]["points"][0]
 
         self.assertEqual(point["load_method"], "hr_trimp")
-        self.assertGreater(point["load"], 0)
+        self.assertEqual(point["load"], 136.4)
+
+    def test_hr_trimp_requires_profile_sex(self):
+        profile = AthleteProfile(user_id=1, sex="unspecified", resting_heart_rate_bpm=50, max_heart_rate_bpm=190, lactate_threshold_pace_seconds_per_km=300)
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), duration_seconds=3600, stress=None)
+        activity.average_heart_rate_bpm = 160
+
+        result = training_load_from_data([activity], [], profile, date(2026, 6, 1), date(2026, 6, 1))
+        point = result["daily"]["points"][0]
+
+        self.assertEqual(point["load_method"], "pace_based_fallback")
+        self.assertEqual(point["load"], 45.0)
 
     def test_support_activity_uses_duration_fallback_without_distance(self):
         activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), distance_km=None, duration_seconds=1800, stress=None)
