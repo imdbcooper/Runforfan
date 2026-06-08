@@ -58,13 +58,20 @@ class AthleteProfile(Base, TimestampMixin):
     weight_kg: Mapped[float | None] = mapped_column(Float)
     timezone: Mapped[str | None] = mapped_column(String(100), default="Europe/Moscow")
     locale: Mapped[str | None] = mapped_column(String(32), default="ru-RU")
+    unit_system: Mapped[str] = mapped_column(String(16), default="metric")
+    preferred_weekdays: Mapped[list[int] | None] = mapped_column(JSONB)
+    long_run_weekday: Mapped[int | None] = mapped_column(Integer)
+    max_run_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     resting_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer)
     max_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer)
     max_hr_source: Mapped[str | None] = mapped_column(String(64))
     lactate_threshold_hr_bpm: Mapped[int | None] = mapped_column(Integer)
     lactate_threshold_pace_seconds_per_km: Mapped[int | None] = mapped_column(Integer)
+    vo2max: Mapped[float | None] = mapped_column(Float)
     conservative_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     injury_notes: Mapped[str | None] = mapped_column(Text)
+    health_conditions: Mapped[str | None] = mapped_column(Text)
+    recovery_status: Mapped[str] = mapped_column(String(32), default="normal")
 
     user: Mapped[User] = relationship(back_populates="athlete_profile")
 
@@ -305,10 +312,17 @@ class RunningGoal(Base, TimestampMixin):
     unit: Mapped[str | None] = mapped_column(String(64))
     period_start: Mapped[date | None] = mapped_column(Date)
     period_end: Mapped[date | None] = mapped_column(Date)
+    race_distance_km: Mapped[float | None] = mapped_column(Float)
+    target_date: Mapped[date | None] = mapped_column(Date, index=True)
+    target_time_seconds: Mapped[int | None] = mapped_column(Integer)
+    priority: Mapped[str | None] = mapped_column(String(16))
+    course_notes: Mapped[str | None] = mapped_column(Text)
+    training_plan_id: Mapped[int | None] = mapped_column(ForeignKey("training_plans.id", ondelete="SET NULL"), index=True)
     reason: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(64), default="active")
 
     user: Mapped[User] = relationship(back_populates="goals")
+    training_plan: Mapped["TrainingPlan | None"] = relationship(back_populates="goals")
 
 
 class LlmProviderSetting(Base, TimestampMixin):
@@ -342,6 +356,7 @@ class TrainingPlan(Base, TimestampMixin):
     explanation: Mapped[str | None] = mapped_column(Text)
 
     workouts: Mapped[list["TrainingPlanWorkout"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    goals: Mapped[list[RunningGoal]] = relationship(back_populates="training_plan")
 
 
 class TrainingPlanWorkout(Base):

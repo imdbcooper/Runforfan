@@ -92,18 +92,51 @@ class ActivityOut(BaseModel):
 
 class GoalCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    goal_type: str = "custom"
-    target_value: float | None = None
-    unit: str | None = None
+    goal_type: str = Field(default="custom_habit", pattern="^(race|weekly_consistency|monthly_distance|long_run|custom_habit|health|custom)$")
+    target_value: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=64)
     period_start: date | None = None
     period_end: date | None = None
-    reason: str | None = None
+    race_distance_km: float | None = Field(default=None, ge=0.1, le=250)
+    target_date: date | None = None
+    target_time_seconds: StrictInt | None = Field(default=None, ge=60, le=172800)
+    priority: str | None = Field(default=None, pattern="^(a|b|c|high|medium|low)$")
+    course_notes: str | None = Field(default=None, max_length=2000)
+    training_plan_id: StrictInt | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=2000)
+
+class GoalUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    goal_type: str | None = Field(default=None, pattern="^(race|weekly_consistency|monthly_distance|long_run|custom_habit|health|custom)$")
+    target_value: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=64)
+    period_start: date | None = None
+    period_end: date | None = None
+    race_distance_km: float | None = Field(default=None, ge=0.1, le=250)
+    target_date: date | None = None
+    target_time_seconds: StrictInt | None = Field(default=None, ge=60, le=172800)
+    priority: str | None = Field(default=None, pattern="^(a|b|c|high|medium|low)$")
+    course_notes: str | None = Field(default=None, max_length=2000)
+    training_plan_id: StrictInt | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None, pattern="^(active|paused|completed|missed|archived)$")
+
+
+class GoalCompleteIn(BaseModel):
+    status: str = Field(default="completed", pattern="^(completed|missed|archived)$")
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class GoalOut(GoalCreate):
     id: int
     status: str
     created_at: datetime
+    updated_at: datetime
+    progress: dict[str, object] = Field(default_factory=dict)
+    milestones: list[dict[str, object]] = Field(default_factory=list)
+    plan: dict[str, object] | None = None
+    current_fitness: dict[str, object] | None = None
+    predicted_time_range: dict[str, object] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -115,13 +148,32 @@ class AthleteProfileUpdate(BaseModel):
     weight_kg: float | None = Field(default=None, ge=25, le=250)
     timezone: str | None = None
     locale: str | None = None
+    unit_system: str | None = Field(default=None, pattern="^(metric|imperial)$")
+    preferred_weekdays: list[StrictInt] | None = Field(default=None, max_length=7)
+    long_run_weekday: StrictInt | None = Field(default=None, ge=1, le=7)
+    max_run_duration_minutes: StrictInt | None = Field(default=None, ge=15, le=600)
     resting_heart_rate_bpm: int | None = Field(default=None, ge=25, le=120)
     max_heart_rate_bpm: int | None = Field(default=None, ge=80, le=240)
     max_hr_source: str | None = Field(default=None, pattern="^(measured|manual|tanaka_estimated)$")
     lactate_threshold_hr_bpm: int | None = Field(default=None, ge=60, le=230)
     lactate_threshold_pace_seconds_per_km: int | None = Field(default=None, ge=120, le=1200)
+    vo2max: float | None = Field(default=None, ge=10, le=100)
     conservative_mode: bool | None = None
     injury_notes: str | None = None
+    health_conditions: str | None = None
+    recovery_status: str | None = Field(default=None, pattern="^(fresh|normal|tired|strained|injured|unknown)$")
+
+    @model_validator(mode="after")
+    def validate_profile_weekdays(self):
+        if self.preferred_weekdays:
+            values = list(self.preferred_weekdays)
+            if any(value < 1 or value > 7 for value in values):
+                raise ValueError("preferred_weekdays must use ISO weekdays 1-7")
+            if len(set(values)) != len(values):
+                raise ValueError("preferred_weekdays must be unique")
+        if self.long_run_weekday and self.preferred_weekdays and self.long_run_weekday not in self.preferred_weekdays:
+            raise ValueError("long_run_weekday must be one of preferred_weekdays")
+        return self
 
 
 class CalculationOut(BaseModel):

@@ -181,6 +181,44 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_performance_results_user_date ON performance_results (user_id, result_date DESC)",
         ),
     ),
+    (
+        "20260608_0009_goal_race_fields",
+        (
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS race_distance_km DOUBLE PRECISION",
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS target_date DATE",
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS target_time_seconds INTEGER",
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS priority VARCHAR(16)",
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS course_notes TEXT",
+            "ALTER TABLE running_goals ADD COLUMN IF NOT EXISTS training_plan_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_running_goals_target_date ON running_goals (target_date)",
+            "CREATE INDEX IF NOT EXISTS ix_running_goals_training_plan_id ON running_goals (training_plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_running_goals_user_status_target ON running_goals (user_id, status, target_date)",
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'fk_running_goals_training_plan_id'
+                ) THEN
+                    ALTER TABLE running_goals
+                    ADD CONSTRAINT fk_running_goals_training_plan_id
+                    FOREIGN KEY (training_plan_id) REFERENCES training_plans(id) ON DELETE SET NULL;
+                END IF;
+            END $$
+            """,
+        ),
+    ),
+    (
+        "20260608_0010_profile_preferences_safety",
+        (
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS unit_system VARCHAR(16) NOT NULL DEFAULT 'metric'",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS preferred_weekdays JSONB",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS long_run_weekday INTEGER",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS max_run_duration_minutes INTEGER",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS vo2max DOUBLE PRECISION",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS health_conditions TEXT",
+            "ALTER TABLE athlete_profiles ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(32) NOT NULL DEFAULT 'normal'",
+        ),
+    ),
 )
 
 

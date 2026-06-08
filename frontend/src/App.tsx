@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
 type FeedbackDraft = { rpe: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
@@ -38,6 +38,7 @@ type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" |
 }
 
 const SUPPORT_WORKOUT_TYPES = new Set(["strength", "ofp", "mobility", "prehab", "core", "cross_training"])
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 const nav = [
   ["overview", "Dashboard", Zap],
@@ -48,6 +49,7 @@ const nav = [
   ["load", "Load & Recovery", BatteryCharging],
   ["zones", "Zones Analytics", Shield],
   ["performance", "Performance", Trophy],
+  ["goals", "Goals & races", Goal],
   ["profile", "Profile & zones", HeartPulse],
   ["planning", "Plans", Goal],
   ["settings", "LLM providers", Settings],
@@ -242,8 +244,29 @@ function missingLabel(field: string) {
     lactate_threshold_pace_seconds_per_km: "пороговый темп",
     lactate_threshold_hr_bpm: "пороговый пульс",
     weight_kg: "вес",
+    height_cm: "рост",
+    preferred_weekdays: "тренировочные дни",
+    max_run_duration_minutes: "макс. длительность",
   }
   return labels[field] || field
+}
+
+function weekdayLabel(value?: number | null) {
+  if (!value) return "--"
+  return WEEKDAY_LABELS[value - 1] || String(value)
+}
+
+function weekdayListLabel(values?: number[] | null) {
+  return values?.length ? values.map(weekdayLabel).join(", ") : "--"
+}
+
+function measurementValueLabel(measurement: AthleteMeasurement) {
+  const value = measurement.value_numeric
+  if (value === null || value === undefined) return "--"
+  if (measurement.measurement_type === "weight") return `${value.toFixed(1)} кг`
+  if (measurement.measurement_type === "vo2max") return `${value.toFixed(1)} ml/kg/min`
+  if (["resting_hr", "max_hr", "lactate_threshold"].includes(measurement.measurement_type)) return `${Math.round(value)} bpm`
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
 function workoutBlockSummary(activity: ActivityType) {
@@ -338,6 +361,7 @@ function App() {
             {page === "load" && <TrainingLoadRecovery />}
             {page === "zones" && <ZonesAnalytics />}
             {page === "performance" && <PerformanceAnalytics />}
+            {page === "goals" && <GoalsRaces />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
             {page === "settings" && <SettingsPage providers={providers} onChanged={refreshGlobal} />}
@@ -424,9 +448,9 @@ function Overview({ activities, analytics, dashboard, providers, onImport, onPla
 }
 
 function signalClass(status?: string) {
-  if (status === "risk" || status === "adjust" || status === "critical") return "border-rose-400/30 bg-rose-500/10 text-rose-200"
-  if (status === "watch" || status === "warning") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
-  if (status === "ok" || status === "active" || status === "done") return "border-zinc-700 bg-zinc-900 text-zinc-200"
+  if (status === "risk" || status === "adjust" || status === "critical" || status === "at_risk" || status === "missed" || status === "strained" || status === "injured") return "border-rose-400/30 bg-rose-500/10 text-rose-200"
+  if (status === "watch" || status === "warning" || status === "tired") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
+  if (status === "ok" || status === "active" || status === "done" || status === "on_track" || status === "completed" || status === "fresh" || status === "normal") return "border-zinc-700 bg-zinc-900 text-zinc-200"
   return "border-zinc-700 bg-zinc-900 text-zinc-400"
 }
 
@@ -1596,6 +1620,180 @@ function PerformancePaceZones({ zones }: { zones: PerformancePaceZone[] }) {
   </Card>
 }
 
+function goalPayload(form: HTMLFormElement) {
+  const data = new FormData(form)
+  const targetTimeMinutes = numberOrNull(data.get("target_time_minutes"))
+  const goalType = stringOrNull(data.get("goal_type")) || "race"
+  const raceGoal = goalType === "race"
+  return {
+    title: stringOrNull(data.get("title")) || "Race goal",
+    goal_type: goalType,
+    target_value: numberOrNull(data.get("target_value")),
+    unit: stringOrNull(data.get("unit")) || (goalType === "monthly_distance" || goalType === "long_run" ? "km" : goalType === "weekly_consistency" ? "days/week" : null),
+    period_start: stringOrNull(data.get("period_start")),
+    period_end: stringOrNull(data.get("period_end")),
+    race_distance_km: raceGoal ? numberOrNull(data.get("race_distance_km")) : null,
+    target_date: raceGoal ? stringOrNull(data.get("target_date")) : null,
+    target_time_seconds: raceGoal && targetTimeMinutes ? Math.round(targetTimeMinutes * 60) : null,
+    priority: raceGoal ? stringOrNull(data.get("priority")) : null,
+    course_notes: raceGoal ? stringOrNull(data.get("course_notes")) : null,
+    training_plan_id: numberOrNull(data.get("training_plan_id")),
+    reason: stringOrNull(data.get("reason")),
+  }
+}
+
+function goalTypeLabel(type: string) {
+  return type.replace(/_/g, " ")
+}
+
+function goalProgressText(goal: RunningGoal) {
+  const target = goal.progress.target === null || goal.progress.target === undefined ? "--" : goal.progress.target
+  const value = goal.progress.value === null || goal.progress.value === undefined ? "--" : goal.progress.value
+  return `${value}/${target} · ${Math.round((goal.progress.percentage || 0) * 100)}%`
+}
+
+function GoalsRaces() {
+  const [goals, setGoals] = useState<RunningGoal[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [busyGoal, setBusyGoal] = useState<number | null>(null)
+  const [error, setError] = useState("")
+
+  async function loadGoals() {
+    setLoading(true)
+    setError("")
+    try {
+      await devLogin()
+      setGoals(await api.goals())
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Goals API недоступен")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadGoals() }, [])
+
+  async function submitGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    setSaving(true)
+    setError("")
+    try {
+      await api.createGoal(goalPayload(form))
+      form.reset()
+      await loadGoals()
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Не удалось сохранить goal")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function setGoalStatus(goal: RunningGoal, status: string) {
+    setBusyGoal(goal.id)
+    setError("")
+    try {
+      if (status === "completed" || status === "missed") await api.completeGoal(goal.id, { status })
+      else await api.updateGoal(goal.id, { status })
+      await loadGoals()
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Не удалось обновить goal")
+    } finally {
+      setBusyGoal(null)
+    }
+  }
+
+  async function removeGoal(goal: RunningGoal) {
+    setBusyGoal(goal.id)
+    setError("")
+    try {
+      await api.deleteGoal(goal.id)
+      await loadGoals()
+    } catch (caught) {
+      console.error(caught)
+      setError(caught instanceof Error ? caught.message : "Не удалось удалить goal")
+    } finally {
+      setBusyGoal(null)
+    }
+  }
+
+  const activeRace = goals.find((goal) => goal.goal_type === "race" && goal.status === "active")
+  const activeGoals = goals.filter((goal) => goal.status === "active")
+
+  return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Goals and Races</p><h2 className="mt-2 text-lg font-semibold text-white">Link race goals, plans and performance readiness</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Goals combine plan adherence, current VDOT/predictions, milestones and status transitions. Race goals require distance and target date.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{goals.length} goals</Badge><Badge className={loading ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : signalClass(activeGoals.length ? "ok" : "warning")}>{loading ? "loading" : `${activeGoals.length} active`}</Badge></div>
+      </div>
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
+    </Card>
+
+    <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
+      <Card>
+        <CardHeader><div><CardTitle>Create goal</CardTitle><p className="text-xs text-zinc-500">Race, consistency, monthly distance, long run or habit.</p></div><Badge>manual</Badge></CardHeader>
+        <form onSubmit={submitGoal} className="grid gap-3 p-4 text-xs">
+          <Field label="Title"><Input name="title" defaultValue="A race goal" /></Field>
+          <Field label="Goal type"><Select name="goal_type" defaultValue="race"><option value="race">Race</option><option value="weekly_consistency">Weekly consistency</option><option value="monthly_distance">Monthly distance</option><option value="long_run">Long run</option><option value="custom_habit">Custom habit</option><option value="health">Health</option></Select></Field>
+          <div className="grid gap-2 sm:grid-cols-2"><Field label="Target value"><Input name="target_value" type="number" min="0" step="0.1" placeholder="optional" /></Field><Field label="Unit"><Input name="unit" placeholder="km, days/week" /></Field></div>
+          <div className="grid gap-2 sm:grid-cols-2"><Field label="Period start"><Input name="period_start" type="date" /></Field><Field label="Period end"><Input name="period_end" type="date" /></Field></div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-2">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Race goal</p>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Distance, км"><Input name="race_distance_km" type="number" min="0.1" max="250" step="0.1" defaultValue="10" /></Field><Field label="Race date"><Input name="target_date" type="date" /></Field></div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2"><Field label="Target time, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field><Field label="Priority"><Select name="priority" defaultValue="b"><option value="a">A race</option><option value="b">B race</option><option value="c">C race</option></Select></Field></div>
+            <Field label="Course notes"><Input name="course_notes" placeholder="terrain, elevation, logistics" /></Field>
+          </div>
+          <Field label="Linked plan ID"><Input name="training_plan_id" type="number" min="1" placeholder="optional" /></Field>
+          <Field label="Reason"><Input name="reason" placeholder="why this matters" /></Field>
+          <Button type="submit" size="sm" disabled={saving}>{saving ? "Saving..." : "Save goal"}</Button>
+        </form>
+      </Card>
+
+      <div className="grid gap-4">
+        {activeRace ? <GoalFocus goal={activeRace} /> : <Card className="p-4 text-sm text-zinc-500">No active race goal yet. Create one to see readiness, predicted range and milestones.</Card>}
+        <div className="grid gap-3">{goals.map((goal) => <GoalCard key={goal.id} goal={goal} busy={busyGoal === goal.id} onStatus={(status) => setGoalStatus(goal, status)} onDelete={() => removeGoal(goal)} />)}</div>
+      </div>
+    </div>
+  </div>
+}
+
+function GoalFocus({ goal }: { goal: RunningGoal }) {
+  const range = goal.predicted_time_range
+  return <Card className="p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Active race</p><h3 className="mt-1 text-base font-semibold text-white">{goal.title}</h3><p className="mt-1 text-xs text-zinc-500">{formatDistance(goal.race_distance_km)} · {formatDate(goal.target_date)} · priority {goal.priority || "--"}</p></div>
+      <Badge className={signalClass(goal.progress.readiness)}>{goal.progress.readiness}</Badge>
+    </div>
+    <div className="mt-3 grid gap-2 md:grid-cols-4">
+      <Stat label="target" value={formatTargetTime(goal.target_time_seconds)} />
+      <Stat label="prediction" value={range ? formatDuration(range.predicted_duration_seconds) : "--"} />
+      <Stat label="range" value={range ? `${formatDuration(range.lower_seconds)}-${formatDuration(range.upper_seconds)}` : "--"} />
+      <Stat label="VDOT" value={goal.current_fitness?.estimate?.value ?? "--"} />
+    </div>
+    <div className="mt-3 grid gap-2 md:grid-cols-3">{goal.milestones.map((milestone) => <div key={milestone.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{milestone.title}</p><Badge className={signalClass(milestone.status)}>{milestone.status}</Badge></div><p className="mt-1 text-zinc-500">due {formatDate(milestone.due_date)} · target {String(milestone.target ?? "--")}</p>{milestone.value !== undefined ? <p className="mt-1 text-zinc-400">current {milestone.value}</p> : null}</div>)}</div>
+  </Card>
+}
+
+function GoalCard({ goal, busy, onStatus, onDelete }: { goal: RunningGoal; busy: boolean; onStatus: (status: string) => void; onDelete: () => void }) {
+  return <Card className="p-3 text-xs">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div><p className="font-semibold text-white">{goal.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{goal.id}</span></p><p className="mt-1 text-zinc-500">{goalTypeLabel(goal.goal_type)} · {goalProgressText(goal)} · {goal.unit || goal.progress.metric}</p></div>
+      <div className="flex flex-wrap gap-1"><Badge className={planStatusClass(goal.status)}>{goal.status}</Badge><Badge className={signalClass(goal.progress.readiness)}>{goal.progress.readiness}</Badge></div>
+    </div>
+    <div className="mt-2 grid gap-2 md:grid-cols-3">
+      <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Race: {formatDistance(goal.race_distance_km)} · {formatDate(goal.target_date)}</p>
+      <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Plan: {goal.plan ? `${goal.plan.title} (${Math.round((goal.plan.adherence.completion_rate || 0) * 100)}%)` : "not linked"}</p>
+      <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Prediction: {goal.predicted_time_range ? `${formatDuration(goal.predicted_time_range.predicted_duration_seconds)} · ${goal.predicted_time_range.confidence}` : "--"}</p>
+    </div>
+    {goal.course_notes || goal.reason ? <p className="mt-2 leading-5 text-zinc-500">{goal.course_notes || goal.reason}</p> : null}
+    <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus(goal.status === "paused" ? "active" : "paused")}>{goal.status === "paused" ? "Resume" : "Pause"}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("completed")}>Complete</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("missed")}>Missed</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("archived")}>Archive</Button><Button size="sm" variant="secondary" disabled={busy} onClick={onDelete}>Delete</Button></div>
+  </Card>
+}
+
 function ProfileZones({ profile, completeness, safety, zones, measurements, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onChanged: () => Promise<void> }) {
   if (!profile) return <Card className="p-4 text-sm text-zinc-400">Loading profile...</Card>
 
@@ -1603,6 +1801,9 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const maxHr = numberOrNull(data.get("max_heart_rate_bpm"))
+    const preferredWeekdays = csvNumbers(data.get("preferred_weekdays"))
+    const longRunWeekday = numberOrNull(data.get("long_run_weekday"))
+    const validLongRunWeekday = longRunWeekday && (!preferredWeekdays.length || preferredWeekdays.includes(longRunWeekday)) ? longRunWeekday : null
     await api.updateProfile({
       date_of_birth: stringOrNull(data.get("date_of_birth")),
       sex: stringOrNull(data.get("sex")) || "unspecified",
@@ -1610,13 +1811,20 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
       weight_kg: numberOrNull(data.get("weight_kg")),
       timezone: stringOrNull(data.get("timezone")),
       locale: stringOrNull(data.get("locale")),
+      unit_system: stringOrNull(data.get("unit_system")) || "metric",
+      preferred_weekdays: preferredWeekdays,
+      long_run_weekday: validLongRunWeekday,
+      max_run_duration_minutes: numberOrNull(data.get("max_run_duration_minutes")),
       resting_heart_rate_bpm: numberOrNull(data.get("resting_heart_rate_bpm")),
       max_heart_rate_bpm: maxHr,
       max_hr_source: maxHr ? stringOrNull(data.get("max_hr_source")) : null,
       lactate_threshold_hr_bpm: numberOrNull(data.get("lactate_threshold_hr_bpm")),
       lactate_threshold_pace_seconds_per_km: numberOrNull(data.get("lactate_threshold_pace_seconds_per_km")),
+      vo2max: numberOrNull(data.get("vo2max")),
       conservative_mode: data.get("conservative_mode") === "on",
       injury_notes: stringOrNull(data.get("injury_notes")),
+      health_conditions: stringOrNull(data.get("health_conditions")),
+      recovery_status: stringOrNull(data.get("recovery_status")) || "normal",
     })
     await onChanged()
   }
@@ -1650,21 +1858,53 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
     <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
       <Card>
         <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge>{completeness?.confidence || "low"} confidence</Badge></CardHeader>
-        <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-3 p-4 text-xs md:grid-cols-2 xl:grid-cols-3">
-          <Field label="Дата рождения"><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
-          <Field label="Пол"><Select name="sex" defaultValue={profile.sex}><option value="unspecified">Не указан</option><option value="male">Мужской</option><option value="female">Женский</option><option value="other">Другой</option></Select></Field>
-          <Field label="Вес, кг"><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder="например 72.5" /></Field>
-          <Field label="Рост, см"><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
-          <Field label="Пульс покоя"><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field>
-          <Field label="HRmax"><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field>
-          <Field label="Источник HRmax"><Select name="max_hr_source" defaultValue={profile.max_hr_source || "manual"}><option value="manual">Manual</option><option value="measured">Measured</option><option value="tanaka_estimated">Tanaka estimated</option></Select></Field>
-          <Field label="Пороговый пульс"><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field>
-          <Field label="Пороговый темп, сек/км"><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field>
-          <Field label="Timezone"><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
-          <Field label="Locale"><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
-          <Field label="Ограничения"><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder="травмы, ограничения" /></Field>
-          <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> conservative mode</label>
-          <div className="md:col-span-2 xl:col-span-3"><Button type="submit">Save profile</Button></div>
+        <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-4 p-4 text-xs">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Personal</p>
+              <div className="grid gap-3">
+                <Field label="Дата рождения"><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
+                <Field label="Пол"><Select name="sex" defaultValue={profile.sex}><option value="unspecified">Не указан</option><option value="male">Мужской</option><option value="female">Женский</option><option value="other">Другой</option></Select></Field>
+                <Field label="Timezone"><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
+                <Field label="Locale"><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Body</p>
+              <div className="grid gap-3">
+                <Field label="Вес, кг"><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder="например 72.5" /></Field>
+                <Field label="Рост, см"><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
+                <Field label="Unit system"><Select name="unit_system" defaultValue={profile.unit_system || "metric"}><option value="metric">Metric</option><option value="imperial">Imperial</option></Select></Field>
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Physiology</p>
+              <div className="grid gap-3">
+                <div className="grid gap-2 sm:grid-cols-2"><Field label="Пульс покоя"><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field><Field label="HRmax"><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field></div>
+                <Field label="Источник HRmax"><Select name="max_hr_source" defaultValue={profile.max_hr_source || "manual"}><option value="manual">Manual</option><option value="measured">Measured</option><option value="tanaka_estimated">Tanaka estimated</option></Select></Field>
+                <div className="grid gap-2 sm:grid-cols-2"><Field label="Пороговый пульс"><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field><Field label="Пороговый темп, сек/км"><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field></div>
+                <Field label="VO2max"><Input name="vo2max" type="number" min="10" max="100" step="0.1" defaultValue={profile.vo2max ?? ""} placeholder="если известен" /></Field>
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Preferences</p>
+              <div className="grid gap-3">
+                <Field label="Training days"><Input name="preferred_weekdays" defaultValue={(profile.preferred_weekdays || []).join(",")} placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
+                <Field label="Long run day"><Select name="long_run_weekday" defaultValue={profile.long_run_weekday || ""}><option value="">Auto</option>{WEEKDAY_LABELS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</Select></Field>
+                <Field label="Max duration, мин"><Input name="max_run_duration_minutes" type="number" min="15" max="600" step="5" defaultValue={profile.max_run_duration_minutes ?? ""} placeholder="optional" /></Field>
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 md:col-span-2">
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Safety</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Травмы / ограничения"><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder="травмы, ограничения" /></Field>
+                <Field label="Conditions"><Input name="health_conditions" defaultValue={profile.health_conditions || ""} placeholder="астма, давление, прочее" /></Field>
+                <Field label="Recovery status"><Select name="recovery_status" defaultValue={profile.recovery_status || "normal"}><option value="fresh">Fresh</option><option value="normal">Normal</option><option value="tired">Tired</option><option value="strained">Strained</option><option value="injured">Injured</option><option value="unknown">Unknown</option></Select></Field>
+                <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> conservative mode</label>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2"><Button type="submit">Save profile</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">long {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)}>{profile.recovery_status || "normal"}</Badge></div>
         </form>
       </Card>
 
@@ -1710,7 +1950,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onCh
         <div className="max-h-72 overflow-auto">
           <table className="w-full min-w-[540px] text-left text-xs">
             <thead className="sticky top-0 border-b border-zinc-800 bg-zinc-950 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Type</th><th>Value</th><th>Source</th><th>Date</th></tr></thead>
-            <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurement.value_numeric ?? "--"}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? new Date(measurement.measured_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+            <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurementValueLabel(measurement)}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? new Date(measurement.measured_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
           </table>
           {!measurements.length && <p className="p-4 text-xs text-zinc-500">Измерений пока нет.</p>}
         </div>

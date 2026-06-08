@@ -138,11 +138,20 @@ def activity_matches_support_marker(activity: Activity, workout_type: str) -> bo
     return any(marker in haystack for marker in markers)
 
 
-def schedule_offsets_for_plan(start_date: date, days: int, preferred_weekdays: list[int] | None = None) -> list[int]:
+def schedule_offsets_for_plan(start_date: date, days: int, preferred_weekdays: list[int] | None = None, long_run_weekday: int | None = None) -> list[int]:
     default_offsets = schedule_offsets(days)
-    if not preferred_weekdays:
-        return default_offsets
     start_weekday = start_date.isoweekday()
+    long_offset = (long_run_weekday - start_weekday) % 7 if long_run_weekday else None
+    if not preferred_weekdays:
+        if long_offset is None or days <= 1:
+            return default_offsets
+        offsets = [offset for offset in default_offsets if offset != long_offset]
+        for offset in default_offsets:
+            if len(offsets) >= days - 1:
+                break
+            if offset not in offsets:
+                offsets.append(offset)
+        return sorted(offsets[:max(0, days - 1)] + [long_offset])
     preferred_offsets = sorted({(weekday - start_weekday) % 7 for weekday in preferred_weekdays})
     offsets = preferred_offsets[:days]
     for offset in default_offsets:
@@ -150,11 +159,16 @@ def schedule_offsets_for_plan(start_date: date, days: int, preferred_weekdays: l
             break
         if offset not in offsets:
             offsets.append(offset)
-    return sorted(offsets[:days])
+    offsets = sorted(offsets[:days])
+    if long_offset is not None:
+        if long_offset not in offsets:
+            offsets = offsets[:max(0, days - 1)] + [long_offset]
+        offsets = sorted(offsets[:days])
+    return offsets
 
 
-def scheduled_workout_date(start_date: date, week_index: int, day_index: int, days: int, preferred_weekdays: list[int] | None = None) -> date:
-    offsets = schedule_offsets_for_plan(start_date, days, preferred_weekdays)
+def scheduled_workout_date(start_date: date, week_index: int, day_index: int, days: int, preferred_weekdays: list[int] | None = None, long_run_weekday: int | None = None) -> date:
+    offsets = schedule_offsets_for_plan(start_date, days, preferred_weekdays, long_run_weekday)
     offset = offsets[min(day_index - 1, len(offsets) - 1)]
     return start_date + timedelta(days=(week_index - 1) * 7 + offset)
 
@@ -196,7 +210,7 @@ def profile_for_plan_builder(db: Session, user: User, persist: bool = False) -> 
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     if profile:
         return profile
-    return AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", conservative_mode=False)
+    return AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", unit_system="metric", conservative_mode=False, recovery_status="normal")
 
 
 def zones_for_plan_builder(db: Session, user: User, profile: AthleteProfile) -> dict[str, object]:
@@ -335,6 +349,10 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
         reasons.append("profile conservative mode")
     if profile.injury_notes:
         reasons.append("injury notes present")
+    if profile.health_conditions:
+        reasons.append("health conditions present")
+    if profile.recovery_status in {"tired", "strained", "injured"}:
+        reasons.append(f"profile recovery status: {profile.recovery_status}")
     if request and request.injury:
         reasons.append("wizard injury constraint")
     if request and request.no_hard_workouts:
@@ -372,6 +390,19 @@ def workout_template(days: int, conservative: bool, has_precise_zones: bool) -> 
         template.append((day, "easy", "Легкий бег", "easy"))
     template.append((days, "long", "Длинная тренировка", "easy-long"))
     return template[:days]
+
+
+def workout_template_for_schedule(days: int, conservative: bool, has_precise_zones: bool, long_run_day_index: int | None = None) -> list[tuple[int, str, str, str]]:
+    template = workout_template(days, conservative, has_precise_zones)
+    if not long_run_day_index or long_run_day_index >= days:
+        return template
+    long_item = next((item for item in template if item[1] == "long"), None)
+    if long_item is None:
+        return template
+    other_items = [item for item in template if item[1] != "long"]
+    position = max(0, min(days - 1, long_run_day_index - 1))
+    ordered = other_items[:position] + [long_item] + other_items[position:]
+    return [(index, workout_type, title, intensity) for index, (_, workout_type, title, intensity) in enumerate(ordered[:days], start=1)]
 
 
 def requested_support_sessions(requested: int | None, enabled: bool, default_value: int, maximum: int) -> int:
@@ -1718,7 +1749,17 @@ def build_plan_preview_blueprint(
     support_settings = support_session_settings(request, str(baseline["training_age_level"]), conservative)
     support_settings, support_limited_by_budget = fit_support_settings_to_time_budget(support_settings, request.time_budget_minutes_per_week, easy_pace_seconds_per_km)
     weekly_support_duration_seconds = support_settings_duration_seconds(support_settings)
-    preferred_weekdays = request.preferred_weekdays or []
+    request_preferred_weekdays = request.preferred_weekdays or []
+    preferred_weekdays = request_preferred_weekdays or profile.preferred_weekdays or []
+    profile_long_run_weekday = profile.long_run_weekday if profile.long_run_weekday and 1 <= profile.long_run_weekday <= 7 else None
+    long_run_weekday = profile_long_run_weekday if profile_long_run_weekday and (not request_preferred_weekdays or profile_long_run_weekday in preferred_weekdays) else None
+    max_run_duration_minutes = request.max_long_run_duration_minutes or profile.max_run_duration_minutes
+    schedule_offsets = schedule_offsets_for_plan(start_date, days, preferred_weekdays, long_run_weekday)
+    long_run_day_index = None
+    if long_run_weekday:
+        long_offset = (long_run_weekday - start_date.isoweekday()) % 7
+        if long_offset in schedule_offsets:
+            long_run_day_index = schedule_offsets.index(long_offset) + 1
     priority_multiplier = 1.05 if request.priority in {"a", "high"} else 0.95 if request.priority in {"c", "low"} else 1.0
     target_time_multiplier = 1.03 if request.target_time_seconds else 1.0
     growth_factor = (1.16 if conservative else 1.35) * priority_multiplier
@@ -1744,19 +1785,19 @@ def build_plan_preview_blueprint(
         long_run = min(goal_distance * long_cap, week_volume * (0.34 if conservative else 0.38))
         if request.max_long_run_km:
             long_run = min(long_run, request.max_long_run_km)
-        if request.max_long_run_duration_minutes:
-            long_run = min(long_run, request.max_long_run_duration_minutes * 60 / easy_pace_seconds_per_km)
+        if max_run_duration_minutes:
+            long_run = min(long_run, max_run_duration_minutes * 60 / easy_pace_seconds_per_km)
         long_run = min(long_run, week_volume)
         easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
         week_start = start_date + timedelta(days=(week - 1) * 7)
-        week_workouts = workout_template(days, conservative=conservative, has_precise_zones=has_precise_zones)
+        week_workouts = workout_template_for_schedule(days, conservative=conservative, has_precise_zones=has_precise_zones, long_run_day_index=long_run_day_index)
         week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
             distance = round(long_run if workout_type == "long" else easy_distance, 1)
             workout = {
                 "week_index": week,
                 "day_index": day_index,
-                "scheduled_date": scheduled_workout_date(start_date, week, day_index, days, preferred_weekdays),
+                "scheduled_date": scheduled_workout_date(start_date, week, day_index, days, preferred_weekdays, long_run_weekday),
                 "workout_type": workout_type,
                 "title": title,
                 "distance_km": distance,
@@ -1857,7 +1898,8 @@ def build_plan_preview_blueprint(
             "injury": request.injury,
             "no_hard_workouts": request.no_hard_workouts,
             "max_long_run_km": request.max_long_run_km,
-            "max_long_run_duration_minutes": request.max_long_run_duration_minutes,
+            "max_long_run_duration_minutes": max_run_duration_minutes,
+            "profile_max_run_duration_minutes": profile.max_run_duration_minutes,
             "time_budget_minutes_per_week": request.time_budget_minutes_per_week,
             "include_strength": request.include_strength,
             "strength_sessions_per_week": support_settings["strength_sessions"],

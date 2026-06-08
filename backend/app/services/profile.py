@@ -11,7 +11,7 @@ def get_or_create_profile(db: Session, user: User, commit: bool = False) -> Athl
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     if profile:
         return profile
-    profile = AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU")
+    profile = AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", unit_system="metric", recovery_status="normal")
     db.add(profile)
     db.flush()
     if commit:
@@ -27,6 +27,10 @@ def profile_estimated_hrmax(profile: AthleteProfile) -> dict | None:
     return estimate_hrmax_tanaka(age).as_dict()
 
 
+def profile_field_missing(value) -> bool:
+    return value is None or value == "" or value == []
+
+
 def profile_completeness(profile: AthleteProfile) -> dict:
     fields = {
         "date_of_birth": profile.date_of_birth,
@@ -35,8 +39,11 @@ def profile_completeness(profile: AthleteProfile) -> dict:
         "lactate_threshold_pace_seconds_per_km": profile.lactate_threshold_pace_seconds_per_km,
         "lactate_threshold_hr_bpm": profile.lactate_threshold_hr_bpm,
         "weight_kg": profile.weight_kg,
+        "height_cm": profile.height_cm,
+        "preferred_weekdays": profile.preferred_weekdays,
+        "max_run_duration_minutes": profile.max_run_duration_minutes,
     }
-    missing = [key for key, value in fields.items() if value in (None, "")]
+    missing = [key for key, value in fields.items() if profile_field_missing(value)]
     available = len(fields) - len(missing)
     score = round(available / len(fields), 2)
     can_calculate_hr_zones = bool(profile.max_heart_rate_bpm or profile.date_of_birth)
@@ -57,12 +64,16 @@ def safety_check(profile: AthleteProfile) -> dict:
     warnings = []
     if profile.injury_notes:
         warnings.append("Указаны травмы или ограничения: планировщик должен использовать conservative mode.")
+    if profile.health_conditions:
+        warnings.append("Указаны медицинские состояния: планировщик должен быть консервативным, а спорные нагрузки требуют консультации специалиста.")
+    if profile.recovery_status in {"tired", "strained", "injured"}:
+        warnings.append(f"Recovery status: {profile.recovery_status}. Интенсивность и длительность нужно снизить до восстановления.")
     if not (profile.max_heart_rate_bpm or profile.date_of_birth):
         warnings.append("Нет HRmax или даты рождения: пульсовые зоны будут недоступны или низкой точности.")
     if not profile.lactate_threshold_pace_seconds_per_km:
         warnings.append("Нет порогового темпа: pace-зоны будут недоступны.")
     return {
-        "conservative_mode": bool(profile.conservative_mode or profile.injury_notes),
+        "conservative_mode": bool(profile.conservative_mode or profile.injury_notes or profile.health_conditions or profile.recovery_status in {"tired", "strained", "injured"}),
         "warnings": warnings,
         "message": "Runforfan не является медицинским устройством; при боли, головокружении или ухудшении самочувствия нужно прекратить тренировку и обратиться к специалисту.",
     }

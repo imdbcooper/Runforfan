@@ -50,6 +50,58 @@ export type ImportUploadResult = Omit<ImportBatch, "source_app" | "created_at"> 
   created_at?: string
 }
 
+export type GoalProgress = {
+  metric: string
+  value: number | null
+  target: number | null
+  percentage: number
+  readiness: string
+}
+
+export type GoalMilestone = {
+  title: string
+  due_date: string | null
+  status: string
+  target: unknown
+  value?: number | null
+}
+
+export type GoalPredictedRange = {
+  target_distance_km: number
+  predicted_duration_seconds: number
+  lower_seconds: number
+  upper_seconds: number
+  confidence: string
+  source: string | null
+  target_delta_seconds: number | null
+  warnings: string[]
+}
+
+export type RunningGoal = {
+  id: number
+  title: string
+  goal_type: "race" | "weekly_consistency" | "monthly_distance" | "long_run" | "custom_habit" | "health" | string
+  target_value: number | null
+  unit: string | null
+  period_start: string | null
+  period_end: string | null
+  race_distance_km: number | null
+  target_date: string | null
+  target_time_seconds: number | null
+  priority: string | null
+  course_notes: string | null
+  training_plan_id: number | null
+  reason: string | null
+  status: "active" | "paused" | "completed" | "missed" | "archived" | string
+  created_at: string
+  updated_at: string
+  progress: GoalProgress
+  milestones: GoalMilestone[]
+  plan: { id: number; title: string; status: string; goal_type: string; race_distance_km: number | null; target_date: string | null; adherence: PlanAdherence } | null
+  current_fitness: PerformanceVdot | null
+  predicted_time_range: GoalPredictedRange | null
+}
+
 export type AthleteProfile = {
   id: number
   user_id: number
@@ -59,13 +111,20 @@ export type AthleteProfile = {
   weight_kg: number | null
   timezone: string | null
   locale: string | null
+  unit_system: "metric" | "imperial" | string
+  preferred_weekdays: number[] | null
+  long_run_weekday: number | null
+  max_run_duration_minutes: number | null
   resting_heart_rate_bpm: number | null
   max_heart_rate_bpm: number | null
   max_hr_source: string | null
   lactate_threshold_hr_bpm: number | null
   lactate_threshold_pace_seconds_per_km: number | null
+  vo2max: number | null
   conservative_mode: boolean
   injury_notes: string | null
+  health_conditions: string | null
+  recovery_status: "fresh" | "normal" | "tired" | "strained" | "injured" | "unknown" | string
   estimated_max_heart_rate: {
     value: number | null
     unit: string
@@ -838,6 +897,11 @@ export const api = {
   performanceVdot: () => request<PerformanceVdot>("/performance/vdot"),
   performancePredictions: () => request<PerformancePrediction[]>("/performance/predictions"),
   performancePbs: () => request<PerformancePb[]>("/performance/pbs"),
+  goals: () => request<RunningGoal[]>("/goals"),
+  createGoal: (payload: Record<string, unknown>) => request<RunningGoal>("/goals", { method: "POST", body: JSON.stringify(payload) }),
+  updateGoal: (id: number, payload: Record<string, unknown>) => request<RunningGoal>(`/goals/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  completeGoal: (id: number, payload: Record<string, unknown> = {}) => request<RunningGoal>(`/goals/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteGoal: (id: number) => request<{ deleted: boolean; id: number }>(`/goals/${id}`, { method: "DELETE" }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),

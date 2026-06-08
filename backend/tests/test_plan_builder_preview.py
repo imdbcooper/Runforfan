@@ -180,6 +180,45 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         first_week_dates = [workout["scheduled_date"] for workout in preview["workouts"] if workout["week_index"] == 1]
         self.assertEqual([day.isoweekday() for day in first_week_dates], [2, 4, 6])
 
+    def test_profile_preferences_drive_schedule_when_request_omits_them(self):
+        start_date = date(2026, 6, 8)  # Monday
+        profile = make_profile(
+            date_of_birth=date(1990, 1, 1),
+            resting_heart_rate_bpm=48,
+            max_heart_rate_bpm=188,
+            lactate_threshold_pace_seconds_per_km=300,
+            lactate_threshold_hr_bpm=170,
+            weight_kg=72,
+            preferred_weekdays=[1, 3, 6],
+            long_run_weekday=6,
+            max_run_duration_minutes=45,
+        )
+        request = PlanGenerateRequest(
+            title="Profile schedule",
+            goal_type="10k",
+            race_distance_km=10.0,
+            available_days_per_week=3,
+            current_weekly_distance_km=25.0,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1]
+        long_run = next(workout for workout in first_week if workout["workout_type"] == "long")
+        self.assertEqual(preview["preferred_weekdays"], [1, 3, 6])
+        self.assertEqual([workout["scheduled_date"].isoweekday() for workout in first_week], [1, 3, 6])
+        self.assertEqual(long_run["scheduled_date"].isoweekday(), 6)
+        self.assertLessEqual(long_run["duration_seconds"], 45 * 60)
+        self.assertEqual(preview["constraints"]["max_long_run_duration_minutes"], 45)
+
     def test_no_hard_constraint_removes_hard_workouts_and_caps_long_run(self):
         start_date = date(2026, 6, 8)
         profile = make_profile(

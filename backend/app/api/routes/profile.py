@@ -32,13 +32,20 @@ def profile_out(profile: AthleteProfile) -> dict:
         "weight_kg": profile.weight_kg,
         "timezone": profile.timezone,
         "locale": profile.locale,
+        "unit_system": profile.unit_system or "metric",
+        "preferred_weekdays": profile.preferred_weekdays or [],
+        "long_run_weekday": profile.long_run_weekday,
+        "max_run_duration_minutes": profile.max_run_duration_minutes,
         "resting_heart_rate_bpm": profile.resting_heart_rate_bpm,
         "max_heart_rate_bpm": profile.max_heart_rate_bpm,
         "max_hr_source": profile.max_hr_source,
         "lactate_threshold_hr_bpm": profile.lactate_threshold_hr_bpm,
         "lactate_threshold_pace_seconds_per_km": profile.lactate_threshold_pace_seconds_per_km,
+        "vo2max": profile.vo2max,
         "conservative_mode": profile.conservative_mode,
         "injury_notes": profile.injury_notes,
+        "health_conditions": profile.health_conditions,
+        "recovery_status": profile.recovery_status or "normal",
         "estimated_max_heart_rate": profile_estimated_hrmax(profile),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
@@ -181,4 +188,7 @@ def apply_measurement_to_profile(profile: AthleteProfile, payload: AthleteMeasur
         if threshold_pace:
             profile.lactate_threshold_pace_seconds_per_km = round(float(threshold_pace))
         return bool(threshold_hr or threshold_pace)
+    elif payload.measurement_type == "vo2max" and value is not None:
+        profile.vo2max = float(value)
+        return False
     return False
