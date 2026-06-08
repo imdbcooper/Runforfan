@@ -3765,6 +3765,28 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
     }
   }
 
+  async function downloadActivitiesCsv() {
+    setDataBusy(true)
+    setDataMessage("")
+    try {
+      await devLogin()
+      const csv = await api.exportActivitiesCsv()
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `runforfan-activities-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+      setDataMessage("Activities CSV export generated.")
+      await loadDataManagement()
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Failed to export activities CSV")
+    } finally {
+      setDataBusy(false)
+    }
+  }
+
   async function deleteAccountData() {
     if (deleteConfirm !== "DELETE") return
     setDataBusy(true)
@@ -3826,7 +3848,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
       <Card>
         <CardHeader><div><CardTitle>Data management</CardTitle><p className="text-xs text-zinc-500">Export current user data or wipe account-scoped records.</p></div><Badge>6.18</Badge></CardHeader>
         <div className="grid gap-3 p-4 text-xs">
-          <Button type="button" disabled={dataBusy} onClick={downloadExport}>{dataBusy ? "Working..." : "Download JSON export"}</Button>
+          <div className="flex flex-wrap gap-2"><Button type="button" disabled={dataBusy} onClick={downloadExport}>{dataBusy ? "Working..." : "Download JSON export"}</Button><Button type="button" variant="secondary" disabled={dataBusy} onClick={downloadActivitiesCsv}>{dataBusy ? "Working..." : "Download activities CSV"}</Button></div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">Export omits API keys and local screenshot file paths. It includes user-scoped activities, plans, goals, profile, providers without secrets, imports and audit log.</div>
           <div className="grid gap-2 rounded-md border border-orange-400/20 bg-orange-400/10 p-3">
             <p className="font-medium text-orange-100">Danger zone: delete account data</p>

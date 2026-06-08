@@ -8,7 +8,7 @@ DEPENDENCY_SKIP_REASON = None
 try:
     from app.models import Activity, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
     from app.services.csv_imports import activity_payload_from_csv_row, iter_csv_rows
-    from app.services.data_management import activity_export, llm_provider_export, model_to_dict, training_plan_export
+    from app.services.data_management import activities_csv_content, activity_export, csv_safe_value, llm_provider_export, model_to_dict, training_plan_export
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for data management tests"
@@ -79,6 +79,33 @@ class DataManagementTests(unittest.TestCase):
         self.assertEqual(exported["id"], 5)
         self.assertEqual(exported["segments"], [])
         self.assertEqual(exported["derived_metrics"][0]["metric_key"], "training_load_proxy")
+
+    def test_activities_csv_export_includes_core_activity_fields(self):
+        activity = Activity(
+            id=5,
+            user_id=1,
+            activity_type="run",
+            title="Morning, run",
+            started_at=datetime(2026, 6, 8, 7, 30, tzinfo=UTC),
+            distance_km=5.0,
+            duration_seconds=1500,
+            average_pace_seconds_per_km=300,
+            average_heart_rate_bpm=145,
+        )
+
+        exported = activities_csv_content([activity])
+
+        self.assertIn("id,activity_type,title,started_at,distance_km", exported)
+        self.assertIn('5,run,"Morning, run",2026-06-08T07:30:00+00:00,5.0', exported)
+
+    def test_activities_csv_export_escapes_spreadsheet_formulas(self):
+        activity = Activity(id=5, user_id=1, title="=cmd", source_note=" @risk", duration_seconds=60)
+
+        exported = activities_csv_content([activity])
+
+        self.assertIn("'=cmd", exported)
+        self.assertIn("' @risk", exported)
+        self.assertEqual(csv_safe_value("normal"), "normal")
 
     def test_training_plan_export_includes_workout_blocks(self):
         workout = TrainingPlanWorkout(id=3, plan_id=9, week_index=1, day_index=1, workout_type="easy", title="Easy", status="planned")

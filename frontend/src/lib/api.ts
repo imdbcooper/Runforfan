@@ -1183,6 +1183,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json()
 }
 
+async function requestText(path: string, options: RequestInit = {}): Promise<string> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  })
+  const body = await response.text()
+  if (!response.ok) {
+    if (response.status === 401 && !DEV_LOGIN_ENABLED) {
+      clearAuthToken()
+      notifyAuthExpired()
+    }
+    throw new Error(`${response.status}: ${body}`)
+  }
+  return body
+}
+
 export async function devLogin() {
   if (!DEV_LOGIN_ENABLED) {
     if (token) return { access_token: token, user: null }
@@ -1286,6 +1306,7 @@ export const api = {
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
   integrations: () => request<Integration[]>("/settings/integrations"),
   exportData: () => request<Record<string, unknown>>("/export"),
+  exportActivitiesCsv: () => requestText("/export/activities.csv"),
   deleteAccountData: (confirmation: "DELETE") => request<{ deleted: boolean; counts: Record<string, number>; audit_id: number | null }>("/account/data", { method: "DELETE", body: JSON.stringify({ confirmation }) }),
   auditLog: (limit = 100, offset = 0) => request<AuditLogEntry[]>(`/audit-log?limit=${limit}&offset=${offset}`),
   previewPlan: (payload: Record<string, unknown>) => request<PlanBuilderPreview>("/planning/preview", { method: "POST", body: JSON.stringify(payload) }),

@@ -1,4 +1,6 @@
+import csv
 from datetime import UTC, date, datetime
+from io import StringIO
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -43,6 +45,12 @@ def model_to_dict(instance: Any, exclude: set[str] | None = None) -> dict[str, A
     }
 
 
+def csv_safe_value(value: Any) -> Any:
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
 def llm_provider_export(provider: LlmProviderSetting) -> dict[str, Any]:
     data = model_to_dict(provider, exclude={"encrypted_api_key"})
     data["has_api_key"] = bool(provider.encrypted_api_key)
@@ -56,6 +64,32 @@ def activity_export(activity: Activity) -> dict[str, Any]:
     data["workout_blocks"] = [model_to_dict(block) for block in activity.workout_blocks]
     data["derived_metrics"] = [model_to_dict(metric) for metric in activity.derived_metrics]
     return data
+
+
+ACTIVITY_CSV_FIELDS = [
+    "id",
+    "activity_type",
+    "title",
+    "started_at",
+    "distance_km",
+    "duration_seconds",
+    "average_pace_seconds_per_km",
+    "average_speed_kmh",
+    "average_heart_rate_bpm",
+    "calories_kcal",
+    "aerobic_training_stress",
+    "source_note",
+]
+
+
+def activities_csv_content(activities: list[Activity]) -> str:
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=ACTIVITY_CSV_FIELDS)
+    writer.writeheader()
+    for activity in activities:
+        exported = model_to_dict(activity)
+        writer.writerow({field: csv_safe_value(exported.get(field)) for field in ACTIVITY_CSV_FIELDS})
+    return buffer.getvalue()
 
 
 def training_plan_export(plan: TrainingPlan) -> dict[str, Any]:
@@ -110,6 +144,15 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "llm_providers": [llm_provider_export(provider) for provider in providers],
         "audit_log": [model_to_dict(item) for item in audit_logs],
     }
+
+
+def export_activities_csv(db: Session, user: User) -> str:
+    activities = list(db.scalars(
+        select(Activity)
+        .where(Activity.user_id == user.id)
+        .order_by(Activity.started_at.desc().nullslast(), Activity.id.desc())
+    ))
+    return activities_csv_content(activities)
 
 
 def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
