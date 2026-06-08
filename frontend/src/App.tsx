@@ -44,6 +44,13 @@ const SUPPORT_WORKOUT_TYPES = new Set(["strength", "ofp", "mobility", "prehab", 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const ONBOARDING_DISMISSED_KEY = "runforfan_onboarding_dismissed"
 const ONBOARDING_READY_SCORE = 0.8
+const DEFAULT_HR_ZONE_ROWS = [
+  { zone_key: "z1", label: "Z1 Recovery" },
+  { zone_key: "z2", label: "Z2 Easy" },
+  { zone_key: "z3", label: "Z3 Steady" },
+  { zone_key: "z4", label: "Z4 Threshold" },
+  { zone_key: "z5", label: "Z5 Hard" },
+]
 
 function safeStorageGet(key: string) {
   try {
@@ -322,6 +329,18 @@ function formatZoneValue(zone: Zone, value: number | null) {
 
 function formatZoneRange(zone: Zone) {
   return `${formatZoneValue(zone, zone.lower_value)} - ${formatZoneValue(zone, zone.upper_value)}`
+}
+
+function manualHrZoneRows(zones?: Zone[] | null) {
+  return DEFAULT_HR_ZONE_ROWS.map((fallback) => {
+    const existing = zones?.find((zone) => zone.zone_key === fallback.zone_key)
+    return {
+      zone_key: fallback.zone_key,
+      label: existing?.label || fallback.label,
+      lower_value: existing?.lower_value ?? null,
+      upper_value: existing?.upper_value ?? null,
+    }
+  })
 }
 
 function missingLabel(field: string) {
@@ -2491,6 +2510,10 @@ function GoalCard({ goal, busy, onStatus, onDelete }: { goal: RunningGoal; busy:
 }
 
 function ProfileZones({ profile, completeness, safety, zones, measurements, onboardingMode, onDismissOnboarding, onChanged }: { profile: AthleteProfile | null; completeness: ProfileCompleteness | null; safety: SafetyCheck | null; zones: Zones | null; measurements: AthleteMeasurement[]; onboardingMode?: boolean; onDismissOnboarding?: () => void; onChanged: () => Promise<void> }) {
+  const [zoneMessage, setZoneMessage] = useState("")
+  const [zoneError, setZoneError] = useState("")
+  const [savingZones, setSavingZones] = useState(false)
+
   if (!profile) return <Card className="p-4 text-sm text-zinc-400">Loading profile...</Card>
 
   async function submitProfile(event: FormEvent<HTMLFormElement>) {
@@ -2550,7 +2573,78 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
     await onChanged()
   }
 
+  async function submitManualHrZones(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const rows = DEFAULT_HR_ZONE_ROWS.map((row) => ({
+      zone_key: row.zone_key,
+      label: stringOrNull(data.get(`${row.zone_key}_label`)) || row.label,
+      lower_value: numberOrNull(data.get(`${row.zone_key}_lower`)),
+      upper_value: numberOrNull(data.get(`${row.zone_key}_upper`)),
+      unit: "bpm",
+    }))
+    setZoneError("")
+    setZoneMessage("")
+    const invalid = rows.find((row) => row.lower_value === null && row.upper_value === null)
+    if (invalid) {
+      setZoneError(`${invalid.zone_key.toUpperCase()} must define at least min or max bpm.`)
+      return
+    }
+    const reversed = rows.find((row) => row.lower_value !== null && row.upper_value !== null && row.lower_value > row.upper_value)
+    if (reversed) {
+      setZoneError(`${reversed.zone_key.toUpperCase()} min bpm must be <= max bpm.`)
+      return
+    }
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]
+      const previous = rows[index - 1]
+      if (index > 0 && row.lower_value === null) {
+        setZoneError(`${row.zone_key.toUpperCase()} must define min bpm to avoid overlap with lower zones.`)
+        return
+      }
+      if (index < rows.length - 1 && row.upper_value === null) {
+        setZoneError(`${row.zone_key.toUpperCase()} must define max bpm to avoid overlap with higher zones.`)
+        return
+      }
+      if (previous?.upper_value !== null && previous?.upper_value !== undefined && row.lower_value !== null && row.lower_value <= previous.upper_value) {
+        setZoneError(`${row.zone_key.toUpperCase()} min bpm must be greater than ${previous.zone_key.toUpperCase()} max bpm.`)
+        return
+      }
+    }
+    setSavingZones(true)
+    try {
+      await api.replaceHrZones(rows)
+      setZoneMessage("Manual HR zones saved. Calculated HR zones are suppressed until overrides are cleared.")
+      await onChanged()
+    } catch (caught) {
+      console.error(caught)
+      setZoneError(apiErrorMessage(caught, "Manual HR zones were not saved"))
+    } finally {
+      setSavingZones(false)
+    }
+  }
+
+  async function clearManualHrZones() {
+    setSavingZones(true)
+    setZoneError("")
+    setZoneMessage("")
+    try {
+      await api.replaceHrZones([])
+      await api.recalculateZones()
+      setZoneMessage("Manual HR overrides cleared. Calculated HR zones restored when profile inputs are available.")
+      await onChanged()
+    } catch (caught) {
+      console.error(caught)
+      setZoneError(apiErrorMessage(caught, "Manual HR zones were not cleared"))
+    } finally {
+      setSavingZones(false)
+    }
+  }
+
   const completenessScore = Math.round((completeness?.score || 0) * 100)
+  const hrRows = manualHrZoneRows(zones?.hr || [])
+  const hrZoneFormKey = hrRows.map((row) => `${row.zone_key}:${row.label}:${row.lower_value ?? ""}:${row.upper_value ?? ""}`).join("|")
+  const hasManualHrZones = Boolean(zones?.hr.some((zone) => zone.method === "manual"))
   const onboardingReady = Boolean(completeness && completeness.score >= ONBOARDING_READY_SCORE)
   const zoneReadiness = completeness ? [
     completeness.can_calculate_hr_zones ? "HR zones ready" : "HR zones need HRmax or birthdate",
@@ -2647,6 +2741,15 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         <div className="grid gap-4 p-4">
           <ZoneTable title="Heart rate" zones={zones?.hr || []} />
           <ZoneTable title="Pace" zones={zones?.pace || []} />
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-semibold text-white">Manual HR override</p><p className="mt-1 text-[11px] text-zinc-500">Save manual bpm ranges when lab/device zones should override calculated HR zones.</p></div><Badge className={hasManualHrZones ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{hasManualHrZones ? "manual active" : "calculated active"}</Badge></div>
+            <form key={hrZoneFormKey} onSubmit={submitManualHrZones} className="mt-3 grid gap-2 text-xs">
+              {hrRows.map((row) => <div key={row.zone_key} className="grid gap-2 md:grid-cols-[5rem_1fr_6rem_6rem]"><span className="flex items-center font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{row.zone_key}</span><Input name={`${row.zone_key}_label`} defaultValue={row.label} placeholder="Label" /><Input name={`${row.zone_key}_lower`} type="number" min="30" max="240" defaultValue={row.lower_value ?? ""} placeholder="min bpm" /><Input name={`${row.zone_key}_upper`} type="number" min="30" max="240" defaultValue={row.upper_value ?? ""} placeholder="max bpm" /></div>)}
+              <div className="flex flex-wrap items-center gap-2"><Button type="submit" size="sm" disabled={savingZones}>{savingZones ? "Saving..." : "Save manual HR zones"}</Button><Button type="button" size="sm" variant="secondary" disabled={savingZones || !hasManualHrZones} onClick={clearManualHrZones}>Clear manual HR zones</Button></div>
+              {zoneMessage ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{zoneMessage}</p> : null}
+              {zoneError ? <p className="rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-[11px] text-rose-100">{zoneError}</p> : null}
+            </form>
+          </div>
         </div>
       </Card>
 
