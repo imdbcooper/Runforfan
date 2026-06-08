@@ -26,6 +26,7 @@ SEILER_LABELS = {
     "high": "Seiler Z3 high",
 }
 SEILER_BY_FIVE_ZONE = {"z1": "low", "z2": "low", "z3": "moderate", "z4": "high", "z5": "high"}
+LOW_INTENSITY_TARGET = {"lower_percentage": 75.0, "upper_percentage": 85.0, "basis": "default_endurance_weekly_target"}
 PACE_TO_FIVE_ZONE = {"easy": "z1", "steady": "z2", "threshold": "z3", "interval": "z4", "rep": "z5"}
 PLANNED_INTENSITY_TO_FIVE_ZONE = {
     "recovery": "z1",
@@ -115,6 +116,23 @@ def add_duration(durations: dict[str, int], counts: dict[str, int], key: str | N
         return
     durations[key] = durations.get(key, 0) + duration
     counts[key] = counts.get(key, 0) + 1
+
+
+def threshold_zone(zone: dict[str, object] | None) -> bool:
+    return zone is not None and str(zone.get("method") or "") in {"threshold_hr", "threshold_pace"}
+
+
+def detailed_zone_key(hr_zone: dict[str, object] | None, pace_zone: dict[str, object] | None, rpe_zone: dict[str, object] | None) -> str | None:
+    for zone_type, zone in (("hr", hr_zone), ("pace", pace_zone)):
+        if threshold_zone(zone):
+            return five_zone_key(zone_type, str(zone["zone_key"]))
+    if hr_zone:
+        return five_zone_key("hr", str(hr_zone["zone_key"]))
+    if pace_zone:
+        return five_zone_key("pace", str(pace_zone["zone_key"]))
+    if rpe_zone:
+        return five_zone_key("rpe", str(rpe_zone["zone_key"]))
+    return None
 
 
 def activity_efforts(activity: Activity) -> list[dict[str, object]]:
@@ -215,6 +233,48 @@ def compare_planned_actual(planned: dict[str, int], actual: dict[str, int]) -> l
     return rows
 
 
+def seiler_bucket_items(five_zone_durations: dict[str, int], five_zone_counts: dict[str, int]) -> list[dict[str, object]]:
+    seiler_duration, seiler_counts = empty_duration_maps(list(SEILER_LABELS))
+    for five_key, duration in five_zone_durations.items():
+        seiler_key = SEILER_BY_FIVE_ZONE.get(five_key)
+        if seiler_key:
+            seiler_duration[seiler_key] += duration
+            seiler_counts[seiler_key] += five_zone_counts.get(five_key, 0)
+    return distribution_items(seiler_duration, seiler_counts, SEILER_LABELS)
+
+
+def low_intensity_status(percentage: float | None) -> str:
+    if percentage is None:
+        return "unknown"
+    if percentage < LOW_INTENSITY_TARGET["lower_percentage"]:
+        return "below"
+    if percentage > LOW_INTENSITY_TARGET["upper_percentage"]:
+        return "above"
+    return "within"
+
+
+def low_intensity_compliance(time_buckets: list[dict[str, object]], to_date: date | None = None, granularity: str = "week") -> dict[str, object]:
+    expected_period_start = bucket_start(to_date, granularity) if to_date else None
+    if expected_period_start and (not time_buckets or time_buckets[-1]["period_start"] != expected_period_start):
+        return {
+            "target": dict(LOW_INTENSITY_TARGET),
+            "period_label": bucket_label(expected_period_start, granularity),
+            "low_percentage": None,
+            "status": "unknown",
+        }
+    latest = time_buckets[-1] if time_buckets else None
+    low_percentage: float | None = None
+    if latest and latest["total_duration_seconds"]:
+        items = {item["zone_key"]: item for item in latest["seiler_three_zone"]}
+        low_percentage = float(items.get("low", {}).get("percentage", 0.0))
+    return {
+        "target": dict(LOW_INTENSITY_TARGET),
+        "period_label": latest["period_label"] if latest else None,
+        "low_percentage": low_percentage,
+        "status": low_intensity_status(low_percentage),
+    }
+
+
 def zone_distribution_from_data(activities: list[Activity], linked_workouts: list[TrainingPlanWorkout], planned_workouts: list[TrainingPlanWorkout], zones: dict[str, list[dict[str, object]]], from_date: date | None = None, to_date: date | None = None, granularity: str = "week", timezone: ZoneInfo = ZoneInfo("UTC"), profile: AthleteProfile | None = None) -> dict[str, object]:
     hr_zones = zones.get("hr", [])
     pace_zones = zones.get("pace", [])
@@ -247,11 +307,7 @@ def zone_distribution_from_data(activities: list[Activity], linked_workouts: lis
                 add_duration(hr_duration, hr_counts, str(hr_zone["zone_key"]), duration)
             if pace_zone:
                 add_duration(pace_duration, pace_counts, str(pace_zone["zone_key"]), duration)
-            detailed_key = five_zone_key("hr", str(hr_zone["zone_key"])) if hr_zone else None
-            if detailed_key is None and pace_zone:
-                detailed_key = five_zone_key("pace", str(pace_zone["zone_key"]))
-            if detailed_key is None and rpe_zone:
-                detailed_key = five_zone_key("rpe", str(rpe_zone["zone_key"]))
+            detailed_key = detailed_zone_key(hr_zone, pace_zone, rpe_zone)
             if detailed_key is None:
                 detailed_key = support_activity_zone(activity, workout)
             add_duration(five_duration, five_counts, detailed_key, duration)
@@ -263,19 +319,13 @@ def zone_distribution_from_data(activities: list[Activity], linked_workouts: lis
         zone_key = planned_workout_zone(workout)
         add_duration(planned_duration, planned_counts, zone_key, planned_workout_duration(workout, profile))
 
-    seiler_duration, seiler_counts = empty_duration_maps(list(SEILER_LABELS))
-    for five_key, duration in five_duration.items():
-        seiler_key = SEILER_BY_FIVE_ZONE.get(five_key)
-        if seiler_key:
-            seiler_duration[seiler_key] += duration
-            seiler_counts[seiler_key] += five_counts.get(five_key, 0)
-
     time_buckets = [
         {
             "period_start": start,
             "period_label": bucket_label(start, granularity),
             "total_duration_seconds": sum(durations.values()),
             "items": distribution_items(durations, bucket_counts[start], FIVE_ZONE_LABELS),
+            "seiler_three_zone": seiler_bucket_items(durations, bucket_counts[start]),
         }
         for start, durations in sorted(bucket_durations.items())
     ]
@@ -289,16 +339,17 @@ def zone_distribution_from_data(activities: list[Activity], linked_workouts: lis
         "actual_pace": distribution_items(pace_duration, pace_counts, zone_labels(pace_zones)),
         "actual_rpe": distribution_items(rpe_duration, rpe_counts, zone_labels(rpe_zones)),
         "actual_five_zone": distribution_items(five_duration, five_counts, FIVE_ZONE_LABELS),
-        "seiler_three_zone": distribution_items(seiler_duration, seiler_counts, SEILER_LABELS),
+        "seiler_three_zone": seiler_bucket_items(five_duration, five_counts),
         "planned_five_zone": distribution_items(planned_duration, planned_counts, FIVE_ZONE_LABELS),
         "planned_vs_actual": compare_planned_actual(planned_duration, five_duration),
         "time_buckets": time_buckets,
+        "low_intensity_compliance": low_intensity_compliance(time_buckets, to_date, granularity),
         "metadata": {
             "activity_count": len(activities),
             "planned_workout_count": len(planned_workouts),
             "classified_actual_duration_seconds": classified_actual,
             "unclassified_actual_duration_seconds": max(total_activity_duration - classified_actual, 0),
-            "classification_priority": ["hr", "pace", "rpe"],
+            "classification_priority": ["threshold_hr", "threshold_pace", "hr", "pace", "rpe"],
         },
     }
 

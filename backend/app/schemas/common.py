@@ -617,6 +617,7 @@ class ZoneDistributionBucketOut(BaseModel):
     period_label: str
     total_duration_seconds: int
     items: list[ZoneDistributionItemOut] = Field(default_factory=list)
+    seiler_three_zone: list[ZoneDistributionItemOut] = Field(default_factory=list)
 
 
 class ZonePlannedActualOut(BaseModel):
@@ -627,6 +628,13 @@ class ZonePlannedActualOut(BaseModel):
     actual_duration_seconds: int
     actual_percentage: float
     diff_percentage: float
+
+
+class LowIntensityComplianceOut(BaseModel):
+    target: dict[str, object]
+    period_label: str | None = None
+    low_percentage: float | None = None
+    status: str
 
 
 class ZoneDistributionOut(BaseModel):
@@ -641,6 +649,7 @@ class ZoneDistributionOut(BaseModel):
     planned_five_zone: list[ZoneDistributionItemOut] = Field(default_factory=list)
     planned_vs_actual: list[ZonePlannedActualOut] = Field(default_factory=list)
     time_buckets: list[ZoneDistributionBucketOut] = Field(default_factory=list)
+    low_intensity_compliance: LowIntensityComplianceOut | None = None
     metadata: dict
 
 
@@ -886,7 +895,9 @@ class PlanWorkoutExecutionScoreOut(BaseModel):
 
 class PlanAdherenceOut(BaseModel):
     total_workouts: int
+    planned_sessions: int = 0
     done_workouts: int
+    completed_sessions: int = 0
     missed_workouts: int
     skipped_workouts: int
     linked_workouts: int = 0
@@ -896,8 +907,11 @@ class PlanAdherenceOut(BaseModel):
     planned_duration_seconds: int = 0
     completed_duration_seconds: int = 0
     completion_rate: float
+    session_adherence: float = 0
     distance_completion_rate: float
+    distance_adherence: float = 0
     duration_completion_rate: float = 0
+    duration_adherence: float = 0
     support_workouts: int = 0
     warnings: list[str] = Field(default_factory=list)
 

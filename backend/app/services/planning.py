@@ -734,6 +734,7 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
     flags: list[str] = []
     volume_score: float | None = None
     intensity_score: float | None = None
+    intensity_over_target = False
     subjective_risk = "unknown"
     adherence_status = "unknown"
     if feedback:
@@ -768,27 +769,45 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
                 miss = min(abs(feedback.rpe - target_low), abs(feedback.rpe - target_high))
                 intensity_score = 0.7 if miss == 1 else 0.4
                 flags.append("RPE outside target range")
+                if feedback.rpe > target_high:
+                    intensity_over_target = True
     if workout.status in {"missed", "skipped"}:
         flags.append(f"workout {workout.status}")
         return {"score": 0.0, "status": workout.status, "volume_score": 0.0, "intensity_score": intensity_score, "adherence_status": workout.status, "subjective_risk": subjective_risk, "flags": flags}
+    if workout.status == "rescheduled" and not activity:
+        return {"score": None, "status": "moved", "volume_score": None, "intensity_score": intensity_score, "adherence_status": "moved", "subjective_risk": subjective_risk, "flags": flags}
     if activity and workout.distance_km and activity.distance_km is not None:
-        relative_delta = abs(activity.distance_km - workout.distance_km) / max(workout.distance_km, 1)
+        target_ratio = activity.distance_km / max(workout.distance_km, 0.001)
+        relative_delta = abs(target_ratio - 1)
         volume_score = max(0.0, min(1.0, 1 - relative_delta / 0.5))
-        if activity.distance_km >= workout.distance_km * 1.2:
+        if target_ratio > 1.2:
             flags.append("actual volume above plan")
             adherence_status = "overdone"
-        elif activity.distance_km <= workout.distance_km * 0.75:
+        elif target_ratio >= 0.8:
+            adherence_status = "completed"
+        elif target_ratio >= 0.4:
             flags.append("actual volume below plan")
             adherence_status = "partial"
+        else:
+            flags.append("actual volume far below plan")
+            adherence_status = "missed"
     elif activity and workout.duration_seconds and activity.duration_seconds:
-        relative_delta = abs(activity.duration_seconds - workout.duration_seconds) / max(workout.duration_seconds, 1)
+        target_ratio = activity.duration_seconds / max(workout.duration_seconds, 1)
+        relative_delta = abs(target_ratio - 1)
         volume_score = max(0.0, min(1.0, 1 - relative_delta / 0.5))
-        if activity.duration_seconds >= workout.duration_seconds * 1.2:
+        if target_ratio > 1.2:
             flags.append("actual duration above plan")
             adherence_status = "overdone"
-        elif activity.duration_seconds <= workout.duration_seconds * 0.75:
+        elif target_ratio >= 0.8:
+            adherence_status = "completed"
+        elif target_ratio >= 0.4:
             flags.append("actual duration below plan")
             adherence_status = "partial"
+        else:
+            flags.append("actual duration far below plan")
+            adherence_status = "missed"
+    elif activity:
+        adherence_status = "completed"
     subjective_score: float | None = None
     if feedback:
         subjective_score = 1.0
@@ -807,15 +826,13 @@ def workout_execution_score(workout: TrainingPlanWorkout) -> dict[str, object]:
             subjective_score = min(subjective_score, 0.75)
     components = [score for score in (volume_score, intensity_score, subjective_score) if score is not None]
     score = round(sum(components) / len(components), 2) if components else None
-    status = "unknown"
-    if workout.status == "rescheduled":
-        adherence_status = "moved"
+    if intensity_over_target:
+        flags.append("intensity above target")
+        adherence_status = "overdone"
     if score is not None:
-        status = "completed" if score >= 0.8 else "partial" if score >= 0.45 else "at_risk"
         if adherence_status == "unknown":
-            adherence_status = status if status in {"completed", "partial"} else "partial"
-    if adherence_status == "overdone":
-        status = "overdone"
+            adherence_status = "completed" if score >= 0.8 else "partial"
+    status = adherence_status if adherence_status in {"completed", "partial", "overdone", "missed", "moved"} else "unknown"
     return {
         "score": score,
         "status": status,
@@ -898,7 +915,9 @@ def adherence_summary(workouts: list[TrainingPlanWorkout], pace_seconds_per_km: 
             warnings.append("ОФП/support длительность заметно ниже плана")
     return {
         "total_workouts": total,
+        "planned_sessions": total,
         "done_workouts": len(done),
+        "completed_sessions": len(done),
         "missed_workouts": len(missed),
         "skipped_workouts": len(skipped),
         "linked_workouts": len(linked),
@@ -908,8 +927,11 @@ def adherence_summary(workouts: list[TrainingPlanWorkout], pace_seconds_per_km: 
         "planned_duration_seconds": planned_duration,
         "completed_duration_seconds": completed_duration,
         "completion_rate": round(len(done) / total, 2) if total else 0,
+        "session_adherence": round(len(done) / total, 2) if total else 0,
         "distance_completion_rate": round(distance_rate, 2) if planned_distance else 0,
+        "distance_adherence": round(distance_rate, 2) if planned_distance else 0,
         "duration_completion_rate": round(duration_rate, 2) if planned_duration else 0,
+        "duration_adherence": round(duration_rate, 2) if planned_duration else 0,
         "support_workouts": support_workouts,
         "warnings": warnings,
     }
@@ -1039,6 +1061,8 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             or (workout.feedback.fatigue is not None and workout.feedback.fatigue >= 8)
         )
     ]
+    risky_feedback_ids = {workout.id for workout in risky_feedback}
+    overdone_hard = [workout for workout in recent if workout.id not in risky_feedback_ids and workout_is_hard(workout) and workout_execution_score(workout)["adherence_status"] == "overdone"]
     recent_completed_distance = sum(workout.completed_activity.distance_km or 0 for workout in recent_linked)
     upcoming_planned_distance = sum(workout.distance_km or 0 for workout in upcoming)
     safety_gated = bool(plan.explanation and "Safety gates:" in plan.explanation and "Safety gates: no active safety gates" not in plan.explanation)
@@ -1114,6 +1138,19 @@ def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan)
             workout_id=risky_feedback[-1].id,
             week_index=risky_feedback[-1].week_index,
             suggested_payload={"action": "reduce_intensity", "days": 3},
+        ))
+
+    if overdone_hard:
+        workout = overdone_hard[-1]
+        recommendations.append(recommendation_item(
+            "reduce_intensity",
+            "warning",
+            "Hard workout was overdone",
+            "A recent hard workout exceeded target volume or intensity; ease the next hard session before adding load.",
+            [f"overdone {workout.workout_type} workout"],
+            workout_id=workout.id,
+            week_index=workout.week_index,
+            suggested_payload={"action": "reduce_intensity", "days": 7},
         ))
 
     if summary["planned_distance_km"] and summary["distance_completion_rate"] >= 1.2:

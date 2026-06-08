@@ -5,7 +5,7 @@ from unittest.mock import patch
 try:
     from app.models import Activity, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutFeedbackIn
-    from app.services.planning import AUTO_MATCH_MIN_SCORE, apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, score_activity_workout_match, workout_execution_score
+    from app.services.planning import AUTO_MATCH_MIN_SCORE, adherence_summary, apply_plan_recommendations, plan_adjustment_recommendations, plan_recommendation_preview_changes, save_workout_feedback, score_activity_workout_match, workout_execution_score
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("SQLAlchemy is required for planning recommendation tests") from exc
@@ -258,6 +258,33 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         self.assertEqual(score["status"], "completed")
         self.assertEqual(score["volume_score"], 1.0)
 
+    def test_execution_score_uses_spec_volume_thresholds(self):
+        completed = make_workout(1, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(101, 12.0))
+        partial = make_workout(2, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(102, 7.9))
+        missed = make_workout(3, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(103, 3.9))
+        overdone = make_workout(4, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(104, 12.1))
+        moved = make_workout(5, TODAY, status="rescheduled", distance_km=10.0)
+        skipped = make_workout(6, TODAY, status="skipped", distance_km=10.0)
+
+        self.assertEqual(workout_execution_score(completed)["status"], "completed")
+        self.assertEqual(workout_execution_score(partial)["status"], "partial")
+        self.assertEqual(workout_execution_score(missed)["status"], "missed")
+        self.assertEqual(workout_execution_score(overdone)["status"], "overdone")
+        self.assertEqual(workout_execution_score(moved)["status"], "moved")
+        self.assertEqual(workout_execution_score(skipped)["status"], "skipped")
+
+    def test_adherence_summary_exposes_spec_aliases(self):
+        done = make_workout(1, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(101, 8.0))
+        missed = make_workout(2, TODAY, status="missed", distance_km=5.0)
+
+        summary = adherence_summary([done, missed])
+
+        self.assertEqual(summary["planned_sessions"], 2)
+        self.assertEqual(summary["completed_sessions"], 1)
+        self.assertEqual(summary["session_adherence"], 0.5)
+        self.assertEqual(summary["distance_adherence"], summary["distance_completion_rate"])
+        self.assertEqual(summary["duration_adherence"], summary["duration_completion_rate"])
+
     def test_execution_score_flags_pain_feedback(self):
         workout = make_workout(1, TODAY, status="done", distance_km=5.0, completed_activity=make_activity(101, 5.0))
         workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, pain=True, pain_level=5)
@@ -319,6 +346,29 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
         result = self.recommendations(plan)
 
         self.assertIn("reduce_intensity", self.recommendation_types(result))
+
+    def test_overdone_hard_workout_triggers_reduce_intensity_without_aggregate_overvolume(self):
+        overdone_interval = make_workout(1, TODAY, status="done", workout_type="interval", intensity="threshold", distance_km=10.0, completed_activity=make_activity(101, 13.0))
+        partial_easy = make_workout(2, TODAY, status="done", distance_km=10.0, completed_activity=make_activity(102, 5.0), day_index=2)
+        upcoming_hard = make_workout(3, date(2026, 6, 9), workout_type="interval", intensity="threshold", distance_km=5.0, day_index=3)
+        plan = make_plan(overdone_interval, partial_easy, upcoming_hard)
+
+        result = self.recommendations(plan)
+        preview = self.preview(plan)
+        intensity_changes = [change for change in preview["changes"] if change["field"] == "intensity"]
+
+        self.assertLess(result["metrics"]["distance_completion_rate"], 1.2)
+        self.assertIn("reduce_intensity", self.recommendation_types(result))
+        self.assertEqual(intensity_changes[0]["workout_id"], 3)
+
+    def test_overdone_hard_feedback_does_not_duplicate_reduce_intensity_recommendation(self):
+        completed = make_workout(1, TODAY, status="done", workout_type="interval", intensity="threshold", distance_km=10.0, completed_activity=make_activity(101, 10.0))
+        completed.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, rpe=9)
+        plan = make_plan(completed, make_workout(2, date(2026, 6, 9), workout_type="interval", intensity="threshold", day_index=2))
+
+        result = self.recommendations(plan)
+
+        self.assertEqual(self.recommendation_types(result).count("reduce_intensity"), 1)
 
     def test_reduce_intensity_eases_only_first_hard_workout_in_window(self):
         completed = make_workout(1, TODAY, status="done", completed_activity=make_activity(101, 5.0))

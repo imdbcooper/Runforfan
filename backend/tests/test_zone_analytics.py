@@ -125,6 +125,57 @@ class ZoneAnalyticsTests(unittest.TestCase):
         self.assertEqual(result["metadata"]["classified_actual_duration_seconds"], 2400)
         self.assertEqual(len(result["time_buckets"]), 1)
 
+    def test_zone_distribution_prefers_threshold_pace_over_non_threshold_hr(self):
+        zones = {
+            "hr": [
+                {"zone_key": "z5", "label": "HR hard", "lower_value": 120, "upper_value": 220, "unit": "bpm", "method": "hrr", "confidence": "low", "source_reference": "test", "zone_type": "hr", "id": None, "is_active": True},
+            ],
+            "pace": [
+                {"zone_key": "easy", "label": "Threshold easy", "lower_value": 330, "upper_value": 430, "unit": "seconds_per_km", "method": "threshold_pace", "confidence": "high", "source_reference": "test", "zone_type": "pace", "id": None, "is_active": True},
+            ],
+            "rpe": [],
+            "metadata": {},
+        }
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 5.0, 1800)
+        activity.average_heart_rate_bpm = 170
+
+        result = zone_distribution_from_data([activity], [], [], zones, date(2026, 6, 1), date(2026, 6, 7))
+        actual = {item["zone_key"]: item for item in result["actual_five_zone"]}
+
+        self.assertEqual(actual["z1"]["duration_seconds"], 1800)
+        self.assertEqual(actual["z5"]["duration_seconds"], 0)
+        self.assertEqual(result["metadata"]["classification_priority"][:2], ["threshold_hr", "threshold_pace"])
+
+    def test_zone_distribution_reports_weekly_low_intensity_compliance(self):
+        zones = {
+            "hr": [],
+            "pace": [
+                {"zone_key": "easy", "label": "Easy", "lower_value": 300, "upper_value": 430, "unit": "seconds_per_km", "method": "threshold_pace", "confidence": "high", "source_reference": "test", "zone_type": "pace", "id": None, "is_active": True},
+                {"zone_key": "interval", "label": "Interval", "lower_value": 0, "upper_value": 299, "unit": "seconds_per_km", "method": "threshold_pace", "confidence": "high", "source_reference": "test", "zone_type": "pace", "id": None, "is_active": True},
+            ],
+            "rpe": [],
+            "metadata": {},
+        }
+        easy = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 8.0, 3200)
+        hard = make_activity(2, datetime(2026, 6, 2, 8, tzinfo=UTC), 4.0, 800)
+
+        result = zone_distribution_from_data([easy, hard], [], [], zones, date(2026, 6, 1), date(2026, 6, 7))
+
+        self.assertEqual(result["low_intensity_compliance"]["low_percentage"], 80.0)
+        self.assertEqual(result["low_intensity_compliance"]["status"], "within")
+        self.assertEqual(result["time_buckets"][0]["seiler_three_zone"][0]["zone_key"], "low")
+
+        below_easy = make_activity(3, datetime(2026, 6, 8, 8, tzinfo=UTC), 6.0, 2400)
+        below_hard = make_activity(4, datetime(2026, 6, 8, 9, tzinfo=UTC), 8.0, 1600)
+        below = zone_distribution_from_data([below_easy, below_hard], [], [], zones, date(2026, 6, 8), date(2026, 6, 14))
+
+        self.assertEqual(below["low_intensity_compliance"]["low_percentage"], 60.0)
+        self.assertEqual(below["low_intensity_compliance"]["status"], "below")
+
+        stale = zone_distribution_from_data([easy, hard], [], [], zones, date(2026, 6, 1), date(2026, 6, 21))
+        self.assertIsNone(stale["low_intensity_compliance"]["low_percentage"])
+        self.assertEqual(stale["low_intensity_compliance"]["status"], "unknown")
+
     def test_activity_efforts_prefer_blocks_when_they_cover_activity_duration(self):
         activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), 2.0, 900)
         activity.segments = [ActivitySegment(id=1, activity_id=1, segment_index=1, distance_km=1.0, duration_seconds=450, pace_seconds_per_km=450, average_heart_rate_bpm=130)]

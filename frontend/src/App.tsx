@@ -522,8 +522,8 @@ function Overview({ activities, analytics, dashboard, providers, onImport, onPla
 
 function signalClass(status?: string) {
   if (status === "risk" || status === "adjust" || status === "critical" || status === "at_risk" || status === "missed" || status === "strained" || status === "injured") return "border-rose-400/30 bg-rose-500/10 text-rose-200"
-  if (status === "watch" || status === "warning" || status === "tired") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
-  if (status === "ok" || status === "active" || status === "done" || status === "on_track" || status === "completed" || status === "fresh" || status === "normal") return "border-zinc-700 bg-zinc-900 text-zinc-200"
+  if (status === "watch" || status === "warning" || status === "tired" || status === "below" || status === "above") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
+  if (status === "ok" || status === "active" || status === "done" || status === "on_track" || status === "completed" || status === "fresh" || status === "normal" || status === "within") return "border-zinc-700 bg-zinc-900 text-zinc-200"
   return "border-zinc-700 bg-zinc-900 text-zinc-400"
 }
 
@@ -1405,6 +1405,9 @@ function ZonesAnalytics() {
   const classified = Number(meta.classified_actual_duration_seconds || 0)
   const unclassified = Number(meta.unclassified_actual_duration_seconds || 0)
   const total = classified + unclassified
+  const lowCompliance = distribution?.low_intensity_compliance
+  const lowTarget = lowCompliance?.target || {}
+  const lowTargetLabel = `${Number(lowTarget.lower_percentage ?? 75).toFixed(0)}-${Number(lowTarget.upper_percentage ?? 85).toFixed(0)}%`
 
   return <div className="grid gap-4">
     <Card className="p-4">
@@ -1427,6 +1430,13 @@ function ZonesAnalytics() {
       <Card className="p-3"><Stat label="activities" value={Number(meta.activity_count || 0)} /></Card>
       <Card className="p-3"><Stat label="planned workouts" value={Number(meta.planned_workout_count || 0)} /></Card>
     </div>
+
+    <Card className="p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><p className="font-semibold text-white">Weekly low-intensity target</p><p className="mt-1 text-xs text-zinc-500">Seiler low share for the latest requested {distribution?.granularity || "week"} bucket. Target defaults to endurance guidance until phase/athlete-level tuning is available.</p></div>
+        <div className="flex flex-wrap gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">target {lowTargetLabel}</Badge><Badge className={signalClass(lowCompliance?.status)}>{lowCompliance?.status || "unknown"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">actual {lowCompliance?.low_percentage === null || lowCompliance?.low_percentage === undefined ? "--" : `${lowCompliance.low_percentage.toFixed(1)}%`}</Badge></div>
+      </div>
+    </Card>
 
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
       <ZoneDistributionBars title="5-zone actual" items={distribution?.actual_five_zone || []} />

@@ -320,7 +320,9 @@ export type PlanWorkoutExecutionScore = {
 
 export type PlanAdherence = {
   total_workouts: number
+  planned_sessions: number
   done_workouts: number
+  completed_sessions: number
   missed_workouts: number
   skipped_workouts: number
   linked_workouts: number
@@ -330,8 +332,11 @@ export type PlanAdherence = {
   planned_duration_seconds: number
   completed_duration_seconds: number
   completion_rate: number
+  session_adherence: number
   distance_completion_rate: number
+  distance_adherence: number
   duration_completion_rate: number
+  duration_adherence: number
   support_workouts: number
   warnings: string[]
 }
@@ -785,6 +790,14 @@ export type ZoneDistributionBucket = {
   period_label: string
   total_duration_seconds: number
   items: ZoneDistributionItem[]
+  seiler_three_zone: ZoneDistributionItem[]
+}
+
+export type LowIntensityCompliance = {
+  target: Record<string, unknown>
+  period_label: string | null
+  low_percentage: number | null
+  status: "below" | "within" | "above" | "unknown" | string
 }
 
 export type ZonePlannedActual = {
@@ -809,6 +822,7 @@ export type ZoneDistribution = {
   planned_five_zone: ZoneDistributionItem[]
   planned_vs_actual: ZonePlannedActual[]
   time_buckets: ZoneDistributionBucket[]
+  low_intensity_compliance: LowIntensityCompliance | null
   metadata: Record<string, unknown>
 }
 
