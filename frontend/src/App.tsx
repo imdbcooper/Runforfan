@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
 import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramLogin, type TelegramLoginPayload, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -88,8 +89,52 @@ function formatPace(seconds?: number | null) {
   return `${Math.floor(seconds / 60)}'${String(seconds % 60).padStart(2, "0")}`
 }
 
+function isEnglishLanguage() {
+  return languageLocale() === "en-US"
+}
+
+function kmUnit() {
+  return isEnglishLanguage() ? "km" : "км"
+}
+
+function kgUnit() {
+  return isEnglishLanguage() ? "kg" : "кг"
+}
+
+function perKmUnit() {
+  return `/${kmUnit()}`
+}
+
+function noDateLabel() {
+  return isEnglishLanguage() ? "no date" : "без даты"
+}
+
+function splitCountLabel(count: number) {
+  return isEnglishLanguage() ? `${count} km splits` : `${count} км сплитов`
+}
+
+function blockCountLabel(count: number) {
+  return isEnglishLanguage() ? `${count} blocks` : `${count} блоков`
+}
+
+function derivedMetricCountLabel(count: number) {
+  return isEnglishLanguage() ? `${count} derived metrics` : `${count} расчетных метрик`
+}
+
 function formatDistance(km?: number | null) {
-  return km ? `${km.toFixed(2)} км` : "--"
+  return km ? `${km.toFixed(2)} ${kmUnit()}` : "--"
+}
+
+function dateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value)
+}
+
+function formatLocalDate(value?: string | null) {
+  return value ? dateValue(value).toLocaleDateString(languageLocale()) : "--"
+}
+
+function formatLocalDateTime(value?: string | null) {
+  return value ? dateValue(value).toLocaleString(languageLocale()) : "--"
 }
 
 function formatChangeValue(value: unknown) {
@@ -322,7 +367,7 @@ function datetimeLocalValue(value?: string | null) {
 
 function formatZoneValue(zone: Zone, value: number | null) {
   if (value === null) return "--"
-  if (zone.unit === "seconds_per_km") return `${formatPace(Math.round(value))}/км`
+  if (zone.unit === "seconds_per_km") return `${formatPace(Math.round(value))}${perKmUnit()}`
   if (zone.unit === "bpm") return `${Math.round(value)} bpm`
   return `${value}`
 }
@@ -344,7 +389,7 @@ function manualHrZoneRows(zones?: Zone[] | null) {
 }
 
 function missingLabel(field: string) {
-  const labels: Record<string, string> = {
+  const labelsRu: Record<string, string> = {
     date_of_birth: "дата рождения",
     resting_heart_rate_bpm: "пульс покоя",
     max_heart_rate_bpm_or_birthdate: "HRmax или дата рождения",
@@ -355,12 +400,25 @@ function missingLabel(field: string) {
     preferred_weekdays: "тренировочные дни",
     max_run_duration_minutes: "макс. длительность",
   }
+  const labelsEn: Record<string, string> = {
+    date_of_birth: "date of birth",
+    resting_heart_rate_bpm: "resting heart rate",
+    max_heart_rate_bpm_or_birthdate: "HRmax or date of birth",
+    lactate_threshold_pace_seconds_per_km: "threshold pace",
+    lactate_threshold_hr_bpm: "threshold heart rate",
+    weight_kg: "weight",
+    height_cm: "height",
+    preferred_weekdays: "training days",
+    max_run_duration_minutes: "max duration",
+  }
+  const labels = languageLocale() === "en-US" ? labelsEn : labelsRu
   return labels[field] || field
 }
 
 function weekdayLabel(value?: number | null) {
   if (!value) return "--"
-  return WEEKDAY_LABELS[value - 1] || String(value)
+  const labels = languageLocale() === "en-US" ? WEEKDAY_LABELS : ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+  return labels[value - 1] || String(value)
 }
 
 function weekdayListLabel(values?: number[] | null) {
@@ -370,7 +428,7 @@ function weekdayListLabel(values?: number[] | null) {
 function measurementValueLabel(measurement: AthleteMeasurement) {
   const value = measurement.value_numeric
   if (value === null || value === undefined) return "--"
-  if (measurement.measurement_type === "weight") return `${value.toFixed(1)} кг`
+  if (measurement.measurement_type === "weight") return `${value.toFixed(1)} ${kgUnit()}`
   if (measurement.measurement_type === "vo2max") return `${value.toFixed(1)} ml/kg/min`
   if (["resting_hr", "max_hr", "lactate_threshold"].includes(measurement.measurement_type)) return `${Math.round(value)} bpm`
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
@@ -381,7 +439,7 @@ function workoutBlockSummary(activity: ActivityType) {
   if (!workBlocks.length) return null
   const distance = workBlocks[0]?.distance_km
   const sameDistance = distance && workBlocks.every((block) => block.distance_km === distance)
-  return sameDistance ? `${workBlocks.length} x ${distance.toFixed(2)} км` : `${workBlocks.length} рабочих блока`
+  return sameDistance ? `${workBlocks.length} x ${distance.toFixed(2)} ${kmUnit()}` : isEnglishLanguage() ? `${workBlocks.length} work blocks` : `${workBlocks.length} рабочих блока`
 }
 
 function activityMetricLabel(key: string) {
@@ -401,21 +459,21 @@ function activityMetricLabel(key: string) {
 }
 
 function formatActivityMetric(metric: ActivityType["derived_metrics"][number]) {
-  if (metric.unit === "seconds_per_km") return `${formatPace(metric.metric_value)}/км`
+  if (metric.unit === "seconds_per_km") return `${formatPace(metric.metric_value)}${perKmUnit()}`
   if (metric.unit === "seconds") return formatDuration(metric.metric_value)
   if (metric.unit === "minutes") return `${metric.metric_value.toFixed(1)} min`
   if (metric.unit === "kcal") return `${metric.metric_value.toFixed(0)} kcal`
   if (metric.unit === "kmh") return `${metric.metric_value.toFixed(2)} km/h`
-  if (metric.unit === "km") return `${metric.metric_value.toFixed(2)} km`
+  if (metric.unit === "km") return `${metric.metric_value.toFixed(2)} ${kmUnit()}`
   if (metric.unit === "count") return String(Math.round(metric.metric_value))
   return `${Number.isInteger(metric.metric_value) ? Math.round(metric.metric_value) : metric.metric_value.toFixed(1)} ${metric.unit}`
 }
 
 function formatValidationValue(value?: number | null, unit?: string | null) {
   if (value === null || value === undefined) return "--"
-  if (unit === "seconds_per_km") return `${formatPace(Math.round(value))}/км`
+  if (unit === "seconds_per_km") return `${formatPace(Math.round(value))}${perKmUnit()}`
   if (unit === "seconds") return formatDuration(Math.round(value))
-  if (unit === "km") return `${value.toFixed(2)} км`
+  if (unit === "km") return `${value.toFixed(2)} ${kmUnit()}`
   if (unit === "bpm") return `${Math.round(value)} bpm`
   if (unit === "spm") return `${Math.round(value)} spm`
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
@@ -457,6 +515,7 @@ function trainingLoadMethodMetadata(method?: string | null, methods?: string[] |
 function App() {
   const [page, setPage] = useState<Page>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [language, setLanguage] = useState<Language>(() => getInitialLanguage())
   const [activities, setActivities] = useState<ActivityType[]>([])
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
@@ -473,6 +532,11 @@ function App() {
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
     setOnboardingDismissed(true)
+  }
+
+  function changeLanguage(nextLanguage: Language) {
+    setLanguage(nextLanguage)
+    saveLanguage(nextLanguage)
   }
 
   async function loginWithTelegram(payload: TelegramLoginPayload) {
@@ -556,8 +620,9 @@ function App() {
   useEffect(() => {
     if (onboardingRequired && page !== "profile") setPage("profile")
   }, [onboardingRequired, page])
+  useDomTranslations(language)
 
-  if (!authReady) return <TelegramLoginGate onLogin={loginWithTelegram} />
+  if (!authReady) return <TelegramLoginGate language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} />
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -572,7 +637,7 @@ function App() {
         </>}
 
         <div className="min-w-0 max-w-full">
-          <Topbar status={status} onMenu={() => setMobileOpen(true)} />
+          <Topbar status={status} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
             {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
@@ -593,7 +658,7 @@ function App() {
   )
 }
 
-function TelegramLoginGate({ onLogin }: { onLogin: (payload: TelegramLoginPayload) => Promise<void> }) {
+function TelegramLoginGate({ language, onLanguageChange, onLogin }: { language: Language; onLanguageChange: (language: Language) => void; onLogin: (payload: TelegramLoginPayload) => Promise<void> }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState("")
   const botUsername = authConfig.telegramBotUsername
@@ -628,7 +693,10 @@ function TelegramLoginGate({ onLogin }: { onLogin: (payload: TelegramLoginPayloa
   return <div className="min-h-screen bg-[#090909] p-4 text-zinc-100 md:p-8">
     <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl place-items-center">
       <Card className="w-full max-w-xl border-orange-400/30 bg-zinc-950 p-6">
-        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · AUTH</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · AUTH</p>
+          <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
+        </div>
         <h1 className="mt-3 text-2xl font-semibold text-white">Sign in with Telegram</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">Production mode uses Telegram Login Widget and the backend validates the signed Telegram payload before issuing a session token. Dev login remains available only in local development.</p>
         <div className="mt-5 rounded-lg border border-zinc-800 bg-black/30 p-4">
@@ -659,16 +727,30 @@ function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Pag
   </div>
 }
 
-function Topbar({ status, onMenu }: { status: string; onMenu: () => void }) {
+function LanguageToggle({ language, onLanguageChange }: { language: Language; onLanguageChange: (language: Language) => void }) {
+  return <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950 p-0.5" aria-label="Language">
+    {(["ru", "en"] as const).map((item) => <button
+      key={item}
+      type="button"
+      aria-label={item === "ru" ? "Use Russian" : "Use English"}
+      aria-pressed={language === item}
+      onClick={() => onLanguageChange(item)}
+      className={cn("h-6 rounded px-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors", language === item ? "bg-orange-500 text-black" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200")}
+    >{item}</button>)}
+  </div>
+}
+
+function Topbar({ status, language, onLanguageChange, onMenu }: { status: string; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
   return <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-zinc-800 bg-[#090909]/95 px-3 backdrop-blur">
     <div className="flex items-center gap-2">
-      <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenu}><Menu /></Button>
+      <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
       <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN · ADMIN</p>
     </div>
     <div className="flex items-center gap-2">
+      <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
       <Badge>{status}</Badge>
       <Button variant="secondary" size="sm">LEGACY</Button>
-      <Button variant="ghost" size="icon"><Moon /></Button>
+      <Button variant="ghost" size="icon" aria-label="Toggle theme"><Moon /></Button>
     </div>
   </header>
 }
@@ -688,18 +770,18 @@ function Overview({ activities, analytics, dashboard, providers, onImport, onPla
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p>
             <h2 className="mt-2 text-lg font-semibold text-white">Today, plan and readiness</h2>
-            <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">{currentWeek?.message || "Loading the active plan, weekly adherence and import alerts."}</p>
+            {currentWeek?.message ? <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500" translate="no">{currentWeek.message}</p> : <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Loading the active plan, weekly adherence and import alerts.</p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge className={cn("border-zinc-700 bg-zinc-900 text-zinc-300", signalClass(readiness?.status))}>{readiness?.status || "loading"}</Badge>
-            {plan ? <Badge>{plan.title}</Badge> : <Badge className="border-orange-400/30 bg-orange-400/10 text-orange-200">no active plan</Badge>}
+            {plan ? <Badge translate="no">{plan.title}</Badge> : <Badge className="border-orange-400/30 bg-orange-400/10 text-orange-200">no active plan</Badge>}
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={onImport}>+ Add screenshots</Button><Button size="sm" variant="secondary" onClick={onPlans}>Open plans</Button></div>
       </Card>
       <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
         <Stat label="activities" value={metrics?.activity_count ?? activities.length} />
-        <Stat label="distance" value={Number(metrics?.total_distance_km || 0).toFixed(1)} suffix="km" />
+        <Stat label="distance" value={Number(metrics?.total_distance_km || 0).toFixed(1)} suffix={kmUnit()} />
         <Stat label="week done" value={`${Math.round((weekly?.completion_rate || 0) * 100)}%`} />
         <Stat label="providers" value={providerCount} />
       </Card>
@@ -724,7 +806,7 @@ function signalClass(status?: string) {
 
 function formatDate(value?: string | null) {
   if (!value) return "--"
-  return new Date(`${value}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })
+  return new Date(`${value}T00:00:00`).toLocaleDateString(languageLocale(), { day: "2-digit", month: "short" })
 }
 
 function dateFromISO(value: string) {
@@ -781,9 +863,9 @@ function dateRange(fromDate: string, toDate: string) {
 function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, onPlans }: { todayWorkout: PlanWorkout | null; nextWorkout: PlanWorkout | null; currentWeek: DashboardSummary["current_week"] | null; onPlans: () => void }) {
   const focus = todayWorkout || nextWorkout
   return <Card>
-    <CardHeader><div><CardTitle>{todayWorkout ? "Today workout" : "Next workout"}</CardTitle><p className="text-xs text-zinc-500">{currentWeek ? `${formatDate(currentWeek.week_start)} - ${formatDate(currentWeek.week_end)}` : "Active plan focus"}</p></div>{focus ? <Badge className={signalClass(focus.status)}>{focus.status}</Badge> : null}</CardHeader>
+    <CardHeader><div><CardTitle>{todayWorkout ? "Today workout" : "Next workout"}</CardTitle><p className="text-xs text-zinc-500">{currentWeek ? `${formatDate(currentWeek.week_start)} - ${formatDate(currentWeek.week_end)}` : "Active plan focus"}</p></div>{focus ? <Badge className={signalClass(focus.status)} translate="no">{focus.status}</Badge> : null}</CardHeader>
     {focus ? <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_auto] md:items-end">
-      <div className="min-w-0">
+      <div className="min-w-0" translate="no">
         <p className="text-base font-semibold text-white">{focus.title}</p>
         <p className="mt-1 text-zinc-500">{formatDate(focus.scheduled_date)} · week {focus.week_index} · {focus.workout_type} · {formatWorkoutTarget(focus)}</p>
         <p className="mt-2 max-w-3xl leading-5 text-zinc-400">{focus.description || "No target description"}</p>
@@ -802,12 +884,12 @@ function DashboardSignals({ dashboard }: { dashboard: DashboardSummary | null })
   const alerts = dashboard?.alerts || []
   const factors = dashboard?.readiness.factors || []
   return <Card>
-    <CardHeader><div><CardTitle>Readiness signals</CardTitle><p className="text-xs text-zinc-500">Profile, imports, feedback and coach alerts.</p></div><Badge className={signalClass(dashboard?.readiness.status)}>{dashboard?.readiness.status || "loading"}</Badge></CardHeader>
+    <CardHeader><div><CardTitle>Readiness signals</CardTitle><p className="text-xs text-zinc-500">Profile, imports, feedback and coach alerts.</p></div><Badge className={signalClass(dashboard?.readiness.status)} translate="no">{dashboard?.readiness.status || "loading"}</Badge></CardHeader>
     <div className="grid gap-3 p-4 text-xs">
-      <p className="leading-5 text-zinc-400">{dashboard?.readiness.message || "Summary is loading."}</p>
-      {factors.length ? <div className="grid gap-1">{factors.map((factor) => <p key={factor} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{factor}</p>)}</div> : null}
+      {dashboard?.readiness.message ? <p className="leading-5 text-zinc-400" translate="no">{dashboard.readiness.message}</p> : <p className="leading-5 text-zinc-400">Summary is loading.</p>}
+      {factors.length ? <div className="grid gap-1" translate="no">{factors.map((factor) => <p key={factor} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{factor}</p>)}</div> : null}
       <div className="grid gap-2">
-        {alerts.length ? alerts.map((alert) => <div key={`${alert.title}-${alert.message}`} className={cn("rounded-md border px-3 py-2", signalClass(alert.severity))}><p className="font-medium">{alert.title}</p><p className="mt-1 leading-5 text-zinc-300/90">{alert.message}</p></div>) : <p className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">No dashboard alerts.</p>}
+        {alerts.length ? alerts.map((alert) => <div key={`${alert.title}-${alert.message}`} className={cn("rounded-md border px-3 py-2", signalClass(alert.severity))} translate="no"><p className="font-medium">{alert.title}</p><p className="mt-1 leading-5 text-zinc-300/90">{alert.message}</p></div>) : <p className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">No dashboard alerts.</p>}
       </div>
     </div>
   </Card>
@@ -816,7 +898,7 @@ function DashboardSignals({ dashboard }: { dashboard: DashboardSummary | null })
 function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSummary["current_week"]; onPlans: () => void }) {
   const adherence = currentWeek.adherence
   return <Card>
-    <CardHeader><div><CardTitle>Current week</CardTitle><p className="text-xs text-zinc-500">{currentWeek.plan_title || "No active plan"} · {formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div><div className="flex items-center gap-2"><Badge className={signalClass(currentWeek.status)}>{currentWeek.status}</Badge><Button size="sm" variant="secondary" onClick={onPlans}>Plans</Button></div></CardHeader>
+    <CardHeader><div><CardTitle>Current week</CardTitle><p className="text-xs text-zinc-500" translate="no">{currentWeek.plan_title || "No active plan"} · {formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div><div className="flex items-center gap-2"><Badge className={signalClass(currentWeek.status)} translate="no">{currentWeek.status}</Badge><Button size="sm" variant="secondary" onClick={onPlans}>Plans</Button></div></CardHeader>
     <div className="grid gap-3 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
       <Stat label="workouts" value={adherence?.total_workouts ?? 0} />
       <Stat label="done" value={adherence?.done_workouts ?? 0} />
@@ -834,7 +916,7 @@ function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSumma
 }
 
 function Stat({ label, value, suffix }: { label: string; value: string | number; suffix?: string }) {
-  return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">{label}</span></div>
+  return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white" translate="no">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500" data-i18n-ui>{label}</span></div>
 }
 
 function Activities({ activities, compact = false, onImport, onChanged }: { activities: ActivityType[]; compact?: boolean; onImport?: () => void; onChanged?: () => Promise<void> }) {
@@ -924,17 +1006,17 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
     const activityColumns: DataTableColumn<ActivityType>[] = [
       { key: "name", header: "Name", sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
         const summary = workoutBlockSummary(activity)
-        return <div className="font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</div>
+        return <div className="font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</div>
       } },
       { key: "distance", header: "Distance", sortValue: (activity) => activity.distance_km || 0, cell: (activity) => <>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></> },
       { key: "pace", header: "Pace", sortValue: (activity) => activity.average_pace_seconds_per_km || 99999, cell: (activity) => {
         const derived = primaryActivityMetrics(activity)
-        return <>{formatPace(activity.average_pace_seconds_per_km)}/км{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</>
+        return <>{formatPace(activity.average_pace_seconds_per_km)}{perKmUnit()}{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</>
       } },
       { key: "hr", header: "HR", sortValue: (activity) => activity.average_heart_rate_bpm || 0, cell: (activity) => activity.average_heart_rate_bpm || "--" },
       { key: "structure", header: "Structure", sortValue: (activity) => activity.workout_blocks?.length || activity.segments.length || 0, cell: (activity) => {
         const summary = workoutBlockSummary(activity)
-        return <>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{activity.derived_metrics.length} derived metrics</div> : null}</>
+        return <>{summary || splitCountLabel(activity.segments.length)}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{blockCountLabel(activity.workout_blocks.length)}</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{derivedMetricCountLabel(activity.derived_metrics.length)}</div> : null}</>
       } },
       { key: "id", header: "ID", sortValue: (activity) => activity.id, cell: (activity) => <span className="font-mono text-zinc-500">#{activity.id}</span> },
       { key: "detail", header: "Detail", cell: (activity) => <Button size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>Inspect</Button> },
@@ -950,7 +1032,7 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
         <Field label="Avg HR"><Input name="average_heart_rate_bpm" type="number" step="1" placeholder="145" /></Field>
         <div className="md:col-span-5"><Field label="Source note"><Input name="source_note" placeholder="Manual correction, watch missing, treadmill entry..." /></Field></div>
         <div className="flex items-end"><Button type="submit" size="sm" disabled={manualBusy}>+ Manual</Button></div>
-        {manualMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{manualMessage}</p> : null}
+        {manualMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300" translate="no">{manualMessage}</p> : null}
       </form>
       <DataTable
         rows={activities}
@@ -963,8 +1045,8 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
       {detail ? <ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /> : null}
       {activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
-          <div className="grid gap-1">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}/км</span></div>)}</div>
+          <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+          <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
         </div>)}
       </div>}
     </Card>
@@ -977,14 +1059,14 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
         <tbody>{activities.slice(0, compact ? 6 : undefined).map((activity) => {
           const summary = workoutBlockSummary(activity)
           const derived = primaryActivityMetrics(activity)
-          return <tr key={activity.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</td><td>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></td><td>{formatPace(activity.average_pace_seconds_per_km)}/км{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{summary || `${activity.segments.length} km splits`}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{activity.workout_blocks.length} blocks</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{activity.derived_metrics.length} derived metrics</div> : null}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>
+          return <tr key={activity.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</td><td>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></td><td>{formatPace(activity.average_pace_seconds_per_km)}{perKmUnit()}{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</td><td>{activity.average_heart_rate_bpm || "--"}</td><td>{summary || splitCountLabel(activity.segments.length)}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{blockCountLabel(activity.workout_blocks.length)}</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{derivedMetricCountLabel(activity.derived_metrics.length)}</div> : null}</td><td className="font-mono text-zinc-500">#{activity.id}</td></tr>
         })}</tbody>
       </table>
     </div>
     {!compact && activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
       {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-        <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge>{workoutBlockSummary(activity) || "blocks"}</Badge></div>
-        <div className="grid gap-1">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}/км</span></div>)}</div>
+        <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+        <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
       </div>)}
     </div>}
   </Card>
@@ -1019,7 +1101,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
     <CardHeader>
       <div className="min-w-0">
         <CardTitle>Activity detail</CardTitle>
-        <p className="mt-1 truncate text-xs text-zinc-500">{activity.title} · #{activity.id} · {activity.started_at ? new Date(activity.started_at).toLocaleString("ru-RU") : "без даты"}</p>
+        <p className="mt-1 truncate text-xs text-zinc-500" translate="no">{activity.title} · #{activity.id} · {activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Badge className={signalClass(validation?.status)}>{loading ? "loading" : validation?.status || "validation"}</Badge>
@@ -1028,11 +1110,11 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
       </div>
     </CardHeader>
     <div className="grid gap-4 border-t border-zinc-800 p-4 text-xs">
-      {error ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{error}</div> : null}
+      {error ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{error}</div> : null}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="distance" value={formatDistance(activity.distance_km)} hint={activity.activity_type} />
-        <MetricCard label="duration" value={formatDuration(activity.duration_seconds)} hint={activity.started_at ? new Date(activity.started_at).toLocaleDateString("ru-RU") : "no date"} />
-        <MetricCard label="weighted pace" value={validation?.weighted_pace_seconds_per_km ? `${formatPace(validation.weighted_pace_seconds_per_km)}/км` : `${formatPace(activity.average_pace_seconds_per_km)}/км`} hint={validation?.weighted_pace_seconds_per_km ? "from segments" : "imported activity pace"} explainer={<CalculationExplainer><p>Segment-weighted pace uses sum(duration_seconds) / sum(distance_km). If segments are missing, imported activity pace is shown.</p></CalculationExplainer>} />
+        <MetricCard label="duration" value={formatDuration(activity.duration_seconds)} hint={activity.started_at ? formatLocalDate(activity.started_at) : noDateLabel()} />
+        <MetricCard label="weighted pace" value={validation?.weighted_pace_seconds_per_km ? `${formatPace(validation.weighted_pace_seconds_per_km)}${perKmUnit()}` : `${formatPace(activity.average_pace_seconds_per_km)}${perKmUnit()}`} hint={validation?.weighted_pace_seconds_per_km ? "from segments" : "imported activity pace"} explainer={<CalculationExplainer><p>Segment-weighted pace uses sum(duration_seconds) / sum(distance_km). If segments are missing, imported activity pace is shown.</p></CalculationExplainer>} />
         <MetricCard label="training load" value={activity.aerobic_training_stress ?? primaryActivityMetrics(activity).find((metric) => metric.metric_key === "training_load_proxy")?.metric_value?.toFixed(0) ?? "--"} hint={activity.aerobic_training_stress ? "imported ATS" : "derived proxy when available"} />
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1052,13 +1134,13 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <Field label="Avg HR"><Input name="average_heart_rate_bpm" type="number" step="1" defaultValue={activity.average_heart_rate_bpm?.toString() || ""} /></Field>
         <div className="md:col-span-5"><Field label="Source note"><Input name="source_note" defaultValue={activity.source_note || ""} /></Field></div>
         <div className="flex items-end"><Button type="submit" size="sm" variant="secondary" disabled={loading}>Save edit</Button></div>
-        {editMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">{editMessage}</p> : null}
+        {editMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300" translate="no">{editMessage}</p> : null}
       </form>
 
       <div className="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Validation report</p><p className="mt-1 text-zinc-500">Data quality checks for pace, segments, blocks and physiological ranges.</p></div><Badge className={signalClass(validation?.status)}>{warnings.length} warnings</Badge></div>
         {validationChecks.length ? <div className="grid gap-2">
-          {validationChecks.map((check) => <div key={`${check.code}-${check.metric || "metric"}`} className={cn("rounded-md border px-3 py-2", check.severity === "warning" ? "border-orange-400/25 bg-orange-400/10 text-orange-100" : "border-zinc-800 bg-zinc-900 text-zinc-300")}>
+          {validationChecks.map((check) => <div key={`${check.code}-${check.metric || "metric"}`} className={cn("rounded-md border px-3 py-2", check.severity === "warning" ? "border-orange-400/25 bg-orange-400/10 text-orange-100" : "border-zinc-800 bg-zinc-900 text-zinc-300")} translate="no">
             <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{check.message}</p><Badge className={signalClass(check.severity)}>{check.severity}</Badge></div>
             <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{check.code} · expected {formatValidationValue(check.expected, check.unit)} · actual {formatValidationValue(check.actual, check.unit)}</p>
           </div>)}
@@ -1068,10 +1150,10 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Recognition sources</p><p className="mt-1 text-zinc-500">Safe screenshot metadata linked to this activity; local file paths are not exposed.</p></div><Badge>{sources.length} sources</Badge></div>
         {sources.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {sources.map((source) => <div key={source.source_id} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2">
+          {sources.map((source) => <div key={source.source_id} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2" translate="no">
             <p className="font-medium text-white">{source.file_name || `source #${source.source_id}`}</p>
             <p className="mt-1 text-[11px] text-zinc-500">#{source.source_id} · {source.source_app || "unknown app"} · {source.screen_type || "screenshot"}</p>
-            <p className="mt-1 text-[11px] text-zinc-500">captured {source.captured_at ? new Date(source.captured_at).toLocaleString("ru-RU") : "unknown"} · uploaded {source.uploaded_at ? new Date(source.uploaded_at).toLocaleString("ru-RU") : "unknown"}</p>
+            <p className="mt-1 text-[11px] text-zinc-500">captured {source.captured_at ? formatLocalDateTime(source.captured_at) : "unknown"} · uploaded {source.uploaded_at ? formatLocalDateTime(source.uploaded_at) : "unknown"}</p>
             {source.notes ? <p className="mt-2 text-[11px] text-zinc-400">{source.notes}</p> : null}
           </div>)}
         </div> : <p className="text-zinc-500">No linked screenshot sources for this activity.</p>}
@@ -1081,14 +1163,14 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
           <table className="w-full min-w-[560px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Split</th><th>Distance</th><th>Time</th><th>Pace</th><th>HR</th><th>Cadence</th></tr></thead>
-            <tbody>{segments.map((segment) => <tr key={segment.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-mono text-zinc-500">#{segment.segment_index}</td><td>{formatDistance(segment.distance_km)}</td><td>{formatDuration(segment.duration_seconds)}</td><td>{formatPace(segment.pace_seconds_per_km)}/км</td><td>{segment.average_heart_rate_bpm || "--"}</td><td>{segment.average_cadence_spm || "--"}</td></tr>)}</tbody>
+            <tbody>{segments.map((segment) => <tr key={segment.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-mono text-zinc-500">#{segment.segment_index}</td><td>{formatDistance(segment.distance_km)}</td><td>{formatDuration(segment.duration_seconds)}</td><td>{formatPace(segment.pace_seconds_per_km)}{perKmUnit()}</td><td>{segment.average_heart_rate_bpm || "--"}</td><td>{segment.average_cadence_spm || "--"}</td></tr>)}</tbody>
           </table>
           {!segments.length ? <p className="p-3 text-zinc-500">No split rows.</p> : null}
         </div>
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
           <table className="w-full min-w-[560px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Block</th><th>Type</th><th>Distance</th><th>Time</th><th>Pace</th><th>HR</th></tr></thead>
-            <tbody>{workoutBlocks.map((block) => <tr key={block.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-medium text-white">{block.title}</td><td><Badge className={block.block_type === "work" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{block.block_type}</Badge></td><td>{formatDistance(block.distance_km)}</td><td>{formatDuration(block.duration_seconds)}</td><td>{block.pace_seconds_per_km ? `${formatPace(block.pace_seconds_per_km)}/км` : "--"}</td><td>{block.average_heart_rate_bpm || "--"}</td></tr>)}</tbody>
+            <tbody>{workoutBlocks.map((block) => <tr key={block.id} className="border-b border-zinc-900 last:border-0"><td className="px-3 py-2 font-medium text-white">{block.title}</td><td><Badge className={block.block_type === "work" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{block.block_type}</Badge></td><td>{formatDistance(block.distance_km)}</td><td>{formatDuration(block.duration_seconds)}</td><td>{block.pace_seconds_per_km ? `${formatPace(block.pace_seconds_per_km)}${perKmUnit()}` : "--"}</td><td>{block.average_heart_rate_bpm || "--"}</td></tr>)}</tbody>
           </table>
           {!workoutBlocks.length ? <p className="p-3 text-zinc-500">No structured workout blocks.</p> : null}
         </div>
@@ -1097,7 +1179,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Calculations and source metadata</p><Badge>{derived.length} metrics</Badge></div>
         {derived.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p><p className="mt-1 font-mono text-[10px] text-zinc-600">computed {new Date(metric.computed_at).toLocaleString("ru-RU")} · hash {metric.input_hash.slice(0, 8)}</p></div>)}
+          {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2" translate="no"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p><p className="mt-1 font-mono text-[10px] text-zinc-600">computed {formatLocalDateTime(metric.computed_at)} · hash {metric.input_hash.slice(0, 8)}</p></div>)}
         </div> : <p className="text-zinc-500">No derived metrics yet.</p>}
       </div>
     </div>
@@ -1284,7 +1366,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
           <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
         </form>
         <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
-          <p className="leading-5">{message}</p>
+          <p className="leading-5" translate="no">{message}</p>
           <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
         </div>
       </Card>
@@ -1300,14 +1382,14 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
           <Stat label="duplicates" value={csvResult.skipped_duplicates} />
           <Stat label="matched" value={csvResult.matched_workouts} />
           <Stat label="failed" value={csvResult.failed_rows} />
-          {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
+          {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
         </div> : null}
       </Card>
     </div>
 
     <div className="grid gap-4">
       <Card>
-        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge>{uploadResult.status}</Badge>}</CardHeader>
+        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge translate="no">{uploadResult.status}</Badge>}</CardHeader>
         {uploadResult ? <div className="grid gap-3 p-4 text-xs">
           <div className="grid gap-2 md:grid-cols-4">
             <Stat label="batch" value={`#${uploadResult.id}`} />
@@ -1315,9 +1397,9 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <Stat label="matched" value={uploadResult.matched_workout_id ? `#${uploadResult.matched_workout_id}` : "--"} />
             <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
           </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">{uploadResult.recognition_message || "No recognition message"}</div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400" translate="no">{uploadResult.recognition_message || "No recognition message"}</div>
           {uploadResult.requires_confirmation && uploadResult.candidate ? <ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /> : null}
-          {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
+          {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
           {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
         </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
       </Card>
@@ -1328,7 +1410,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Action</th><th>Date</th></tr></thead>
-            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500">{batch.created_at ? new Date(batch.created_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></td><td>{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td>{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td>{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] text-zinc-500">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
           </table>
           {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
         </div>
@@ -1373,10 +1455,10 @@ function ImportCandidateReview({ batch, busy, onConfirm, onReject, onUpdate }: {
   }
 
   return <div className="grid gap-3 rounded-md border border-orange-400/25 bg-orange-400/10 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">Review required before analytics</p><p className="mt-1 text-orange-100/70">LLM output passed validation but will not create an activity until confirmed.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{candidate.confidence || "unknown"} confidence</Badge></div>
-    <div className="grid gap-2 md:grid-cols-4"><Stat label="title" value={candidate.activity.title || "--"} /><Stat label="distance" value={candidate.activity.distance_km ? `${candidate.activity.distance_km} км` : "--"} /><Stat label="duration" value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label="pace" value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
-    {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
-    {candidate.estimated_fields.length ? <p className="text-[11px] text-orange-100/70">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">Review required before analytics</p><p className="mt-1 text-orange-100/70">LLM output passed validation but will not create an activity until confirmed.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100" translate="no">{candidate.confidence || "unknown"} confidence</Badge></div>
+    <div className="grid gap-2 md:grid-cols-4"><Stat label="title" value={candidate.activity.title || "--"} /><Stat label="distance" value={candidate.activity.distance_km ? `${candidate.activity.distance_km} ${kmUnit()}` : "--"} /><Stat label="duration" value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label="pace" value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
+    {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70" translate="no">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
+    {candidate.estimated_fields.length ? <p className="text-[11px] text-orange-100/70" translate="no">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
     <form onSubmit={submitCorrection} className="grid gap-2 rounded-md border border-orange-400/20 bg-zinc-950/70 p-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-orange-100/70">Manual corrections before confirm</p>
       <div className="grid gap-2 md:grid-cols-3">
@@ -1400,8 +1482,8 @@ function MatchReview({ candidates, busy, candidateError, linkError, onLink }: { 
     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Plan match candidates</p>
     {linkError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{linkError}</p> : null}
     {candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs md:grid-cols-[1fr_auto] md:items-center">
-      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">Week {candidate.workout.week_index} · {candidate.workout.scheduled_date ? new Date(candidate.workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {candidate.workout.distance_km?.toFixed(1) || "--"} км</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} aria-label={`Link uploaded activity to planned workout ${candidate.workout.title} #${candidate.workout.id}`} onClick={() => onLink(candidate)}>Link</Button></div>
+      <div translate="no"><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">Week {candidate.workout.week_index} · {candidate.workout.scheduled_date ? formatLocalDate(candidate.workout.scheduled_date) : noDateLabel()} · {candidate.workout.distance_km?.toFixed(1) || "--"} {kmUnit()}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} aria-label={`Link uploaded activity to planned workout ${candidate.workout.title} #${candidate.workout.id}`} onClick={() => onLink(candidate)}>Link</Button></div>
     </div>)}
   </div>
 }
@@ -1578,7 +1660,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
 
     {calendar?.warnings.length ? <Card>
       <CardHeader><div><CardTitle>Schedule warnings</CardTitle><p className="text-xs text-zinc-500">Conflict detection for hard sessions and long runs.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{calendar.warnings.length}</Badge></CardHeader>
-      <div className="grid gap-2 p-4 text-xs md:grid-cols-2">{calendar.warnings.map((warning) => <div key={`${warning.title}-${warning.date}-${warning.planned_workout_ids.join("-")}`} className="rounded-md border border-orange-400/20 bg-orange-400/10 p-3 text-orange-100"><p className="font-medium">{warning.title}</p><p className="mt-1 leading-5 text-orange-100/80">{warning.message}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-orange-200/70">{formatDate(warning.date)} · workouts {warning.planned_workout_ids.map((id) => `#${id}`).join(", ")}</p></div>)}</div>
+      <div className="grid gap-2 p-4 text-xs md:grid-cols-2">{calendar.warnings.map((warning) => <div key={`${warning.title}-${warning.date}-${warning.planned_workout_ids.join("-")}`} className="rounded-md border border-orange-400/20 bg-orange-400/10 p-3 text-orange-100" translate="no"><p className="font-medium">{warning.title}</p><p className="mt-1 leading-5 text-orange-100/80">{warning.message}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-orange-200/70">{formatDate(warning.date)} · workouts {warning.planned_workout_ids.map((id) => `#${id}`).join(", ")}</p></div>)}</div>
     </Card> : null}
 
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
@@ -1595,7 +1677,7 @@ function CalendarDay({ day, events, load, maxLoad, ...cardProps }: CalendarDayPr
   const today = toISODate(new Date())
   const width = Math.max(6, Math.round(load / maxLoad * 100))
   return <div className={cn("min-h-48 rounded-lg border bg-zinc-950/60 p-3 text-xs", day === today ? "border-orange-400/40" : "border-zinc-800")}>
-    <div className="flex items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day)}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{dateFromISO(day).toLocaleDateString("ru-RU", { weekday: "short" })}</p></div>{events.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{events.length}</Badge> : null}</div>
+    <div className="flex items-start justify-between gap-2"><div><p className="font-medium text-white">{formatDate(day)}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{dateFromISO(day).toLocaleDateString(languageLocale(), { weekday: "short" })}</p></div>{events.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{events.length}</Badge> : null}</div>
     <div className="mt-3 h-1.5 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${width}%` }} /></div>
     <div className="mt-3 grid gap-2">{events.length ? events.map((event) => <CalendarEventCard key={event.id} event={event} {...cardProps} />) : <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-2 text-zinc-600">No plan or activity.</p>}</div>
   </div>
@@ -1614,8 +1696,8 @@ function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent
   const canReschedule = isWorkout && Boolean(event.planned_workout_id) && !event.linked_activity_id && ["planned", "rescheduled"].includes(event.status || "")
   const rescheduleDraft = rescheduleDrafts[event.id] ?? event.date
   return <div className={cn("rounded-md border p-2", isWorkout ? "border-zinc-800 bg-zinc-950" : isLinked ? "border-orange-400/20 bg-orange-400/10" : "border-zinc-800 bg-zinc-900/70")}>
-    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : event.workout_type || "activity"} · {formatWorkoutTarget(event)}</p></div><Badge className={signalClass(event.status || undefined)}>{event.status || event.kind}</Badge></div>
-    {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
+    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0" translate="no"><p className="truncate font-medium text-white">{event.title}</p><p className="mt-1 text-[11px] text-zinc-500">{isWorkout ? event.workout_type || "workout" : event.workout_type || "activity"} · {formatWorkoutTarget(event)}</p></div><Badge className={signalClass(event.status || undefined)} translate="no">{event.status || event.kind}</Badge></div>
+    {score !== null && score !== undefined ? <p className="mt-2 text-[11px] text-zinc-500" translate="no">Score {Math.round(score * 100)}% · {event.execution_score?.subjective_risk}</p> : null}
     {event.linked_activity_id && isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Linked activity #{event.linked_activity_id}</p> : null}
     {event.planned_workout_id && !isWorkout ? <p className="mt-2 rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">Matched to workout #{event.planned_workout_id}</p> : null}
     {canReschedule ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
@@ -1643,8 +1725,8 @@ function CalendarMatchCandidates({ event, state, busy, onLinkMatch }: { event: C
     return <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
       <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Activity candidates</p>
       {state.candidates.slice(0, 4).map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
-        <div><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? new Date(candidate.activity.started_at).toLocaleDateString("ru-RU") : "без даты"} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-        <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, workoutId, candidate.activity.id)}>Link</Button></div>
+        <div translate="no"><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? formatLocalDate(candidate.activity.started_at) : noDateLabel()} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+        <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, workoutId, candidate.activity.id)}>Link</Button></div>
       </div>)}
     </div>
   }
@@ -1655,8 +1737,8 @@ function CalendarMatchCandidates({ event, state, busy, onLinkMatch }: { event: C
   return <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Workout candidates</p>
     {state.candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
-      <div><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">{formatDate(candidate.workout.scheduled_date)} · {formatWorkoutTarget(candidate.workout)} · {candidate.workout.intensity || "--"}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, candidate.workout.id, activityId)}>Link</Button></div>
+      <div translate="no"><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">{formatDate(candidate.workout.scheduled_date)} · {formatWorkoutTarget(candidate.workout)} · {candidate.workout.intensity || "--"}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} onClick={() => onLinkMatch(event, candidate.workout.id, activityId)}>Link</Button></div>
     </div>)}
   </div>
 }
@@ -1753,7 +1835,7 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Analytics Overview</p><h2 className="mt-2 text-lg font-semibold text-white">Training signal center</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Периодная аналитика: объем, темп, пульс, adherence, best efforts и VO2max/VDOT estimate с источником.</p></div>
-        <div className="flex flex-wrap gap-2"><Badge>{summary?.period.label || "loading"}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+        <div className="flex flex-wrap gap-2"><Badge translate="no">{summary?.period.label || "loading"}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
         <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
@@ -1764,30 +1846,30 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
     </Card>
 
     <div className="grid gap-3 md:grid-cols-4">
-      <MetricCard label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix="km" />
+      <MetricCard label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix={kmUnit()} />
       <MetricCard label="time" value={formatDuration(summary?.total_duration_seconds)} />
       <MetricCard label="workouts" value={summary?.activity_count || 0} />
       <MetricCard label="adherence" value={`${Math.round((summary?.adherence?.completion_rate || 0) * 100)}%`} hint="done workouts / planned workouts" explainer={<CalculationExplainer><p>Completion rate is calculated from active-plan workouts in the selected period. Missed and skipped workouts lower the value.</p></CalculationExplainer>} />
-      <MetricCard label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}/км`} hint="total duration / total distance" explainer={<CalculationExplainer><p>Weighted pace uses total moving duration divided by total distance, so short outlier runs do not distort the average like a simple mean would.</p></CalculationExplainer>} />
+      <MetricCard label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}${perKmUnit()}`} hint="total duration / total distance" explainer={<CalculationExplainer><p>Weighted pace uses total moving duration divided by total distance, so short outlier runs do not distort the average like a simple mean would.</p></CalculationExplainer>} />
       <MetricCard label="avg HR" value={summary?.average_heart_rate_bpm || "--"} hint="duration-weighted" explainer={<CalculationExplainer><p>Average HR is weighted by activity duration. Longer runs contribute more than short sessions.</p></CalculationExplainer>} />
       <MetricCard label="load" value={summary?.training_load ?? "--"} hint={summary?.load_method || "unavailable"} explainer={<CalculationExplainer><p>Load sums aerobic training stress when available. If devices do not provide stress values, the card stays unavailable instead of guessing.</p></CalculationExplainer>} />
       <MetricCard label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} hint={vdot ? `${vdot.confidence} · ${vdot.method}` : vo2 ? `${vo2.confidence} · ${vo2.method}` : "needs race/device data"} explainer={<CalculationExplainer><p>VDOT is derived from race-like best efforts. Manual or device VO2max is shown as fallback and keeps its own method and confidence.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(vdot || vo2)}</p></CalculationExplainer>} />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-      <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} km total</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} км</strong></div>) : <p className="p-4 text-xs text-zinc-500">Нет месячных данных.</p>}</div></Card>
-      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p><p className="mt-1 text-[11px] text-zinc-600">{vdot ? calculationSourceReference(vdot) : "source appears after an eligible effort"}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p><p className="mt-1 text-[11px] text-zinc-600">{vo2 ? calculationSourceReference(vo2) : "manual/device source appears after measurement"}</p></div></div></Card>
+      <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} {kmUnit()} total</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs" translate="no"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} {kmUnit()}</strong></div>) : <p className="p-4 text-xs text-zinc-500">Нет месячных данных.</p>}</div></Card>
+      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white" translate="no">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500" translate={vdot ? "no" : undefined}>{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p><p className="mt-1 text-[11px] text-zinc-600" translate={vdot ? "no" : undefined}>{vdot ? calculationSourceReference(vdot) : "source appears after an eligible effort"}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white" translate="no">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500" translate={vo2 ? "no" : undefined}>{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p><p className="mt-1 text-[11px] text-zinc-600" translate={vo2 ? "no" : undefined}>{vo2 ? calculationSourceReference(vo2) : "manual/device source appears after measurement"}</p></div></div></Card>
     </div>
 
     <div className="grid gap-3 xl:grid-cols-3">
-      <TrendChart title="Weekly volume" series={volumeTrend} formatter={(value) => `${Number(value || 0).toFixed(1)} км`} />
-      <TrendChart title="Pace trend" series={paceTrend} formatter={(value) => `${formatPace(value)}/км`} lowerIsBetter />
+      <TrendChart title="Weekly volume" series={volumeTrend} formatter={(value) => `${Number(value || 0).toFixed(1)} ${kmUnit()}`} />
+      <TrendChart title="Pace trend" series={paceTrend} formatter={(value) => `${formatPace(value)}${perKmUnit()}`} lowerIsBetter />
       <TrendChart title="HR trend" series={hrTrend} formatter={(value) => value ? `${Math.round(value)} bpm` : "--"} />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{effort.target_distance_km} км</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p>{effort.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(effort.estimated_vdot)}</p> : null}</div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
-      <Card><CardHeader><CardTitle>Insights</CardTitle><Badge>{insights.length} notes</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insight.title}</p><div className="flex gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{insight.confidence}</Badge><Badge className={insight.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{insight.severity}</Badge></div></div><p className="mt-1 leading-5 text-zinc-400">{insight.message}</p>{insight.evidence.length ? <p className="mt-1 text-[11px] text-zinc-600">evidence: {insight.evidence.slice(0, 2).map((item) => `${String(item.metric || item.source || "signal")}=${String(item.value ?? item.method ?? item.source ?? "ok")}`).join(" · ")}</p> : null}{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div></Card>
+      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]" translate="no"><div className="font-semibold text-white">{effort.target_distance_km} {kmUnit()}</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}{perKmUnit()}</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p>{effort.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(effort.estimated_vdot)}</p> : null}</div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
+      <Card><CardHeader><CardTitle>Insights</CardTitle><Badge>{insights.length} notes</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insight.title}</p><div className="flex gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{insight.confidence}</Badge><Badge className={insight.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{insight.severity}</Badge></div></div><p className="mt-1 leading-5 text-zinc-400">{insight.message}</p>{insight.evidence.length ? <p className="mt-1 text-[11px] text-zinc-600">evidence: {insight.evidence.slice(0, 2).map((item) => `${String(item.metric || item.source || "signal")}=${String(item.value ?? item.method ?? item.source ?? "ok")}`).join(" · ")}</p> : null}{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div></Card>
     </div>
 
     <Card className="p-4"><div className="grid gap-3 text-xs md:grid-cols-3"><Stat label="training days" value={summary?.consistency.training_days || 0} /><Stat label="days / week" value={summary?.consistency.training_days_per_week || 0} /><Stat label="missed planned" value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
@@ -2087,7 +2169,7 @@ function TrainingLoadWarnings({ warnings }: { warnings: TrainingLoadWarning[] })
   return <Card>
     <CardHeader><CardTitle>Load alerts</CardTitle><Badge>{warnings.length} signals</Badge></CardHeader>
     <div className="grid gap-2 p-4">
-      {warnings.map((warning) => <div key={`${warning.title}-${warning.metric || "signal"}`} className={cn("rounded-md border px-3 py-2 text-xs", signalClass(warning.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{warning.title}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{warning.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-300">{warning.message}</p>{warning.metric ? <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">{warning.metric}: {formatOptionalNumber(warning.value)} / threshold {formatOptionalNumber(warning.threshold)}</p> : null}{warning.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{warning.reasons.slice(0, 3).join(" · ")}</p> : null}</div>)}
+      {warnings.map((warning) => <div key={`${warning.title}-${warning.metric || "signal"}`} className={cn("rounded-md border px-3 py-2 text-xs", signalClass(warning.severity))} translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{warning.title}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{warning.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-300">{warning.message}</p>{warning.metric ? <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">{warning.metric}: {formatOptionalNumber(warning.value)} / threshold {formatOptionalNumber(warning.threshold)}</p> : null}{warning.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{warning.reasons.slice(0, 3).join(" · ")}</p> : null}</div>)}
       {!warnings.length ? <p className="text-xs text-zinc-500">Нет load alerts.</p> : null}
     </div>
   </Card>
@@ -2114,7 +2196,7 @@ function RecoveryDaysCard({ recoveryDays }: { recoveryDays: TrainingLoadDailyPoi
   return <Card>
     <CardHeader><CardTitle>Recovery days</CardTitle><Badge>{recoveryDays.length} recent</Badge></CardHeader>
     <div className="divide-y divide-zinc-800">
-      {recoveryDays.map((day) => <div key={day.date} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{formatDate(day.date)}</div><div><p className="text-zinc-300">{day.load.toFixed(1)} au · {formatDuration(day.duration_seconds)}</p><p className="mt-1 text-zinc-500">{day.activity_count ? `${day.activity_count} light activity` : "No recorded activity"}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">recovery</Badge></div>)}
+      {recoveryDays.map((day) => <div key={day.date} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]" translate="no"><div className="font-semibold text-white">{formatDate(day.date)}</div><div><p className="text-zinc-300">{day.load.toFixed(1)} au · {formatDuration(day.duration_seconds)}</p><p className="mt-1 text-zinc-500">{day.activity_count ? `${day.activity_count} light activity` : "No recorded activity"}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">recovery</Badge></div>)}
       {!recoveryDays.length ? <p className="p-4 text-xs text-zinc-500">Recovery days за последнюю неделю не найдены.</p> : null}
     </div>
   </Card>
@@ -2212,13 +2294,13 @@ function PerformanceAnalytics() {
         <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Performance Analytics</p><h2 className="mt-2 text-lg font-semibold text-white">Race readiness and equivalent performances</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Race/time trial results drive VDOT, Riegel predictions, personal bests, threshold trend and pace zones. Easy runs are not used as VDOT sources.</p></div>
         <div className="flex flex-wrap gap-2"><Badge className={confidenceClass(vdot?.confidence)}>{vdot?.confidence || "low"} confidence</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
       </div>
-      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
-      {vdot?.warnings.length ? <div className="mt-3 grid gap-2">{vdot.warnings.map((warning) => <p key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</p>)}</div> : null}
+      {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100" translate="no">{error}</p> : null}
+      {vdot?.warnings.length ? <div className="mt-3 grid gap-2" translate="no">{vdot.warnings.map((warning) => <p key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</p>)}</div> : null}
     </Card>
 
     <div className="grid gap-3 md:grid-cols-4">
       <Card className="p-3"><Stat label="VDOT" value={vdot?.estimate?.value ?? "--"} /></Card>
-      <Card className="p-3"><Stat label="source" value={source ? `${source.distance_km.toFixed(1)} km` : "--"} /></Card>
+      <Card className="p-3"><Stat label="source" value={source ? `${source.distance_km.toFixed(1)} ${kmUnit()}` : "--"} /></Card>
       <Card className="p-3"><Stat label="predictions" value={predictions.length} /></Card>
       <Card className="p-3"><Stat label="PB rows" value={pbs.length} /></Card>
     </div>
@@ -2247,7 +2329,7 @@ function PerformanceAnalytics() {
         <CardHeader><div><CardTitle>VDOT source</CardTitle><p className="text-xs text-zinc-500">Source selection prefers recent race/time trial results with reliable conditions.</p></div><Badge className={confidenceClass(vdot?.confidence)}>{vdot?.confidence || "low"}</Badge></CardHeader>
         <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_1fr]">
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-3xl font-semibold text-white">{vdot?.estimate?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot?.estimate ? calculationMetadata(vdot.estimate) : "No eligible race/time trial yet."}</p></div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Selected result</p><p className="mt-1 text-lg font-semibold text-white">{source?.name || "--"}</p><p className="mt-1 text-zinc-500">{source ? `${source.distance_km.toFixed(2)} км · ${formatDuration(source.duration_seconds)} · ${source.age_days ?? 0} days old` : "Add a result >= 3 km."}</p>{source?.noisy_reasons.length ? <p className="mt-2 text-orange-200">Noisy: {source.noisy_reasons.join(" · ")}</p> : null}</div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Selected result</p><p className="mt-1 text-lg font-semibold text-white" translate="no">{source?.name || "--"}</p><p className="mt-1 text-zinc-500" translate={source ? "no" : undefined}>{source ? `${source.distance_km.toFixed(2)} ${kmUnit()} · ${formatDuration(source.duration_seconds)} · ${source.age_days ?? 0} days old` : "Add a result >= 3 km."}</p>{source?.noisy_reasons.length ? <p className="mt-2 text-orange-200" translate="no">Noisy: {source.noisy_reasons.join(" · ")}</p> : null}</div>
         </div>
       </Card>
     </div>
@@ -2275,7 +2357,7 @@ function PerformanceResultsTable({ title, results }: { title: string; results: P
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Result</th><th>Date</th><th>Distance</th><th>Time</th><th>Pace</th><th>VDOT</th><th>Signal</th></tr></thead>
-        <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} км</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}/км</td><td>{result.estimated_vdot?.value ?? "--"}{result.estimated_vdot ? <div className="mt-1 max-w-[13rem] text-[10px] text-zinc-600">{calculationMetadata(result.estimated_vdot)}</div> : null}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
+        <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} {kmUnit()}</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}{perKmUnit()}</td><td>{result.estimated_vdot?.value ?? "--"}{result.estimated_vdot ? <div className="mt-1 max-w-[13rem] text-[10px] text-zinc-600">{calculationMetadata(result.estimated_vdot)}</div> : null}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
       </table>
       {!results.length ? <p className="p-4 text-xs text-zinc-500">Нет сохраненных результатов этого типа.</p> : null}
     </div>
@@ -2288,7 +2370,7 @@ function PerformancePredictions({ predictions }: { predictions: PerformancePredi
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Target</th><th>Prediction</th><th>Pace</th><th>Source</th><th>Confidence</th><th>Notes</th></tr></thead>
-        <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} км</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}/км</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div><div className="text-[10px] text-zinc-600">source {prediction.source_distance_km?.toFixed(2) ?? "--"} км · {formatDuration(prediction.source_duration_seconds)}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}<div className="mt-1 text-[10px] text-zinc-600">{prediction.method} · {prediction.source_reference}</div></td></tr>)}</tbody>
+        <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} {kmUnit()}</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}{perKmUnit()}</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div><div className="text-[10px] text-zinc-600">source {prediction.source_distance_km?.toFixed(2) ?? "--"} {kmUnit()} · {formatDuration(prediction.source_duration_seconds)}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}<div className="mt-1 text-[10px] text-zinc-600">{prediction.method} · {prediction.source_reference}</div></td></tr>)}</tbody>
       </table>
       {!predictions.length ? <p className="p-4 text-xs text-zinc-500">Нужен race/time trial результат &gt;= 3 км для прогнозов.</p> : null}
     </div>
@@ -2299,7 +2381,7 @@ function PerformancePbs({ pbs, latestPb }: { pbs: PerformancePb[]; latestPb?: Pe
   return <Card>
     <CardHeader><div><CardTitle>Personal bests</CardTitle><p className="text-xs text-zinc-500">PB uses near-exact race/time trial distances only.</p></div><Badge>{latestPb ? latestPb.label : "--"}</Badge></CardHeader>
     <div className="divide-y divide-zinc-800">
-      {pbs.map((pb) => <div key={pb.label} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[4.5rem_1fr_auto]"><div className="font-semibold text-white">{pb.label}</div><div><p className="text-zinc-300">{formatDuration(pb.normalized_duration_seconds)} · {formatPace(pb.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{pb.name} · {formatDateTime(pb.result_date)} · actual {pb.distance_km.toFixed(2)} км</p>{pb.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(pb.estimated_vdot)}</p> : null}{pb.noisy_reasons.length ? <p className="mt-1 text-[11px] text-orange-200">Noisy: {pb.noisy_reasons.join(" · ")}</p> : null}</div><Badge className={pb.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>VDOT {pb.estimated_vdot?.value ?? "--"}</Badge></div>)}
+      {pbs.map((pb) => <div key={pb.label} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[4.5rem_1fr_auto]" translate="no"><div className="font-semibold text-white">{pb.label}</div><div><p className="text-zinc-300">{formatDuration(pb.normalized_duration_seconds)} · {formatPace(pb.pace_seconds_per_km)}{perKmUnit()}</p><p className="mt-1 text-zinc-500">{pb.name} · {formatDateTime(pb.result_date)} · actual {pb.distance_km.toFixed(2)} {kmUnit()}</p>{pb.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(pb.estimated_vdot)}</p> : null}{pb.noisy_reasons.length ? <p className="mt-1 text-[11px] text-orange-200">Noisy: {pb.noisy_reasons.join(" · ")}</p> : null}</div><Badge className={pb.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>VDOT {pb.estimated_vdot?.value ?? "--"}</Badge></div>)}
       {!pbs.length ? <p className="p-4 text-xs text-zinc-500">Нет PB по стандартным дистанциям.</p> : null}
     </div>
   </Card>
@@ -2311,14 +2393,14 @@ function PerformanceThresholdTrend({ points }: { points: PerformanceVdot["thresh
   return <Card>
     <CardHeader><div><CardTitle>Threshold trend</CardTitle><p className="text-xs text-zinc-500">Estimated 60-minute pace from race/time trial results.</p></div><Badge>{points.length} points</Badge></CardHeader>
     <div className="grid gap-2 p-4">
-      {points.map((point) => <div key={point.result_id} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{new Date(point.result_date).toLocaleDateString("ru-RU", { month: "short", day: "2-digit" })}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, min / point.threshold_pace_seconds_per_km * 100)}%` }} /></div><strong className="text-right text-zinc-300">{formatPace(point.threshold_pace_seconds_per_km)}</strong><span className="col-span-full text-[10px] text-zinc-600">{point.source} · {point.confidence}</span></div>)}
+      {points.map((point) => <div key={point.result_id} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{dateValue(point.result_date).toLocaleDateString(languageLocale(), { month: "short", day: "2-digit" })}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, min / point.threshold_pace_seconds_per_km * 100)}%` }} /></div><strong className="text-right text-zinc-300">{formatPace(point.threshold_pace_seconds_per_km)}</strong><span className="col-span-full text-[10px] text-zinc-600">{point.source} · {point.confidence}</span></div>)}
       {!points.length ? <p className="text-xs text-zinc-500">Добавьте результаты, чтобы увидеть trend.</p> : null}
     </div>
   </Card>
 }
 
 function formatPerformanceZoneRange(zone: PerformancePaceZone) {
-  const format = (value: number | null) => value === null ? "--" : zone.unit === "seconds_per_km" ? `${formatPace(Math.round(value))}/км` : `${value}`
+  const format = (value: number | null) => value === null ? "--" : zone.unit === "seconds_per_km" ? `${formatPace(Math.round(value))}${perKmUnit()}` : `${value}`
   return `${format(zone.lower_value)} - ${format(zone.upper_value)}`
 }
 
@@ -2480,8 +2562,8 @@ function GoalFocus({ goal }: { goal: RunningGoal }) {
   const range = goal.predicted_time_range
   return <Card className="p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Active race</p><h3 className="mt-1 text-base font-semibold text-white">{goal.title}</h3><p className="mt-1 text-xs text-zinc-500">{formatDistance(goal.race_distance_km)} · {formatDate(goal.target_date)} · priority {goal.priority || "--"}</p></div>
-      <Badge className={signalClass(goal.progress.readiness)}>{goal.progress.readiness}</Badge>
+      <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Active race</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{goal.title}</h3><p className="mt-1 text-xs text-zinc-500" translate="no">{formatDistance(goal.race_distance_km)} · {formatDate(goal.target_date)} · priority {goal.priority || "--"}</p></div>
+      <Badge className={signalClass(goal.progress.readiness)} translate="no">{goal.progress.readiness}</Badge>
     </div>
     <div className="mt-3 grid gap-2 md:grid-cols-4">
       <Stat label="target" value={formatTargetTime(goal.target_time_seconds)} />
@@ -2489,22 +2571,22 @@ function GoalFocus({ goal }: { goal: RunningGoal }) {
       <Stat label="range" value={range ? `${formatDuration(range.lower_seconds)}-${formatDuration(range.upper_seconds)}` : "--"} />
       <Stat label="VDOT" value={goal.current_fitness?.estimate?.value ?? "--"} />
     </div>
-    <div className="mt-3 grid gap-2 md:grid-cols-3">{goal.milestones.map((milestone) => <div key={milestone.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{milestone.title}</p><Badge className={signalClass(milestone.status)}>{milestone.status}</Badge></div><p className="mt-1 text-zinc-500">due {formatDate(milestone.due_date)} · target {String(milestone.target ?? "--")}</p>{milestone.value !== undefined ? <p className="mt-1 text-zinc-400">current {milestone.value}</p> : null}</div>)}</div>
+    <div className="mt-3 grid gap-2 md:grid-cols-3">{goal.milestones.map((milestone) => <div key={milestone.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs" translate="no"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{milestone.title}</p><Badge className={signalClass(milestone.status)}>{milestone.status}</Badge></div><p className="mt-1 text-zinc-500">due {formatDate(milestone.due_date)} · target {String(milestone.target ?? "--")}</p>{milestone.value !== undefined ? <p className="mt-1 text-zinc-400">current {milestone.value}</p> : null}</div>)}</div>
   </Card>
 }
 
 function GoalCard({ goal, busy, onStatus, onDelete }: { goal: RunningGoal; busy: boolean; onStatus: (status: string) => void; onDelete: () => void }) {
   return <Card className="p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><p className="font-semibold text-white">{goal.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{goal.id}</span></p><p className="mt-1 text-zinc-500">{goalTypeLabel(goal.goal_type)} · {goalProgressText(goal)} · {goal.unit || goal.progress.metric}</p></div>
-      <div className="flex flex-wrap gap-1"><Badge className={planStatusClass(goal.status)}>{goal.status}</Badge><Badge className={signalClass(goal.progress.readiness)}>{goal.progress.readiness}</Badge></div>
+      <div translate="no"><p className="font-semibold text-white">{goal.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{goal.id}</span></p><p className="mt-1 text-zinc-500">{goalTypeLabel(goal.goal_type)} · {goalProgressText(goal)} · {goal.unit || goal.progress.metric}</p></div>
+      <div className="flex flex-wrap gap-1"><Badge className={planStatusClass(goal.status)} translate="no">{goal.status}</Badge><Badge className={signalClass(goal.progress.readiness)} translate="no">{goal.progress.readiness}</Badge></div>
     </div>
     <div className="mt-2 grid gap-2 md:grid-cols-3">
       <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Race: {formatDistance(goal.race_distance_km)} · {formatDate(goal.target_date)}</p>
-      <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Plan: {goal.plan ? `${goal.plan.title} (${Math.round((goal.plan.adherence.completion_rate || 0) * 100)}%)` : "not linked"}</p>
+      <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400" translate="no">Plan: {goal.plan ? `${goal.plan.title} (${Math.round((goal.plan.adherence.completion_rate || 0) * 100)}%)` : "not linked"}</p>
       <p className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5 text-zinc-400">Prediction: {goal.predicted_time_range ? `${formatDuration(goal.predicted_time_range.predicted_duration_seconds)} · ${goal.predicted_time_range.confidence}` : "--"}</p>
     </div>
-    {goal.course_notes || goal.reason ? <p className="mt-2 leading-5 text-zinc-500">{goal.course_notes || goal.reason}</p> : null}
+    {goal.course_notes || goal.reason ? <p className="mt-2 leading-5 text-zinc-500" translate="no">{goal.course_notes || goal.reason}</p> : null}
     <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus(goal.status === "paused" ? "active" : "paused")}>{goal.status === "paused" ? "Resume" : "Pause"}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("completed")}>Complete</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("missed")}>Missed</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onStatus("archived")}>Archive</Button><Button size="sm" variant="secondary" disabled={busy} onClick={onDelete}>Delete</Button></div>
   </Card>
 }
@@ -2665,7 +2747,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
     </Card> : null}
     <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
       <Card>
-        <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge>{completeness?.confidence || "low"} confidence</Badge></CardHeader>
+        <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge translate="no">{completeness?.confidence || "low"} confidence</Badge></CardHeader>
         <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-4 p-4 text-xs">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
@@ -2712,7 +2794,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><Button type="submit">Save profile</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">long {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)}>{profile.recovery_status || "normal"}</Badge></div>
+          <div className="flex flex-wrap items-center gap-2"><Button type="submit">Save profile</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">days {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">long {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)} translate="no">{profile.recovery_status || "normal"}</Badge></div>
         </form>
       </Card>
 
@@ -2729,8 +2811,8 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         </Card>
         <Card className="p-4">
           <p className="text-sm font-semibold text-white">Safety</p>
-          <p className="mt-2 text-xs leading-5 text-zinc-400">{safety?.message}</p>
-          {safety?.warnings.length ? <div className="mt-3 grid gap-2">{safety.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : <p className="mt-3 text-xs text-zinc-500">Нет активных предупреждений.</p>}
+          <p className="mt-2 text-xs leading-5 text-zinc-400" translate="no">{safety?.message}</p>
+          {safety?.warnings.length ? <div className="mt-3 grid gap-2" translate="no">{safety.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : <p className="mt-3 text-xs text-zinc-500">Нет активных предупреждений.</p>}
         </Card>
       </div>
     </div>
@@ -2767,7 +2849,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         <div className="max-h-72 overflow-auto">
           <table className="w-full min-w-[540px] text-left text-xs">
             <thead className="sticky top-0 border-b border-zinc-800 bg-zinc-950 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Type</th><th>Value</th><th>Source</th><th>Date</th></tr></thead>
-            <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurementValueLabel(measurement)}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? new Date(measurement.measured_at).toLocaleString("ru-RU") : "--"}</td></tr>)}</tbody>
+            <tbody>{measurements.map((measurement) => <tr key={`${measurement.source_model}-${measurement.id}`} className="border-b border-zinc-900 last:border-0"><td className="px-4 py-2 font-medium text-white">{measurement.measurement_type}<div className="text-[11px] text-zinc-500">{measurement.notes || measurement.source_model}</div></td><td>{measurementValueLabel(measurement)}</td><td>{measurement.source}</td><td className="text-zinc-400">{measurement.measured_at ? formatLocalDateTime(measurement.measured_at) : "--"}</td></tr>)}</tbody>
           </table>
           {!measurements.length && <p className="p-4 text-xs text-zinc-500">Измерений пока нет.</p>}
         </div>
@@ -2831,7 +2913,7 @@ function formatTargetTime(seconds?: number | null) {
 
 function formatDateTime(value?: string | null) {
   if (!value) return "--"
-  return new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+  return dateValue(value).toLocaleString(languageLocale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
 }
 
 function planGoalLabel(plan: Plan) {
@@ -3383,14 +3465,14 @@ function Planning() {
       <div className="grid gap-4 p-4 text-sm text-zinc-400">
         {result ? <>
           <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />
-          <p className="leading-6">{result.explanation}</p>
+          <p className="leading-6" translate="no">{result.explanation}</p>
           <div className="flex flex-wrap items-center gap-2">
             {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Activate plan</Button> : <Badge>active plan</Badge>}
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round((result.adherence?.completion_rate || 0) * 100)}% adherence</Badge>
-            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} км</Badge>
-            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} {kmUnit()}</Badge>
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
-          {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
+          {result.adherence?.warnings?.length ? <div className="grid gap-2" translate="no">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
           <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
           <PlanVersions versions={planVersions} />
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
@@ -3418,31 +3500,31 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
       <div><p className="font-semibold text-white">Builder preview</p><p className="mt-1 text-zinc-500">Baseline, risk flags and first workouts before saving a draft.</p></div>
       <Badge className={preview.risk_flags.some((flag) => flag.severity === "critical" || flag.severity === "warning") ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{preview.risk_flags.length} flags</Badge>
     </div>
-    <p className="mt-3 leading-5 text-zinc-400">{preview.explanation}</p>
+    <p className="mt-3 leading-5 text-zinc-400" translate="no">{preview.explanation}</p>
     <div className="mt-3 grid grid-cols-4 gap-2 text-center">
       <Stat label="weeks" value={preview.weeks} />
-      <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix="km" />
-      <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix="km" />
+      <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
+      <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
       <Stat label="support" value={supportSessions} />
     </div>
     <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Baseline</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500">
+      <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500" translate="no">
         <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
         <p>history: <span className="text-zinc-300">{preview.baseline.history_span_days} days</span></p>
         <p>consistent: <span className="text-zinc-300">{preview.baseline.consistent_weeks || 0} weeks</span></p>
         <p>quality: <span className="text-zinc-300">{preview.baseline.quality_sessions_8w || 0}/8w</span></p>
         <p>activities: <span className="text-zinc-300">{preview.baseline.activity_count}</span></p>
-        <p>recent long: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} km</span></p>
+        <p>recent long: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} {kmUnit()}</span></p>
       </div>
       <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
     </div>
     <div className="mt-3 grid gap-2">
-      {preview.weekly_volume_curve.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_8.5rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className={cn("h-full rounded", week.is_taper ? "bg-orange-200/80" : "bg-orange-400/70")} style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} km · {week.phase}</span></div>)}
+      {preview.weekly_volume_curve.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_8.5rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className={cn("h-full rounded", week.is_taper ? "bg-orange-200/80" : "bg-orange-400/70")} style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} {kmUnit()} · {week.phase}</span></div>)}
     </div>
-    <div className="mt-3 flex flex-wrap gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
-    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
-    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
+    <div className="mt-3 flex flex-wrap gap-2" translate="no"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5" translate="no">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
+    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
   </div>
 }
 
@@ -3453,7 +3535,7 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
   const renameChanged = renameDraft.trim() && renameDraft.trim() !== plan.title
   return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
     <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
-      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{plan.status}</Badge></div>
+      <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge></div>
       <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="workouts" value={plan.workouts.length} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="support" value={planSupportWorkouts(plan)} /></div>
       <div className="mt-1 grid grid-cols-2 gap-1 text-center text-[11px]"><Stat label="duration" value={formatDuration(planPlannedDuration(plan))} /><Stat label="done" value={`${adherence}%`} /></div>
     </div>
@@ -3475,8 +3557,8 @@ function PlanDetailHeader({ plan, currentWeekIndex }: { plan: Plan; currentWeekI
   ]
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Plan header</p><h3 className="mt-1 text-base font-semibold text-white">{plan.title}</h3><p className="mt-1 text-zinc-500">{planGoalLabel(plan)}</p></div>
-      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)}>{plan.status}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">current week {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">current week --</Badge>}</div>
+      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Plan header</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{plan.title}</h3><p className="mt-1 text-zinc-500" translate="no">{planGoalLabel(plan)}</p></div>
+      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">current week {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">current week --</Badge>}</div>
     </div>
     <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-6">
       <Stat label="target date" value={formatDate(plan.target_date)} />
@@ -3495,14 +3577,14 @@ function PlanVolumeChart({ weeks }: { weeks: PlanWeekSummary[] }) {
   if (!weeks.length) return null
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Volume chart</p><p className="mt-1 text-zinc-500">Weekly running distance with support-session markers.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{weeks.length} weeks</Badge></div>
-    <div className="mt-3 grid gap-2">{weeks.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_7rem] items-center gap-2 text-[11px]"><span className="text-zinc-500">W{week.week_index}</span><div className="grid gap-1"><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(3, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-zinc-400/70" style={{ width: `${Math.round((week.completed_distance_km / maxVolume) * 100)}%` }} /></div></div><span className="text-right text-zinc-400">{week.completed_distance_km.toFixed(1)}/{week.planned_distance_km.toFixed(1)} км · S{week.support_workouts}</span></div>)}</div>
+    <div className="mt-3 grid gap-2">{weeks.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_7rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="grid gap-1"><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(3, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-zinc-400/70" style={{ width: `${Math.round((week.completed_distance_km / maxVolume) * 100)}%` }} /></div></div><span className="text-right text-zinc-400">{week.completed_distance_km.toFixed(1)}/{week.planned_distance_km.toFixed(1)} {kmUnit()} · S{week.support_workouts}</span></div>)}</div>
   </div>
 }
 
 function PlanIntensitySplit({ split }: { split: { key: string; value: number; percent: number }[] }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Intensity split</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">planned time</Badge></div>
-    <div className="mt-3 grid gap-2 md:grid-cols-5">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)}</p></div>)}</div>
+    <div className="mt-3 grid gap-2 md:grid-cols-5">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2" translate="no"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)}</p></div>)}</div>
   </div>
 }
 
@@ -3511,9 +3593,9 @@ function PlanVersions({ versions }: { versions: PlanVersion[] }) {
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">Plan versions</p><p className="mt-1 text-zinc-500">Immutable snapshots for generation, manual edits and adaptation.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{versions.length} saved</Badge></div>
     {versions.length ? <div className="mt-3 grid gap-2">{versions.slice(0, 5).map((version) => {
       const workoutCount = Array.isArray(version.snapshot_json?.workouts) ? version.snapshot_json.workouts.length : 0
-      return <div key={version.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-2 md:grid-cols-[5rem_1fr_auto] md:items-center">
+      return <div key={version.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-2 md:grid-cols-[5rem_1fr_auto] md:items-center" translate="no">
         <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">v{version.version_number}</div>
-        <div><p className="font-medium text-white">{version.summary || version.reason}</p><p className="mt-1 text-zinc-500">{version.reason} · {workoutCount} workouts · {new Date(version.created_at).toLocaleString("ru-RU")}</p></div>
+        <div><p className="font-medium text-white">{version.summary || version.reason}</p><p className="mt-1 text-zinc-500">{version.reason} · {workoutCount} workouts · {formatLocalDateTime(version.created_at)}</p></div>
         <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">snapshot</Badge>
       </div>
     })}</div> : <p className="mt-3 text-zinc-500">Versions will appear after generating or editing a plan.</p>}
@@ -3533,10 +3615,10 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
       <div><p className="font-semibold text-white">Coach recommendations</p><p className="mt-1 text-zinc-500">Adaptive guidance with preview/apply safeguards and audit history.</p></div>
       <div className="flex flex-wrap items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading || previewing || applying} onClick={onRefresh}>{loading ? "Refreshing..." : "Refresh"}</Button><Button size="sm" variant="ghost" disabled={!recommendations || loading || previewing || applying} onClick={onPreview}>{previewing ? "Previewing..." : "Preview"}</Button><Button size="sm" disabled={!canApply} onClick={onApply}>{applying ? "Applying..." : "Apply"}</Button></div>
     </div>
-    {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100">{error}</div> : null}
-    {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100">{actionError}</div> : null}
+    {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100" translate="no">{error}</div> : null}
+    {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100" translate="no">{actionError}</div> : null}
     {recommendations ? <>
-      <p className="mt-3 leading-5 text-zinc-300">{recommendations.adaptation_summary || recommendations.summary}</p>
+      <p className="mt-3 leading-5 text-zinc-300" translate="no">{recommendations.adaptation_summary || recommendations.summary}</p>
       <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-6">
         <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
         <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
@@ -3545,13 +3627,13 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
         <Stat label="risk" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
         <Stat label="hard 7d" value={recommendations.metrics.upcoming_hard_workouts || 0} />
       </div>
-      <div className="mt-3 grid gap-2">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
+      <div className="mt-3 grid gap-2" translate="no">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
       {preview ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 p-2">
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Preview diff</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge></div>
-        {preview.changes.length ? <div className="mt-2 grid gap-1.5">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
-        {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
+        {preview.changes.length ? <div className="mt-2 grid gap-1.5" translate="no">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
+        {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2" translate="no"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
       </div> : null}
-      {audits.length ? <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">Adjustment history</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge></div><div className="mt-2 grid gap-1 text-[11px] text-zinc-500">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {new Date(audit.created_at).toLocaleString("ru-RU")}</p>)}</div></div> : null}
+      {audits.length ? <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">Adjustment history</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge></div><div className="mt-2 grid gap-1 text-[11px] text-zinc-500" translate="no">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {formatLocalDateTime(audit.created_at)}</p>)}</div></div> : null}
     </> : <p className="mt-3 text-zinc-500">{loading ? "Recommendations are loading..." : error ? "Recommendations are unavailable." : "No recommendations loaded."}</p>}
   </div>
 }
@@ -3559,16 +3641,16 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
 function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDrafts, completionDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onCompletionDraft, onCompleteWorkout, onSaveFeedback }: { summary: PlanWeekSummary; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; completionDrafts: Record<number, CompletionDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onCompletionDraft: (workout: PlanWorkout, patch: Partial<CompletionDraft>) => void; onCompleteWorkout: (workout: PlanWorkout) => Promise<void>; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/60">
     <div className="border-b border-zinc-800 px-3 py-2">
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} км</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} км</div></div>
+        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} {kmUnit()}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">support</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
         <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">done</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} км</div></div>
+        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} {kmUnit()}</div></div>
       </div>
-      {summary.warnings.length ? <div className="mt-2 grid gap-1">{summary.warnings.map((warning) => <p key={warning} className="rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">{warning}</p>)}</div> : null}
+      {summary.warnings.length ? <div className="mt-2 grid gap-1" translate="no">{summary.warnings.map((warning) => <p key={warning} className="rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">{warning}</p>)}</div> : null}
     </div>
     <div className="grid gap-2 p-3">{summary.workouts.map((workout) => {
       const candidates = candidatesByWorkout[workout.id] || []
@@ -3580,15 +3662,15 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
       const canReschedule = !workout.completed_activity_id && ["planned", "rescheduled", "missed", "skipped"].includes(workout.status)
       const supportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? new Date(workout.scheduled_date).toLocaleDateString("ru-RU") : "no date"} · {formatWorkoutTarget(workout)} · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workout.status}</Badge></div></div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · {formatWorkoutTarget(workout)} · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"} translate="no">{workout.status}</Badge></div></div>
         <div className="mt-2 grid gap-2 md:grid-cols-4">
           <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
           <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Purpose</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
           <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Safety note</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
-        <p className="mt-2 leading-5 text-zinc-400">{workout.description}</p>
-        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
+        <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
+        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100" translate="no">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
         {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div><div className="mt-1 flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
         {canCompleteManually ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Manual completion</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Workout Detail</Badge></div>
@@ -3619,11 +3701,11 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
         </div> : null}
         {canReschedule ? <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
         <div className="mt-2 flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
-        {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200">{candidateErrors[workout.id]}</p> : null}
+        {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200" translate="no">{candidateErrors[workout.id]}</p> : null}
         {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           {candidates.map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
-            <div><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? new Date(candidate.activity.started_at).toLocaleDateString("ru-RU") : "без даты"} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" aria-label={`Link activity ${candidate.activity.title} #${candidate.activity.id} to planned workout ${workout.title} #${workout.id}`} onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
+            <div translate="no"><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? formatLocalDate(candidate.activity.started_at) : noDateLabel()} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
+            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" aria-label={`Link activity ${candidate.activity.title} #${candidate.activity.id} to planned workout ${workout.title} #${workout.id}`} onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
           </div>)}
         </div> : null}
       </div>
@@ -3815,14 +3897,14 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
       <Field label="API key"><Input name="api_key" placeholder="API key" type="password" /></Field>
       <label className="flex items-center gap-2 text-xs text-zinc-400"><input name="is_default" type="checkbox" /> default provider</label>
       <Button type="submit">Save provider</Button>
-      {message ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">{message}</p> : null}
+      {message ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300" translate="no">{message}</p> : null}
     </form></Card>
     <Card><CardHeader><div><CardTitle>Providers</CardTitle><p className="text-xs text-zinc-500">Edit, test with a safe prompt, set default or disable providers.</p></div><Badge>{providers.length} total</Badge></CardHeader><div className="divide-y divide-zinc-800">{providers.map((provider) => {
       const result = testResults[provider.id]
       const busy = busyProvider === provider.id
       return <div key={provider.id} className="grid gap-3 px-4 py-3 text-xs">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><p className="font-medium text-white">{provider.display_name}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{provider.id}</span></p><p className="mt-1 text-zinc-500">{provider.provider} · {provider.model}</p></div>
+          <div translate="no"><p className="font-medium text-white">{provider.display_name}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{provider.id}</span></p><p className="mt-1 text-zinc-500">{provider.provider} · {provider.model}</p></div>
           <div className="flex flex-wrap gap-1">{provider.is_default && <Badge>default</Badge>}<Badge className={provider.has_api_key ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-orange-400/30 bg-orange-400/10 text-orange-200"}>key {provider.has_api_key ? "stored" : "missing"}</Badge><Badge className={provider.supports_vision ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-500"}>vision {provider.supports_vision ? "likely" : "unknown"}</Badge></div>
         </div>
         <form onSubmit={(event) => updateExisting(event, provider)} className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -3833,14 +3915,14 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
           <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="clear_api_key" type="checkbox" /> clear key</label>
           <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-3"><Button size="sm" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy || provider.is_default} onClick={() => setDefault(provider)}>Set default</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => testProvider(provider)}>{busy ? "Testing..." : "Test"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => deleteExisting(provider)}>Delete</Button></div>
         </form>
-        {result ? <div className={`rounded-md border px-2 py-1.5 text-xs ${result.ok ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/20 bg-orange-400/10 text-orange-100"}`}>{result.status} · {result.response_ms ?? "--"} ms · vision {result.supports_vision ? "likely" : "unknown"}<div className="mt-1 text-zinc-500">{result.message}</div></div> : null}
+        {result ? <div className={`rounded-md border px-2 py-1.5 text-xs ${result.ok ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/20 bg-orange-400/10 text-orange-100"}`} translate="no">{result.status} · {result.response_ms ?? "--"} ms · vision {result.supports_vision ? "likely" : "unknown"}<div className="mt-1 text-zinc-500">{result.message}</div></div> : null}
       </div>
     })}{!providers.length ? <p className="p-4 text-xs text-zinc-500">No active providers yet.</p> : null}</div></Card>
     </div>
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
       <Card>
         <CardHeader><div><CardTitle>Integrations</CardTitle><p className="text-xs text-zinc-500">Configured and planned data sources.</p></div><Button size="sm" variant="secondary" onClick={loadDataManagement}>Refresh</Button></CardHeader>
-        <div className="divide-y divide-zinc-800">{integrations.map((integration) => <div key={integration.id} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[1fr_auto] md:items-start">
+        <div className="divide-y divide-zinc-800">{integrations.map((integration) => <div key={integration.id} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[1fr_auto] md:items-start" translate="no">
           <div><p className="font-medium text-white">{integration.name}</p><p className="mt-1 text-zinc-500">{integration.description}</p><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">{integration.category} · {integration.id}</p></div>
           <Badge className={integration.configured ? "border-zinc-700 bg-zinc-900 text-zinc-300" : integration.status === "planned" ? "border-zinc-800 bg-zinc-950 text-zinc-500" : "border-orange-400/30 bg-orange-400/10 text-orange-200"}>{integration.status}</Badge>
         </div>)}{!integrations.length ? <p className="p-4 text-xs text-zinc-500">No integration data loaded.</p> : null}</div>
@@ -3856,13 +3938,13 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
             <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} placeholder="Type DELETE to confirm" />
             <Button type="button" variant="secondary" disabled={dataBusy || deleteConfirm !== "DELETE"} onClick={deleteAccountData}>Delete user data</Button>
           </div>
-          {dataMessage ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">{dataMessage}</p> : null}
+          {dataMessage ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300" translate="no">{dataMessage}</p> : null}
         </div>
       </Card>
     </div>
     <Card>
       <CardHeader><div><CardTitle>Audit log</CardTitle><p className="text-xs text-zinc-500">Recent user-scoped import, provider, export and delete events.</p></div><Badge>{auditLog.length} events</Badge></CardHeader>
-      <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500">{new Date(event.created_at).toLocaleString("ru-RU")}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></td><td className="text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500">{formatLocalDateTime(event.created_at)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></td><td className="text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
     </Card>
   </div>
 }
