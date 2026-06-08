@@ -24,6 +24,12 @@ class AuthToken(BaseModel):
     user: UserOut
 
 
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    details: object | None = None
+
+
 class SegmentOut(BaseModel):
     id: int
     segment_index: int

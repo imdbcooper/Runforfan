@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.errors import add_exception_handlers
 from app.api.routes import account, activities, analytics, audit_log, auth, calendar, dashboard, export, goals, imports, performance, planning, profile, settings as settings_routes, zones
 from app.core.settings import get_settings
 from app.db.base import Base
@@ -15,6 +16,7 @@ from app.services.training_load import backfill_recent_daily_training_loads
 settings = get_settings()
 
 app = FastAPI(title="Runforfan Backend", version="0.1.0")
+add_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

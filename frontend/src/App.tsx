@@ -121,7 +121,8 @@ function apiErrorMessage(caught: unknown, fallback: string) {
   if (!(caught instanceof Error)) return fallback
   const body = caught.message.replace(/^\d+:\s*/, "")
   try {
-    const parsed = JSON.parse(body) as { detail?: unknown }
+    const parsed = JSON.parse(body) as { detail?: unknown; message?: unknown }
+    if (typeof parsed.message === "string") return parsed.message
     if (typeof parsed.detail === "string") return parsed.detail
   } catch {
     return caught.message || fallback

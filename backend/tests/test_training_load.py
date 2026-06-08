@@ -88,12 +88,19 @@ def import_analytics_route_dependencies(test_case: unittest.TestCase):
     try:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+        from app.api.errors import add_exception_handlers
         from app.api.routes import analytics as analytics_routes
     except ModuleNotFoundError as exc:
         if exc.name in {"fastapi", "httpx", "starlette"}:
             test_case.skipTest("FastAPI dependencies are required for analytics route tests")
         raise
-    return FastAPI, TestClient, analytics_routes
+
+    def fastapi_with_handlers():
+        app = FastAPI()
+        add_exception_handlers(app)
+        return app
+
+    return fastapi_with_handlers, TestClient, analytics_routes
 
 
 class TrainingLoadTests(unittest.TestCase):
@@ -446,7 +453,7 @@ class TrainingLoadTests(unittest.TestCase):
             response = client.post("/api/analytics/load/backfill?from=2025-01-01&to=2026-02-01", json={})
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "too many days")
+        self.assertEqual(response.json(), {"code": "bad_request", "message": "too many days", "details": None})
 
     def test_materialization_route_returns_400_for_unbounded_range(self):
         FastAPI, TestClient, analytics_routes = import_analytics_route_dependencies(self)
@@ -467,7 +474,7 @@ class TrainingLoadTests(unittest.TestCase):
             response = client.get("/api/analytics/load/materialization?from=2025-01-01&to=2026-02-01")
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "too many days")
+        self.assertEqual(response.json(), {"code": "bad_request", "message": "too many days", "details": None})
 
 
 if __name__ == "__main__":
