@@ -1106,6 +1106,7 @@ export const api = {
   },
   confirmImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/confirm`, { method: "POST", body: "{}" }),
   rejectImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/reject`, { method: "POST", body: "{}" }),
+  updateImportCandidate: (id: number, payload: Record<string, unknown>) => request<ImportUploadResult>(`/imports/${id}/candidate`, { method: "PATCH", body: JSON.stringify(payload) }),
   uploadCsv: (file: File, sourceApp = "csv") => {
     const data = new FormData()
     data.append("csv_file", file)

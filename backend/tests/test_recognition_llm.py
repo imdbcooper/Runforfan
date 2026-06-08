@@ -250,6 +250,76 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(result["created_activity_id"], 55)
         self.assertEqual(result["candidate"]["confidence"], "medium")
 
+    def test_candidate_patch_updates_safe_fields_and_clears_estimated_flags(self):
+        payload = valid_llm_payload()
+        payload["estimated_fields"] = ["activity.distance_km", "activity.average_pace_seconds_per_km", "activity.average_speed_kmh"]
+        patch = imports_routes.ImportCandidatePatchIn(distance_km=6.0, duration_seconds=2400, average_pace_seconds_per_km=400)
+
+        updated, changed_fields = imports_routes.update_candidate_payload(payload, patch)
+
+        self.assertEqual(changed_fields, ["average_pace_seconds_per_km", "distance_km", "duration_seconds"])
+        self.assertEqual(updated["activity"]["distance_km"], 6.0)
+        self.assertEqual(updated["activity"]["duration_seconds"], 2400)
+        self.assertEqual(updated["activity"]["average_speed_kmh"], 9.0)
+        self.assertEqual(updated["estimated_fields"], ["activity.average_speed_kmh"])
+        self.assertIn("Manually corrected: average_pace_seconds_per_km, distance_km, duration_seconds", updated["uncertainty_notes"])
+        self.assertEqual(payload["activity"]["distance_km"], 5.0)
+
+    def test_candidate_patch_recomputes_stale_pace_when_distance_or_duration_changes(self):
+        patch = imports_routes.ImportCandidatePatchIn(distance_km=6.0, average_pace_seconds_per_km=300)
+
+        updated, changed_fields = imports_routes.update_candidate_payload(valid_llm_payload(), patch)
+
+        self.assertEqual(changed_fields, ["distance_km"])
+        self.assertEqual(updated["activity"]["average_pace_seconds_per_km"], 250)
+        self.assertEqual(updated["activity"]["average_speed_kmh"], 14.4)
+        self.assertIn("activity.average_pace_seconds_per_km", updated["estimated_fields"])
+
+    def test_candidate_patch_revalidates_corrected_payload(self):
+        patch = imports_routes.ImportCandidatePatchIn(average_pace_seconds_per_km=600)
+
+        with self.assertRaises(RecognitionValidationError):
+            imports_routes.update_candidate_payload(valid_llm_payload(), patch)
+
+    def test_candidate_patch_can_clear_nullable_review_fields(self):
+        patch = imports_routes.ImportCandidatePatchIn(title=None, started_at=None, average_heart_rate_bpm=None)
+
+        updated, changed_fields = imports_routes.update_candidate_payload(valid_llm_payload(), patch)
+
+        self.assertEqual(changed_fields, ["average_heart_rate_bpm", "started_at", "title"])
+        self.assertIsNone(updated["activity"]["title"])
+        self.assertIsNone(updated["activity"]["started_at"])
+        self.assertIsNone(updated["activity"]["average_heart_rate_bpm"])
+
+    def test_candidate_patch_clears_stale_nested_structure_after_top_level_correction(self):
+        payload = valid_llm_payload()
+        payload["segments"] = [{"segment_index": 1, "distance_km": 5.0, "duration_seconds": 1500, "pace_seconds_per_km": 300}]
+        payload["split_blocks"] = [{"block_index": 1, "start_km": 0, "end_km": 5, "distance_km": 5.0, "duration_seconds": 1500}]
+        payload["workout_blocks"] = [{"block_index": 1, "block_type": "easy", "duration_seconds": 1500, "distance_km": 5.0}]
+        patch = imports_routes.ImportCandidatePatchIn(distance_km=6.0, duration_seconds=2400, average_pace_seconds_per_km=400)
+
+        updated, _changed_fields = imports_routes.update_candidate_payload(payload, patch)
+
+        self.assertEqual(updated["segments"], [])
+        self.assertEqual(updated["split_blocks"], [])
+        self.assertEqual(updated["workout_blocks"], [])
+        self.assertIn("Cleared stale structured data after correction: segments, split_blocks, workout_blocks", updated["uncertainty_notes"])
+
+    def test_candidate_patch_clears_only_stale_nested_structure(self):
+        payload = valid_llm_payload()
+        payload["activity"]["distance_km"] = 6.0
+        payload["activity"]["duration_seconds"] = 2400
+        payload["segments"] = [{"segment_index": 1, "distance_km": 5.0, "duration_seconds": 1500, "pace_seconds_per_km": 300}]
+        payload["split_blocks"] = [{"block_index": 1, "start_km": 0, "end_km": 6, "distance_km": 6.0, "duration_seconds": 2400}]
+        payload["workout_blocks"] = [{"block_index": 1, "block_type": "easy", "duration_seconds": 2400, "distance_km": 6.0}]
+
+        cleared = imports_routes.clear_stale_candidate_structure(payload, {"distance_km"})
+
+        self.assertEqual(cleared, ["segments"])
+        self.assertEqual(payload["segments"], [])
+        self.assertEqual(len(payload["split_blocks"]), 1)
+        self.assertEqual(len(payload["workout_blocks"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

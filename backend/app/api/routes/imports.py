@@ -1,3 +1,4 @@
+from copy import deepcopy
 import shutil
 import uuid
 from datetime import datetime
@@ -10,13 +11,13 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.db.session import get_db
 from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, ImportBatch, ImportBatchSource, ImportRecognitionAttempt, ScreenshotSource, TrainingPlan, TrainingPlanWorkout, User
-from app.schemas.common import CsvImportOut
+from app.schemas.common import CsvImportOut, ImportCandidatePatchIn
 from app.services.audit import log_audit_event
 from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.auth import get_current_user
 from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
 from app.services.planning import auto_match_activity_to_plan
-from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
+from app.services.recognition import RecognitionValidationError, llm_or_template_recognize, validate_activity_payload
 from app.services.training_load import sync_daily_training_loads_for_activities, sync_daily_training_loads_for_activity
 
 
@@ -178,6 +179,105 @@ def import_batch_for_user(db: Session, user: User, batch_id: int, for_update: bo
     return batch
 
 
+def candidate_field_changed(current: object, value: object, field: str) -> bool:
+    if field == "started_at" and current and value:
+        try:
+            current_dt = datetime.fromisoformat(str(current).replace("Z", "+00:00"))
+            value_dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return current_dt != value_dt
+        except ValueError:
+            return current != value
+    return current != value
+
+
+def sync_candidate_dependent_fields(payload: dict, changed_fields: set[str]) -> None:
+    if not ({"distance_km", "duration_seconds"} & changed_fields):
+        return
+    activity = payload.get("activity") or {}
+    distance = activity.get("distance_km")
+    duration = activity.get("duration_seconds")
+    if distance and duration:
+        activity["average_speed_kmh"] = round(float(distance) * 3600 / int(duration), 2)
+        if "average_pace_seconds_per_km" not in changed_fields:
+            activity["average_pace_seconds_per_km"] = round(int(duration) / float(distance))
+        estimated_fields = set(payload.get("estimated_fields") or [])
+        estimated_fields.add("activity.average_speed_kmh")
+        if "average_pace_seconds_per_km" not in changed_fields:
+            estimated_fields.add("activity.average_pace_seconds_per_km")
+        payload["estimated_fields"] = sorted(estimated_fields)
+
+
+def stale_candidate_structure_keys(payload: dict) -> list[str]:
+    activity = payload.get("activity") or {}
+    distance = activity.get("distance_km")
+    duration = activity.get("duration_seconds")
+
+    def distance_mismatch(rows: list[dict], tolerance_km: float, tolerance_fraction: float) -> bool:
+        if not rows or not distance:
+            return False
+        total = sum(float(row.get("distance_km") or 0) for row in rows)
+        return abs(total - float(distance)) > max(tolerance_km, float(distance) * tolerance_fraction)
+
+    def duration_mismatch(rows: list[dict], tolerance_seconds: int, tolerance_fraction: float) -> bool:
+        if not rows or not duration:
+            return False
+        total = sum(int(row.get("duration_seconds") or 0) for row in rows)
+        return abs(total - int(duration)) > max(tolerance_seconds, int(duration) * tolerance_fraction)
+
+    stale = []
+    checks = [
+        ("segments", 0.5, 0.12, 10, 0.01),
+        ("split_blocks", 0.05, 0.01, 10, 0.01),
+        ("workout_blocks", 0.08, 0.02, 15, 0.02),
+    ]
+    for key, distance_tolerance, distance_fraction, duration_tolerance, duration_fraction in checks:
+        rows = payload.get(key) or []
+        if distance_mismatch(rows, distance_tolerance, distance_fraction) or duration_mismatch(rows, duration_tolerance, duration_fraction):
+            stale.append(key)
+    return stale
+
+
+def clear_stale_candidate_structure(payload: dict, changed_fields: set[str]) -> list[str]:
+    if not ({"distance_km", "duration_seconds"} & changed_fields):
+        return []
+    stale_keys = set(stale_candidate_structure_keys(payload))
+    cleared = []
+    for key in ("segments", "split_blocks", "workout_blocks"):
+        if key in stale_keys and payload.get(key):
+            payload[key] = []
+            cleared.append(key)
+    return cleared
+
+
+def update_candidate_payload(payload: dict, patch: ImportCandidatePatchIn) -> tuple[dict, list[str]]:
+    updated = deepcopy(payload)
+    activity = updated.setdefault("activity", {})
+    patch_values = patch.model_dump(exclude_unset=True, mode="json")
+    changed = {}
+    for key, value in patch_values.items():
+        if candidate_field_changed(activity.get(key), value, key):
+            changed[key] = value
+            activity[key] = value
+    if changed:
+        sync_candidate_dependent_fields(updated, set(changed))
+        cleared_structure = clear_stale_candidate_structure(updated, set(changed))
+        estimated_fields = set(updated.get("estimated_fields") or [])
+        for key in changed:
+            estimated_fields.discard(f"activity.{key}")
+        updated["estimated_fields"] = sorted(estimated_fields)
+        notes = list(updated.get("uncertainty_notes") or [])
+        note = f"Manually corrected: {', '.join(sorted(changed))}"
+        if note not in notes:
+            notes.append(note)
+        if cleared_structure:
+            structure_note = f"Cleared stale structured data after correction: {', '.join(cleared_structure)}"
+            if structure_note not in notes:
+                notes.append(structure_note)
+        updated["uncertainty_notes"] = notes
+    validate_activity_payload(updated)
+    return updated, sorted(changed)
+
+
 @router.get("")
 def list_imports(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     batches = list(db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc())))
@@ -295,6 +395,28 @@ def confirm_import(batch_id: int, user: User = Depends(get_current_user), db: Se
     })
     db.commit()
     return import_result(db, user, batch, matched_workout, include_candidate=True)
+
+
+@router.patch("/{batch_id}/candidate")
+def patch_import_candidate(batch_id: int, patch: ImportCandidatePatchIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    batch = import_batch_for_user(db, user, batch_id, for_update=True)
+    if batch.status != "pending_confirmation":
+        raise HTTPException(status_code=409, detail="Import batch is not pending confirmation")
+    attempt = latest_recognition_attempt(db, batch.id)
+    if not attempt or not attempt.parsed_payload:
+        raise HTTPException(status_code=409, detail="Import candidate payload is missing")
+    try:
+        updated_payload, changed_fields = update_candidate_payload(attempt.parsed_payload, patch)
+    except RecognitionValidationError as exc:
+        raise HTTPException(status_code=400, detail="; ".join(exc.errors)) from exc
+    if not changed_fields:
+        db.commit()
+        return import_result(db, user, batch, include_candidate=True)
+    attempt.parsed_payload = updated_payload
+    batch.recognition_message = "Import candidate manually corrected; review and confirm to create activity." if changed_fields else batch.recognition_message
+    log_audit_event(db, user.id, "import.candidate_corrected", "import_batch", batch.id, {"fields": changed_fields})
+    db.commit()
+    return import_result(db, user, batch, include_candidate=True)
 
 
 @router.post("/{batch_id}/reject")

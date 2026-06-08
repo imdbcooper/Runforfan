@@ -129,6 +129,15 @@ class ActivityValidationOut(BaseModel):
     issues: list[ActivityValidationIssueOut] = Field(default_factory=list)
 
 
+class ImportCandidatePatchIn(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    started_at: datetime | None = None
+    distance_km: float | None = Field(default=None, gt=0, le=300)
+    duration_seconds: StrictInt | None = Field(default=None, ge=60, le=86400)
+    average_pace_seconds_per_km: StrictInt | None = Field(default=None, ge=120, le=1200)
+    average_heart_rate_bpm: StrictInt | None = Field(default=None, ge=40, le=230)
+
+
 class GoalCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     goal_type: str = Field(default="custom_habit", pattern="^(race|weekly_consistency|monthly_distance|long_run|custom_habit|health|custom)$")

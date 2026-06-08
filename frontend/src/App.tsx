@@ -976,6 +976,22 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     }
   }
 
+  async function updateImportCandidate(batchId: number, payload: Record<string, unknown>) {
+    setBusy(true)
+    try {
+      await devLogin()
+      const result = await api.updateImportCandidate(batchId, payload)
+      setUploadResult(result)
+      setMessage(result.recognition_message || "Import candidate updated")
+      await loadImports()
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? error.message : "Не удалось обновить import candidate")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => { void loadImports() }, [])
 
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
@@ -1019,7 +1035,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
           </div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">{uploadResult.recognition_message || "No recognition message"}</div>
-          {uploadResult.requires_confirmation && uploadResult.candidate ? <ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} /> : null}
+          {uploadResult.requires_confirmation && uploadResult.candidate ? <ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /> : null}
           {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
           {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
         </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
@@ -1040,14 +1056,58 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   </div>
 }
 
-function ImportCandidateReview({ batch, busy, onConfirm, onReject }: { batch: ImportUploadResult; busy: boolean; onConfirm: (batchId: number) => Promise<void>; onReject: (batchId: number) => Promise<void> }) {
+function ImportCandidateReview({ batch, busy, onConfirm, onReject, onUpdate }: { batch: ImportUploadResult; busy: boolean; onConfirm: (batchId: number) => Promise<void>; onReject: (batchId: number) => Promise<void>; onUpdate: (batchId: number, payload: Record<string, unknown>) => Promise<void> }) {
   const candidate = batch.candidate
+  const [draft, setDraft] = useState({ title: "", started_at: "", distance_km: "", duration_seconds: "", average_pace_seconds_per_km: "", average_heart_rate_bpm: "" })
+
+  useEffect(() => {
+    if (!candidate) return
+    setDraft({
+      title: candidate.activity.title || "",
+      started_at: candidate.activity.started_at || "",
+      distance_km: candidate.activity.distance_km?.toString() || "",
+      duration_seconds: candidate.activity.duration_seconds?.toString() || "",
+      average_pace_seconds_per_km: candidate.activity.average_pace_seconds_per_km?.toString() || "",
+      average_heart_rate_bpm: candidate.activity.average_heart_rate_bpm?.toString() || "",
+    })
+  }, [candidate])
+
   if (!candidate) return null
+
+  function submitCorrection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const payload: Record<string, unknown> = {}
+    const trimmedTitle = draft.title.trim()
+    payload.title = trimmedTitle || null
+    payload.started_at = draft.started_at.trim() || null
+    for (const key of ["distance_km", "duration_seconds"] as const) {
+      const value = draft[key].trim()
+      if (value) payload[key] = Number(value)
+    }
+    for (const key of ["average_pace_seconds_per_km", "average_heart_rate_bpm"] as const) {
+      const value = draft[key].trim()
+      payload[key] = value ? Number(value) : null
+    }
+    void onUpdate(batch.id, payload)
+  }
+
   return <div className="grid gap-3 rounded-md border border-orange-400/25 bg-orange-400/10 p-3 text-xs">
     <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">Review required before analytics</p><p className="mt-1 text-orange-100/70">LLM output passed validation but will not create an activity until confirmed.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{candidate.confidence || "unknown"} confidence</Badge></div>
     <div className="grid gap-2 md:grid-cols-4"><Stat label="title" value={candidate.activity.title || "--"} /><Stat label="distance" value={candidate.activity.distance_km ? `${candidate.activity.distance_km} км` : "--"} /><Stat label="duration" value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label="pace" value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
     {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
     {candidate.estimated_fields.length ? <p className="text-[11px] text-orange-100/70">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
+    <form onSubmit={submitCorrection} className="grid gap-2 rounded-md border border-orange-400/20 bg-zinc-950/70 p-3">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-orange-100/70">Manual corrections before confirm</p>
+      <div className="grid gap-2 md:grid-cols-3">
+        <Field label="Title"><Input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></Field>
+        <Field label="Started at"><Input value={draft.started_at} onChange={(event) => setDraft((current) => ({ ...current, started_at: event.target.value }))} placeholder="2026-06-08T07:00:00+00:00" /></Field>
+        <Field label="Distance km"><Input type="number" step="0.01" value={draft.distance_km} onChange={(event) => setDraft((current) => ({ ...current, distance_km: event.target.value }))} /></Field>
+        <Field label="Duration sec"><Input type="number" step="1" value={draft.duration_seconds} onChange={(event) => setDraft((current) => ({ ...current, duration_seconds: event.target.value }))} /></Field>
+        <Field label="Pace sec/km"><Input type="number" step="1" value={draft.average_pace_seconds_per_km} onChange={(event) => setDraft((current) => ({ ...current, average_pace_seconds_per_km: event.target.value }))} /></Field>
+        <Field label="Avg HR bpm"><Input type="number" step="1" value={draft.average_heart_rate_bpm} onChange={(event) => setDraft((current) => ({ ...current, average_heart_rate_bpm: event.target.value }))} /></Field>
+      </div>
+      <div><Button type="submit" size="sm" variant="secondary" disabled={busy}>Save corrections</Button></div>
+    </form>
     <div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={() => onConfirm(batch.id)}>Confirm and create activity</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onReject(batch.id)}>Reject candidate</Button></div>
   </div>
 }

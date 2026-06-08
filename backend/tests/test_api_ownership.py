@@ -279,6 +279,75 @@ class ApiOwnershipTests(unittest.TestCase):
         self.assertIn("import_batches.id = 7", query)
         self.assertIn("import_batches.user_id = 42", query)
 
+    def test_import_candidate_patch_is_user_scoped_and_updates_candidate(self):
+        db = ImportRejectDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        attempt = SimpleNamespace(parsed_payload=valid_import_candidate_payload())
+
+        with patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt), patch.object(imports_routes, "log_audit_event") as audit:
+            response = TestClient(app).patch("/api/imports/7/candidate", json={"distance_km": 6.0, "duration_seconds": 1800, "average_pace_seconds_per_km": 300})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["requires_confirmation"])
+        self.assertIsNone(body["created_activity_id"])
+        self.assertEqual(body["candidate"]["activity"]["distance_km"], 6.0)
+        self.assertEqual(body["candidate"]["activity"]["duration_seconds"], 1800)
+        self.assertTrue(db.committed)
+        audit.assert_called_once()
+        query = compiled_query(db.scalar_queries[0])
+        self.assertIn("import_batches.id = 7", query)
+        self.assertIn("import_batches.user_id = 42", query)
+
+    def test_import_candidate_patch_rejects_non_pending_batch(self):
+        db = ImportRejectDb()
+        db.batch.status = "recognized"
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+
+        response = TestClient(app).patch("/api/imports/7/candidate", json={"distance_km": 6.0})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json(), {"code": "conflict", "message": "Import batch is not pending confirmation", "details": None})
+        self.assertFalse(db.committed)
+
+    def test_import_candidate_patch_rejects_missing_candidate_payload(self):
+        db = ImportRejectDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        attempt = SimpleNamespace(parsed_payload=None)
+
+        with patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt):
+            response = TestClient(app).patch("/api/imports/7/candidate", json={"distance_km": 6.0})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json(), {"code": "conflict", "message": "Import candidate payload is missing", "details": None})
+        self.assertFalse(db.committed)
+
+    def test_import_candidate_patch_noop_commits_without_audit(self):
+        db = ImportRejectDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        attempt = SimpleNamespace(parsed_payload=valid_import_candidate_payload())
+
+        with patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt), patch.object(imports_routes, "log_audit_event") as audit:
+            response = TestClient(app).patch("/api/imports/7/candidate", json={"distance_km": 5.0, "duration_seconds": 1500, "average_pace_seconds_per_km": 300})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(db.committed)
+        audit.assert_not_called()
+
+    def test_import_candidate_patch_rejects_invalid_corrected_payload(self):
+        db = ImportRejectDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        attempt = SimpleNamespace(parsed_payload=valid_import_candidate_payload())
+
+        with patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt), patch.object(imports_routes, "log_audit_event") as audit:
+            response = TestClient(app).patch("/api/imports/7/candidate", json={"average_pace_seconds_per_km": 600})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "bad_request")
+        self.assertIn("distance/time/pace", response.json()["message"])
+        self.assertFalse(db.committed)
+        audit.assert_not_called()
+
     def test_llm_upload_pending_confirmation_does_not_create_activity(self):
         db = ImportUploadDb()
         app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
