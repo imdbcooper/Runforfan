@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, type CalendarEvent, type CalendarResponse, type CsvImportResult, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -115,6 +115,18 @@ function numberOrNull(value: FormDataEntryValue | null) {
 
 function stringOrNull(value: FormDataEntryValue | null) {
   return value === null || value === "" ? null : String(value)
+}
+
+function apiErrorMessage(caught: unknown, fallback: string) {
+  if (!(caught instanceof Error)) return fallback
+  const body = caught.message.replace(/^\d+:\s*/, "")
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown }
+    if (typeof parsed.detail === "string") return parsed.detail
+  } catch {
+    return caught.message || fallback
+  }
+  return caught.message || fallback
 }
 
 function csvNumbers(value: FormDataEntryValue | null) {
@@ -1209,7 +1221,10 @@ function TrainingLoadRecovery() {
   const [weekly, setWeekly] = useState<TrainingLoadWeekly | null>(null)
   const [fitness, setFitness] = useState<TrainingLoadFitnessFatigue | null>(null)
   const [warnings, setWarnings] = useState<TrainingLoadWarning[]>([])
+  const [materialization, setMaterialization] = useState<TrainingLoadMaterializationStatus | null>(null)
+  const [materializationError, setMaterializationError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [materializing, setMaterializing] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -1218,23 +1233,31 @@ function TrainingLoadRecovery() {
     async function loadTrainingLoad() {
       setLoading(true)
       setError("")
+      setMaterializationError("")
       try {
         await devLogin()
-        const [nextDaily, nextWeekly, nextFitness, nextWarnings] = await Promise.all([
+        const materializationStatus = api.trainingLoadMaterialization(query).then((status) => ({ status, error: "" })).catch((caught) => {
+          console.warn(caught)
+          return { status: null, error: apiErrorMessage(caught, "Materialization status unavailable") }
+        })
+        const [nextDaily, nextWeekly, nextFitness, nextWarnings, nextMaterializationResult] = await Promise.all([
           api.trainingLoadDaily(query),
           api.trainingLoadWeekly(query),
           api.trainingLoadFitnessFatigue(query),
           api.trainingLoadWarnings(query),
+          materializationStatus,
         ])
         if (!cancelled) {
           setDaily(nextDaily)
           setWeekly(nextWeekly)
           setFitness(nextFitness)
           setWarnings(nextWarnings)
+          setMaterialization(nextMaterializationResult.status)
+          setMaterializationError(nextMaterializationResult.error)
         }
       } catch (caught) {
         console.error(caught)
-        if (!cancelled) setError("Training Load API недоступен")
+        if (!cancelled) setError(apiErrorMessage(caught, "Training Load API недоступен"))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -1250,17 +1273,40 @@ function TrainingLoadRecovery() {
   const recoveryDays = dailyPoints.filter((point) => point.recovery_day).slice(-7)
   const current = fitness?.current
   const method = fitness?.method || daily?.method || "unavailable"
+  const staleCount = (materialization?.missing_dates.length || 0) + (materialization?.stale_dates.length || 0)
+  const materializationRangeLabel = preset === "all" ? "default 28-day window" : "selected range"
+
+  async function backfillMaterialization() {
+    const query = analyticsQuery(preset, customFrom, customTo)
+    setMaterializing(true)
+    setError("")
+    try {
+      await devLogin()
+      const result = await api.backfillTrainingLoad(query)
+      setMaterialization(result.status)
+      setMaterializationError("")
+    } catch (caught) {
+      console.error(caught)
+      setError(apiErrorMessage(caught, "Daily load backfill не выполнен"))
+    } finally {
+      setMaterializing(false)
+    }
+  }
 
   return <div className="grid gap-4">
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Training Load & Recovery</p><h2 className="mt-2 text-lg font-semibold text-white">Fitness, fatigue and recovery signals</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Daily/weekly load, CTL/ATL/TSB heuristics, monotony, strain, hard-session spacing and recovery-day alerts. These metrics are coaching signals, not medical predictions.</p></div>
-        <div className="flex flex-wrap gap-2"><Badge>{daily?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{method}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+        <div className="flex flex-wrap gap-2"><Badge>{daily?.period.label || "loading"}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{method}</Badge>{materialization ? <Badge className={materialization.fresh ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-amber-400/40 bg-amber-400/10 text-amber-100"}>{materialization.fresh ? "materialized fresh" : `${staleCount} stale/missing`}</Badge> : materializationError ? <Badge className="border-amber-400/40 bg-amber-400/10 text-amber-100">materialization unavailable</Badge> : null}{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
         <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
         <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
         <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-xs text-zinc-500">
+        <span>Materialized daily loads ({materializationRangeLabel}): {materialization?.fresh ? "fresh" : materialization ? `${materialization.missing_dates.length} missing, ${materialization.stale_dates.length} stale` : materializationError ? `status unavailable: ${materializationError}` : "checking"}</span>
+        <Button type="button" variant="secondary" disabled={materializing || loading || Boolean(materialization?.fresh)} onClick={backfillMaterialization}>{materializing ? "Backfilling..." : `Backfill ${materializationRangeLabel}`}</Button>
       </div>
       {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
     </Card>

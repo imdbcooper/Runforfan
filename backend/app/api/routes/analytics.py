@@ -1,14 +1,14 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import User
-from app.schemas.common import AnalyticsInsightOut, AnalyticsSummaryOut, AnalyticsTimeseriesOut, TrainingLoadDailyOut, TrainingLoadFitnessFatigueOut, TrainingLoadWarningOut, TrainingLoadWeeklyOut, ZoneDistributionOut
+from app.schemas.common import AnalyticsInsightOut, AnalyticsSummaryOut, AnalyticsTimeseriesOut, TrainingLoadBackfillOut, TrainingLoadDailyOut, TrainingLoadFitnessFatigueOut, TrainingLoadMaterializationStatusOut, TrainingLoadWarningOut, TrainingLoadWeeklyOut, ZoneDistributionOut
 from app.services.analytics import analytics_insights, analytics_timeseries, user_analytics
 from app.services.auth import get_current_user
-from app.services.training_load import training_load_daily, training_load_fitness_fatigue, training_load_warning_list, training_load_weekly
+from app.services.training_load import backfill_daily_training_loads, daily_training_load_materialization_status, training_load_daily, training_load_fitness_fatigue, training_load_warning_list, training_load_weekly
 from app.services.zone_analytics import zone_distribution
 
 
@@ -48,6 +48,24 @@ def analytics_load_fitness_fatigue(from_date: date | None = Query(default=None, 
 @router.get("/load/warnings", response_model=list[TrainingLoadWarningOut])
 def analytics_load_warnings(from_date: date | None = Query(default=None, alias="from"), to_date: date | None = Query(default=None, alias="to"), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return training_load_warning_list(db, user, from_date, to_date)
+
+
+@router.get("/load/materialization", response_model=TrainingLoadMaterializationStatusOut)
+def analytics_load_materialization(from_date: date | None = Query(default=None, alias="from"), to_date: date | None = Query(default=None, alias="to"), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return daily_training_load_materialization_status(db, user, from_date, to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/load/backfill", response_model=TrainingLoadBackfillOut)
+def analytics_load_backfill(from_date: date | None = Query(default=None, alias="from"), to_date: date | None = Query(default=None, alias="to"), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        result = backfill_daily_training_loads(db, user, from_date, to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return result
 
 
 @router.get("/zones/distribution", response_model=ZoneDistributionOut)

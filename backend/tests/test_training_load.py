@@ -1,13 +1,14 @@
 import unittest
 from datetime import UTC, date, datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 try:
     from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlanWorkout, TrainingPlanWorkoutFeedback
     from app.services import training_load as training_load_service
-    from app.services.training_load import load_warnings, load_planned_workouts_with_feedback, sync_daily_training_loads, training_load_from_data
+    from app.services.training_load import daily_training_load_row_matches_point, load_warnings, load_planned_workouts_with_feedback, sync_daily_training_loads, training_load_from_data
 except ModuleNotFoundError as exc:
-    if exc.name in {"pydantic", "sqlalchemy"}:
+    if exc.name in {"pydantic", "pydantic_core", "sqlalchemy"}:
         raise unittest.SkipTest("Backend dependencies are required for training load tests") from exc
     raise
 
@@ -42,6 +43,57 @@ def make_workout(workout_id: int, activity_id: int, rpe: int | None = None, fati
     )
     workout.feedback = TrainingPlanWorkoutFeedback(id=workout_id, user_id=1, workout_id=workout_id, rpe=rpe, fatigue=fatigue, pain=False)
     return workout
+
+
+def make_daily_load_point(day: date, load: float = 42.0) -> dict[str, object]:
+    return {
+        "date": day,
+        "load": load,
+        "load_method": "aerobic_training_stress",
+        "load_methods": ["aerobic_training_stress"],
+        "distance_km": 5.0,
+        "duration_seconds": 3600,
+        "duration_minutes": 60.0,
+        "activity_ids": [1],
+        "activity_count": 1,
+        "srpe_count": 0,
+        "hard_session": False,
+        "hard_reasons": [],
+        "recovery_day": False,
+        "ctl": 1.0,
+        "atl": 2.0,
+        "tsb": -1.0,
+        "monotony_window_value": 1.1,
+        "strain_window_value": 42.0,
+    }
+
+
+def make_daily_load_row(point: dict[str, object]) -> DailyTrainingLoad:
+    return DailyTrainingLoad(
+        user_id=1,
+        date=point["date"],
+        load_value=point["load"],
+        method="manual",
+        duration_minutes=point["duration_minutes"],
+        activity_ids=point["activity_ids"],
+        ctl=point["ctl"],
+        atl=point["atl"],
+        tsb=point["tsb"],
+        monotony_window_value=point["monotony_window_value"],
+        strain_window_value=point["strain_window_value"],
+    )
+
+
+def import_analytics_route_dependencies(test_case: unittest.TestCase):
+    try:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.api.routes import analytics as analytics_routes
+    except ModuleNotFoundError as exc:
+        if exc.name in {"fastapi", "httpx", "starlette"}:
+            test_case.skipTest("FastAPI dependencies are required for analytics route tests")
+        raise
+    return FastAPI, TestClient, analytics_routes
 
 
 class TrainingLoadTests(unittest.TestCase):
@@ -206,6 +258,216 @@ class TrainingLoadTests(unittest.TestCase):
         self.assertEqual(row.method, "manual")
         self.assertEqual(row.duration_minutes, 60.0)
         self.assertEqual(row.activity_ids, [1])
+
+    def test_daily_training_load_row_compare_matches_on_the_fly_point(self):
+        activity = make_activity(1, datetime(2026, 6, 1, 8, tzinfo=UTC), duration_seconds=3600, stress=42)
+        point = training_load_from_data([activity], [], None, date(2026, 6, 1), date(2026, 6, 1))["daily"]["points"][0]
+        row = DailyTrainingLoad(
+            user_id=1,
+            date=point["date"],
+            load_value=point["load"],
+            method="manual",
+            duration_minutes=point["duration_minutes"],
+            activity_ids=point["activity_ids"],
+            ctl=point["ctl"],
+            atl=point["atl"],
+            tsb=point["tsb"],
+            monotony_window_value=point["monotony_window_value"],
+            strain_window_value=point["strain_window_value"],
+        )
+
+        self.assertTrue(daily_training_load_row_matches_point(row, point))
+        row.load_value = 99
+        self.assertFalse(daily_training_load_row_matches_point(row, point))
+
+    def test_materialization_status_reports_fresh_missing_and_stale_dates(self):
+        class FakeScalarResult:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def __iter__(self):
+                return iter(self.rows)
+
+        class FakeDb:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def scalars(self, _query):
+                return FakeScalarResult(self.rows)
+
+        user = type("User", (), {"id": 1})()
+        points = [make_daily_load_point(date(2026, 6, 1)), make_daily_load_point(date(2026, 6, 2), load=12.0)]
+        context = {"daily": {"period": {"from_date": date(2026, 6, 1), "to_date": date(2026, 6, 2), "label": "2026-06-01..2026-06-02"}, "points": points}}
+
+        with patch.object(training_load_service, "training_load_context", return_value=context):
+            fresh = training_load_service.daily_training_load_materialization_status(FakeDb([make_daily_load_row(points[0]), make_daily_load_row(points[1])]), user, date(2026, 6, 1), date(2026, 6, 2))
+            missing = training_load_service.daily_training_load_materialization_status(FakeDb([make_daily_load_row(points[0])]), user, date(2026, 6, 1), date(2026, 6, 2))
+            stale_row = make_daily_load_row(points[1])
+            stale_row.load_value = 99.0
+            stale = training_load_service.daily_training_load_materialization_status(FakeDb([make_daily_load_row(points[0]), stale_row]), user, date(2026, 6, 1), date(2026, 6, 2))
+
+        self.assertTrue(fresh["fresh"])
+        self.assertEqual(missing["missing_dates"], [date(2026, 6, 2)])
+        self.assertFalse(missing["fresh"])
+        self.assertEqual(stale["stale_dates"], [date(2026, 6, 2)])
+        self.assertFalse(stale["fresh"])
+
+    def test_backfill_rejects_invalid_or_unbounded_date_ranges(self):
+        user = type("User", (), {"id": 1})()
+        db = object()
+
+        with self.assertRaises(ValueError):
+            training_load_service.backfill_daily_training_loads(db, user, date(2026, 6, 2), date(2026, 6, 1))
+        with self.assertRaises(ValueError):
+            training_load_service.backfill_daily_training_loads(db, user, date(2025, 1, 1), date(2026, 2, 1))
+
+    def test_materialization_status_rejects_invalid_or_unbounded_date_ranges(self):
+        user = type("User", (), {"id": 1})()
+        db = object()
+
+        with self.assertRaises(ValueError):
+            training_load_service.daily_training_load_materialization_status(db, user, date(2026, 6, 2), date(2026, 6, 1))
+        with self.assertRaises(ValueError):
+            training_load_service.daily_training_load_materialization_status(db, user, date(2025, 1, 1), date(2026, 2, 1))
+
+    def test_backfill_flushes_synced_rows_before_status_check(self):
+        class FakeDb:
+            def __init__(self):
+                self.flushed = False
+
+            def flush(self):
+                self.flushed = True
+
+        user = type("User", (), {"id": 1})()
+        db = FakeDb()
+        status = {"period": {"from_date": date(2026, 6, 1), "to_date": date(2026, 6, 1), "label": "2026-06-01"}, "expected_days": 1, "persisted_days": 1, "missing_dates": [], "stale_dates": [], "fresh": True}
+
+        def fake_status(_db, _user, _from_date, _to_date):
+            self.assertTrue(db.flushed)
+            return status
+
+        with patch.object(training_load_service, "sync_daily_training_loads", return_value=1) as sync, patch.object(training_load_service, "daily_training_load_materialization_status", side_effect=fake_status) as materialization_status:
+            result = training_load_service.backfill_daily_training_loads(db, user, date(2026, 6, 1), date(2026, 6, 1))
+
+        self.assertEqual(result, {"synced_rows": 1, "status": status})
+        sync.assert_called_once_with(db, user, date(2026, 6, 1), date(2026, 6, 1))
+        materialization_status.assert_called_once_with(db, user, date(2026, 6, 1), date(2026, 6, 1))
+
+    def test_materialization_status_route_serializes_dates(self):
+        FastAPI, TestClient, analytics_routes = import_analytics_route_dependencies(self)
+        app = FastAPI()
+        app.include_router(analytics_routes.router, prefix="/api")
+        user = type("User", (), {"id": 1})()
+        db = object()
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[analytics_routes.get_current_user] = lambda: user
+        app.dependency_overrides[analytics_routes.get_db] = override_db
+        client = TestClient(app)
+        result = {
+            "period": {"from_date": date(2026, 6, 1), "to_date": date(2026, 6, 2), "label": "2026-06-01..2026-06-02"},
+            "expected_days": 2,
+            "persisted_days": 1,
+            "missing_dates": [date(2026, 6, 2)],
+            "stale_dates": [],
+            "fresh": False,
+        }
+
+        with patch.object(analytics_routes, "daily_training_load_materialization_status", return_value=result) as status:
+            response = client.get("/api/analytics/load/materialization?from=2026-06-01&to=2026-06-02")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["missing_dates"], ["2026-06-02"])
+        status.assert_called_once_with(db, user, date(2026, 6, 1), date(2026, 6, 2))
+
+    def test_backfill_route_commits_and_serializes_status(self):
+        FastAPI, TestClient, analytics_routes = import_analytics_route_dependencies(self)
+
+        class FakeDb:
+            def __init__(self):
+                self.committed = False
+
+            def commit(self):
+                self.committed = True
+
+        app = FastAPI()
+        app.include_router(analytics_routes.router, prefix="/api")
+        user = type("User", (), {"id": 1})()
+        db = FakeDb()
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[analytics_routes.get_current_user] = lambda: user
+        app.dependency_overrides[analytics_routes.get_db] = override_db
+        client = TestClient(app)
+        result = {
+            "synced_rows": 2,
+            "status": {
+                "period": {"from_date": date(2026, 6, 1), "to_date": date(2026, 6, 2), "label": "2026-06-01..2026-06-02"},
+                "expected_days": 2,
+                "persisted_days": 2,
+                "missing_dates": [],
+                "stale_dates": [],
+                "fresh": True,
+            },
+        }
+
+        with patch.object(analytics_routes, "backfill_daily_training_loads", return_value=result) as backfill:
+            response = client.post("/api/analytics/load/backfill?from=2026-06-01&to=2026-06-02", json={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"]["period"]["from_date"], "2026-06-01")
+        self.assertTrue(db.committed)
+        backfill.assert_called_once_with(db, user, date(2026, 6, 1), date(2026, 6, 2))
+
+    def test_backfill_route_returns_400_for_unbounded_range(self):
+        FastAPI, TestClient, analytics_routes = import_analytics_route_dependencies(self)
+
+        class FakeDb:
+            def commit(self):
+                raise AssertionError("invalid backfill ranges must not commit")
+
+        app = FastAPI()
+        app.include_router(analytics_routes.router, prefix="/api")
+        user = type("User", (), {"id": 1})()
+        db = FakeDb()
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[analytics_routes.get_current_user] = lambda: user
+        app.dependency_overrides[analytics_routes.get_db] = override_db
+        client = TestClient(app)
+
+        with patch.object(analytics_routes, "backfill_daily_training_loads", side_effect=ValueError("too many days")):
+            response = client.post("/api/analytics/load/backfill?from=2025-01-01&to=2026-02-01", json={})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "too many days")
+
+    def test_materialization_route_returns_400_for_unbounded_range(self):
+        FastAPI, TestClient, analytics_routes = import_analytics_route_dependencies(self)
+
+        app = FastAPI()
+        app.include_router(analytics_routes.router, prefix="/api")
+        user = type("User", (), {"id": 1})()
+        db = object()
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[analytics_routes.get_current_user] = lambda: user
+        app.dependency_overrides[analytics_routes.get_db] = override_db
+        client = TestClient(app)
+
+        with patch.object(analytics_routes, "daily_training_load_materialization_status", side_effect=ValueError("too many days")):
+            response = client.get("/api/analytics/load/materialization?from=2025-01-01&to=2026-02-01")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "too many days")
 
 
 if __name__ == "__main__":

@@ -381,6 +381,20 @@ class TrainingLoadWarningOut(BaseModel):
     threshold: float | None = None
 
 
+class TrainingLoadMaterializationStatusOut(BaseModel):
+    period: AnalyticsPeriodOut
+    expected_days: int
+    persisted_days: int
+    missing_dates: list[Date] = Field(default_factory=list)
+    stale_dates: list[Date] = Field(default_factory=list)
+    fresh: bool
+
+
+class TrainingLoadBackfillOut(BaseModel):
+    synced_rows: int
+    status: TrainingLoadMaterializationStatusOut
+
+
 class PerformanceResultCreate(BaseModel):
     result_type: str = Field(default="race", pattern="^(race|time_trial)$")
     name: str = Field(default="Race result", min_length=1, max_length=255)

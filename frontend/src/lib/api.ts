@@ -752,6 +752,20 @@ export type TrainingLoadWarning = {
   threshold: number | null
 }
 
+export type TrainingLoadMaterializationStatus = {
+  period: AnalyticsPeriod
+  expected_days: number
+  persisted_days: number
+  missing_dates: string[]
+  stale_dates: string[]
+  fresh: boolean
+}
+
+export type TrainingLoadBackfill = {
+  synced_rows: number
+  status: TrainingLoadMaterializationStatus
+}
+
 export type ZoneDistributionItem = {
   zone_key: string
   label: string
@@ -988,6 +1002,8 @@ export const api = {
   trainingLoadWeekly: (params = "") => request<TrainingLoadWeekly>(`/analytics/load/weekly${params}`),
   trainingLoadFitnessFatigue: (params = "") => request<TrainingLoadFitnessFatigue>(`/analytics/load/fitness-fatigue${params}`),
   trainingLoadWarnings: (params = "") => request<TrainingLoadWarning[]>(`/analytics/load/warnings${params}`),
+  trainingLoadMaterialization: (params = "") => request<TrainingLoadMaterializationStatus>(`/analytics/load/materialization${params}`),
+  backfillTrainingLoad: (params = "") => request<TrainingLoadBackfill>(`/analytics/load/backfill${params}`, { method: "POST", body: "{}" }),
   zoneDistribution: (params = "") => request<ZoneDistribution>(`/analytics/zones/distribution${params}`),
   performanceResults: (params = "") => request<PerformanceResult[]>(`/performance/results${params}`),
   createPerformanceResult: (payload: Record<string, unknown>) => request<PerformanceResult>("/performance/results", { method: "POST", body: JSON.stringify(payload) }),

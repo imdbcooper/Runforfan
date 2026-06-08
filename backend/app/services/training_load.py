@@ -14,6 +14,7 @@ from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_RE
 
 LOAD_LOOKBACK_DAYS = 84
 DEFAULT_PERIOD_DAYS = 28
+MAX_DAILY_TRAINING_LOAD_BACKFILL_DAYS = 366
 RECOVERY_LOAD_THRESHOLD = 10.0
 SUPPORT_LOAD_FACTORS = {
     "strength": 0.75,
@@ -423,6 +424,84 @@ def sync_daily_training_loads(db: Session, user: User, from_date: date, to_date:
         row.computed_at = datetime.now(UTC)
         synced_count += 1
     return synced_count
+
+
+def _same_float(left: float | None, right: float | None, tolerance: float = 0.000001) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return abs(float(left) - float(right)) <= tolerance
+
+
+def daily_training_load_row_matches_point(row: DailyTrainingLoad, point: dict[str, object]) -> bool:
+    return (
+        _same_float(row.load_value, float(point["load"]))
+        and row.method == persisted_load_method(str(point["load_method"]))
+        and _same_float(row.duration_minutes, float(point["duration_minutes"]))
+        and sorted(int(activity_id) for activity_id in (row.activity_ids or [])) == sorted(int(activity_id) for activity_id in point["activity_ids"])
+        and _same_float(row.ctl, float(point["ctl"]) if point["ctl"] is not None else None)
+        and _same_float(row.atl, float(point["atl"]) if point["atl"] is not None else None)
+        and _same_float(row.tsb, float(point["tsb"]) if point["tsb"] is not None else None)
+        and _same_float(row.monotony_window_value, float(point["monotony_window_value"]) if point["monotony_window_value"] is not None else None)
+        and _same_float(row.strain_window_value, float(point["strain_window_value"]) if point["strain_window_value"] is not None else None)
+    )
+
+
+def validate_daily_training_load_backfill_range(start_date: date, end_date: date) -> None:
+    if end_date < start_date:
+        raise ValueError("to_date must be on or after from_date")
+    if (end_date - start_date).days + 1 > MAX_DAILY_TRAINING_LOAD_BACKFILL_DAYS:
+        raise ValueError(f"daily training load backfill is limited to {MAX_DAILY_TRAINING_LOAD_BACKFILL_DAYS} days")
+
+
+def materialization_period(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> tuple[date, date]:
+    end_date = to_date
+    if end_date is None:
+        timezone = profile_timezone(db, user)
+        end_date = datetime.now(timezone).date()
+    start_date = from_date or end_date - timedelta(days=DEFAULT_PERIOD_DAYS - 1)
+    validate_daily_training_load_backfill_range(start_date, end_date)
+    return start_date, end_date
+
+
+def daily_training_load_materialization_status(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    start_date, end_date = materialization_period(db, user, from_date, to_date)
+    context = training_load_context(db, user, start_date, end_date)
+    points = context["daily"]["points"]
+    expected_dates = [point["date"] for point in points]
+    rows = {
+        row.date: row
+        for row in db.scalars(
+            select(DailyTrainingLoad)
+            .where(DailyTrainingLoad.user_id == user.id, DailyTrainingLoad.date.in_(expected_dates))
+            .order_by(DailyTrainingLoad.date.asc())
+        )
+    }
+    missing_dates: list[date] = []
+    stale_dates: list[date] = []
+    for point in points:
+        row = rows.get(point["date"])
+        if row is None:
+            missing_dates.append(point["date"])
+            continue
+        if not daily_training_load_row_matches_point(row, point):
+            stale_dates.append(point["date"])
+    period = context["daily"]["period"]
+    return {
+        "period": period,
+        "expected_days": len(points),
+        "persisted_days": len(rows),
+        "missing_dates": missing_dates,
+        "stale_dates": stale_dates,
+        "fresh": not missing_dates and not stale_dates,
+    }
+
+
+def backfill_daily_training_loads(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
+    start_date, end_date = materialization_period(db, user, from_date, to_date)
+    synced_rows = sync_daily_training_loads(db, user, start_date, end_date)
+    db.flush()
+    status = daily_training_load_materialization_status(db, user, start_date, end_date)
+    return {"synced_rows": synced_rows, "status": status}
 
 
 def sync_daily_training_loads_for_dates(db: Session, user: User, changed_dates: list[date]) -> int:
