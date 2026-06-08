@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type CalendarEvent, type CalendarResponse, type DashboardSummary, devLogin, type ImportBatch, type ImportUploadResult, type LlmProvider, type LlmProviderTest, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -2762,24 +2762,128 @@ function PlanWeek({ summary, candidatesByWorkout, candidateErrors, feedbackDraft
 }
 
 function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onChanged: () => Promise<void> }) {
+  const [busyProvider, setBusyProvider] = useState<number | null>(null)
+  const [message, setMessage] = useState("")
+  const [testResults, setTestResults] = useState<Record<number, LlmProviderTest>>({})
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries())
-    await api.createProvider({ ...data, is_default: data.is_default === "on" })
-    event.currentTarget.reset()
-    await onChanged()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    setMessage("")
+    try {
+      await api.createProvider({
+        provider: stringOrNull(data.get("provider")) || "openai",
+        display_name: stringOrNull(data.get("display_name")) || "LLM provider",
+        base_url: stringOrNull(data.get("base_url")),
+        model: stringOrNull(data.get("model")) || "gpt-4o-mini",
+        api_key: stringOrNull(data.get("api_key")),
+        is_default: data.get("is_default") === "on",
+      })
+      form.reset()
+      setMessage("Provider saved. API key was stored server-side and will not be returned.")
+      await onChanged()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save provider")
+    }
   }
+
+  async function updateExisting(event: FormEvent<HTMLFormElement>, provider: LlmProvider) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const nextKey = stringOrNull(data.get("api_key"))
+    const payload: Record<string, unknown> = {
+      display_name: stringOrNull(data.get("display_name")) || provider.display_name,
+      base_url: stringOrNull(data.get("base_url")),
+      model: stringOrNull(data.get("model")) || provider.model,
+    }
+    if (data.get("clear_api_key") === "on") payload.api_key = null
+    else if (nextKey) payload.api_key = nextKey
+    setBusyProvider(provider.id)
+    setMessage("")
+    try {
+      await api.updateProvider(provider.id, payload)
+      setMessage(`Updated ${provider.display_name}.`)
+      await onChanged()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update provider")
+    } finally {
+      setBusyProvider(null)
+    }
+  }
+
+  async function setDefault(provider: LlmProvider) {
+    setBusyProvider(provider.id)
+    setMessage("")
+    try {
+      await api.setDefaultProvider(provider.id)
+      setMessage(`${provider.display_name} is now default.`)
+      await onChanged()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to set default provider")
+    } finally {
+      setBusyProvider(null)
+    }
+  }
+
+  async function testProvider(provider: LlmProvider) {
+    setBusyProvider(provider.id)
+    setMessage("")
+    try {
+      const result = await api.testProvider(provider.id)
+      setTestResults((current) => ({ ...current, [provider.id]: result }))
+      setMessage(`${provider.display_name}: ${result.status}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to test provider")
+    } finally {
+      setBusyProvider(null)
+    }
+  }
+
+  async function deleteExisting(provider: LlmProvider) {
+    setBusyProvider(provider.id)
+    setMessage("")
+    try {
+      await api.deleteProvider(provider.id)
+      setMessage(`Deleted ${provider.display_name}.`)
+      await onChanged()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete provider")
+    } finally {
+      setBusyProvider(null)
+    }
+  }
+
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <Card><CardHeader><CardTitle>Add LLM provider</CardTitle><Badge>OpenAI / Anthropic</Badge></CardHeader><form onSubmit={submit} className="grid gap-3 p-4">
-      <Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select>
-      <Input name="display_name" placeholder="Display name" required />
-      <Input name="base_url" placeholder="Base URL optional" />
-      <Input name="model" placeholder="Model" required />
-      <Input name="api_key" placeholder="API key" type="password" />
+    <Card><CardHeader><div><CardTitle>Add LLM provider</CardTitle><p className="text-xs text-zinc-500">OpenAI-compatible and Anthropic providers for recognition and explanations. Keys are never returned to the frontend.</p></div><Badge>6.17</Badge></CardHeader><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
+      <Field label="Provider"><Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select></Field>
+      <Field label="Display name"><Input name="display_name" placeholder="Display name" required /></Field>
+      <Field label="Base URL"><Input name="base_url" placeholder="Full endpoint URL optional" /></Field>
+      <Field label="Model"><Input name="model" placeholder="gpt-4o-mini, claude-3-5-sonnet..." required /></Field>
+      <Field label="API key"><Input name="api_key" placeholder="API key" type="password" /></Field>
       <label className="flex items-center gap-2 text-xs text-zinc-400"><input name="is_default" type="checkbox" /> default provider</label>
       <Button type="submit">Save provider</Button>
+      {message ? <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">{message}</p> : null}
     </form></Card>
-    <Card><CardHeader><CardTitle>Providers</CardTitle><Badge>{providers.length} total</Badge></CardHeader><div className="divide-y divide-zinc-800">{providers.map((provider) => <div key={provider.id} className="flex items-center justify-between gap-3 px-4 py-3 text-xs"><div><p className="font-medium text-white">{provider.display_name}</p><p className="text-zinc-500">{provider.provider} · {provider.model}</p></div><div className="flex items-center gap-2">{provider.is_default && <Badge>default</Badge>}<span className="text-zinc-500">key: {provider.has_api_key ? "encrypted" : "none"}</span></div></div>)}</div></Card>
+    <Card><CardHeader><div><CardTitle>Providers</CardTitle><p className="text-xs text-zinc-500">Edit, test with a safe prompt, set default or disable providers.</p></div><Badge>{providers.length} total</Badge></CardHeader><div className="divide-y divide-zinc-800">{providers.map((provider) => {
+      const result = testResults[provider.id]
+      const busy = busyProvider === provider.id
+      return <div key={provider.id} className="grid gap-3 px-4 py-3 text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="font-medium text-white">{provider.display_name}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{provider.id}</span></p><p className="mt-1 text-zinc-500">{provider.provider} · {provider.model}</p></div>
+          <div className="flex flex-wrap gap-1">{provider.is_default && <Badge>default</Badge>}<Badge className={provider.has_api_key ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-orange-400/30 bg-orange-400/10 text-orange-200"}>key {provider.has_api_key ? "stored" : "missing"}</Badge><Badge className={provider.supports_vision ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-zinc-800 bg-zinc-950 text-zinc-500"}>vision {provider.supports_vision ? "likely" : "unknown"}</Badge></div>
+        </div>
+        <form onSubmit={(event) => updateExisting(event, provider)} className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <Field label="Name"><Input name="display_name" defaultValue={provider.display_name} /></Field>
+          <Field label="Base URL"><Input name="base_url" defaultValue={provider.base_url || ""} placeholder="default endpoint" /></Field>
+          <Field label="Model"><Input name="model" defaultValue={provider.model} /></Field>
+          <Field label="New API key"><Input name="api_key" type="password" placeholder={provider.has_api_key ? "leave blank to keep" : "optional"} /></Field>
+          <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="clear_api_key" type="checkbox" /> clear key</label>
+          <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-3"><Button size="sm" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy || provider.is_default} onClick={() => setDefault(provider)}>Set default</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => testProvider(provider)}>{busy ? "Testing..." : "Test"}</Button><Button size="sm" type="button" variant="secondary" disabled={busy} onClick={() => deleteExisting(provider)}>Delete</Button></div>
+        </form>
+        {result ? <div className={`rounded-md border px-2 py-1.5 text-xs ${result.ok ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/20 bg-orange-400/10 text-orange-100"}`}>{result.status} · {result.response_ms ?? "--"} ms · vision {result.supports_vision ? "likely" : "unknown"}<div className="mt-1 text-zinc-500">{result.message}</div></div> : null}
+      </div>
+    })}{!providers.length ? <p className="p-4 text-xs text-zinc-500">No active providers yet.</p> : null}</div></Card>
   </div>
 }
 

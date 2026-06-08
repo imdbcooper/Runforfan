@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
 from app.models import ImportRecognitionAttempt, LlmProviderSetting, User
+from app.services.llm_providers import provider_endpoint_url
 from app.services.secrets import decrypt_secret
 
 
@@ -131,7 +132,7 @@ def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     response = httpx.post(
-        provider.base_url or "https://api.openai.com/v1/chat/completions",
+        provider_endpoint_url(provider, settings),
         headers=headers,
         timeout=settings.llm_timeout,
         json={"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0},
@@ -161,7 +162,7 @@ def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settin
     if api_key:
         headers["x-api-key"] = api_key
     response = httpx.post(
-        provider.base_url or "https://api.anthropic.com/v1/messages",
+        provider_endpoint_url(provider, settings),
         headers=headers,
         timeout=settings.llm_timeout,
         json={"model": provider.model, "max_tokens": 4096, "temperature": 0, "messages": [{"role": "user", "content": content}]},

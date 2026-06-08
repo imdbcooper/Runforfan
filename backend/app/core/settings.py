@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-change-me"
     telegram_bot_token: str | None = None
     llm_timeout: int = 45
+    allow_private_llm_base_urls: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",

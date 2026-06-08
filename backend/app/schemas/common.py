@@ -606,6 +606,14 @@ class LlmProviderCreate(BaseModel):
     is_default: bool = False
 
 
+class LlmProviderUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    base_url: str | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    api_key: str | None = None
+    is_default: bool | None = None
+
+
 class LlmProviderOut(BaseModel):
     id: int
     provider: str
@@ -615,9 +623,20 @@ class LlmProviderOut(BaseModel):
     is_default: bool
     is_active: bool
     has_api_key: bool
+    supports_vision: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class LlmProviderTestOut(BaseModel):
+    ok: bool
+    status: str
+    provider: str
+    model: str
+    response_ms: int | None = None
+    supports_vision: bool
+    message: str
 
 
 class PlanGenerateRequest(BaseModel):

@@ -29,7 +29,18 @@ export type LlmProvider = {
   model: string
   is_default: boolean
   has_api_key: boolean
+  supports_vision: boolean
   created_at: string
+}
+
+export type LlmProviderTest = {
+  ok: boolean
+  status: string
+  provider: string
+  model: string
+  response_ms: number | null
+  supports_vision: boolean
+  message: string
 }
 
 export type ImportBatch = {
@@ -940,6 +951,9 @@ export const api = {
   attachWorkoutActivity: (workoutId: number, activityId: number) => request<PlanWorkout>(`/planning/workouts/${workoutId}/attach-activity`, { method: "POST", body: JSON.stringify({ activity_id: activityId }) }),
   providers: () => request<LlmProvider[]>("/settings/llm-providers"),
   createProvider: (payload: Record<string, unknown>) => request<LlmProvider>("/settings/llm-providers", { method: "POST", body: JSON.stringify(payload) }),
+  updateProvider: (id: number, payload: Record<string, unknown>) => request<LlmProvider>(`/settings/llm-providers/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  setDefaultProvider: (id: number) => request<LlmProvider>(`/settings/llm-providers/${id}/default`, { method: "POST", body: "{}" }),
+  testProvider: (id: number) => request<LlmProviderTest>(`/settings/llm-providers/${id}/test`, { method: "POST", body: "{}" }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
   previewPlan: (payload: Record<string, unknown>) => request<PlanBuilderPreview>("/planning/preview", { method: "POST", body: JSON.stringify(payload) }),
   generatePlan: (payload: Record<string, unknown>) => request<Plan>("/planning/generate", { method: "POST", body: JSON.stringify(payload) }),
