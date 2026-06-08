@@ -82,6 +82,11 @@ function formatDuration(seconds?: number | null) {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`
 }
 
+function formatOptionalNumber(value?: number | null) {
+  if (value === null || value === undefined) return "--"
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
 function isSupportWorkoutType(type?: string | null) {
   return SUPPORT_WORKOUT_TYPES.has(type || "")
 }
@@ -392,6 +397,20 @@ function loadMethodLabel(method: string) {
     unavailable: "unavailable",
   }
   return labels[method] || method.replace(/_/g, " ")
+}
+
+function calculationSourceReference(calculation?: { source_reference?: string | null } | null) {
+  return calculation?.source_reference || "source reference unavailable"
+}
+
+function calculationMetadata(calculation?: { method?: string | null; confidence?: string | null; source_reference?: string | null } | null) {
+  const parts = [calculation?.confidence, calculation?.method, calculation?.source_reference].filter(Boolean)
+  return parts.length ? parts.join(" · ") : "source reference unavailable"
+}
+
+function trainingLoadMethodMetadata(method?: string | null, methods?: string[] | null) {
+  const labels = methods?.length ? methods.map(loadMethodLabel).join(", ") : loadMethodLabel(method || "unavailable")
+  return labels || "load source unavailable"
 }
 
 function App() {
@@ -946,7 +965,7 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Calculations and source metadata</p><Badge>{derived.length} metrics</Badge></div>
         {derived.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p></div>)}
+          {derived.map((metric) => <div key={metric.metric_key} className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"><p className="font-medium text-white">{activityMetricLabel(metric.metric_key)}: {formatActivityMetric(metric)}</p><p className="mt-1 text-[11px] text-zinc-500">{metric.method} · {metric.source_reference || "no source"}</p><p className="mt-1 font-mono text-[10px] text-zinc-600">computed {new Date(metric.computed_at).toLocaleString("ru-RU")} · hash {metric.input_hash.slice(0, 8)}</p></div>)}
         </div> : <p className="text-zinc-500">No derived metrics yet.</p>}
       </div>
     </div>
@@ -1620,12 +1639,12 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
       <MetricCard label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}/км`} hint="total duration / total distance" explainer={<CalculationExplainer><p>Weighted pace uses total moving duration divided by total distance, so short outlier runs do not distort the average like a simple mean would.</p></CalculationExplainer>} />
       <MetricCard label="avg HR" value={summary?.average_heart_rate_bpm || "--"} hint="duration-weighted" explainer={<CalculationExplainer><p>Average HR is weighted by activity duration. Longer runs contribute more than short sessions.</p></CalculationExplainer>} />
       <MetricCard label="load" value={summary?.training_load ?? "--"} hint={summary?.load_method || "unavailable"} explainer={<CalculationExplainer><p>Load sums aerobic training stress when available. If devices do not provide stress values, the card stays unavailable instead of guessing.</p></CalculationExplainer>} />
-      <MetricCard label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} hint={vdot ? `${vdot.confidence} · ${vdot.method}` : vo2 ? `${vo2.confidence} · ${vo2.method}` : "needs race/device data"} explainer={<CalculationExplainer><p>VDOT is derived from race-like best efforts. Manual or device VO2max is shown as fallback and keeps its own method and confidence.</p></CalculationExplainer>} />
+      <MetricCard label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} hint={vdot ? `${vdot.confidence} · ${vdot.method}` : vo2 ? `${vo2.confidence} · ${vo2.method}` : "needs race/device data"} explainer={<CalculationExplainer><p>VDOT is derived from race-like best efforts. Manual or device VO2max is shown as fallback and keeps its own method and confidence.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(vdot || vo2)}</p></CalculationExplainer>} />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
       <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} km total</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} км</strong></div>) : <p className="p-4 text-xs text-zinc-500">Нет месячных данных.</p>}</div></Card>
-      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p></div></div></Card>
+      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p><p className="mt-1 text-[11px] text-zinc-600">{vdot ? calculationSourceReference(vdot) : "source appears after an eligible effort"}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p><p className="mt-1 text-[11px] text-zinc-600">{vo2 ? calculationSourceReference(vo2) : "manual/device source appears after measurement"}</p></div></div></Card>
     </div>
 
     <div className="grid gap-3 xl:grid-cols-3">
@@ -1635,7 +1654,7 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{effort.target_distance_km} км</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
+      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white">{effort.target_distance_km} км</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p>{effort.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(effort.estimated_vdot)}</p> : null}</div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
       <Card><CardHeader><CardTitle>Insights</CardTitle><Badge>{insights.length} notes</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insight.title}</p><div className="flex gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{insight.confidence}</Badge><Badge className={insight.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{insight.severity}</Badge></div></div><p className="mt-1 leading-5 text-zinc-400">{insight.message}</p>{insight.evidence.length ? <p className="mt-1 text-[11px] text-zinc-600">evidence: {insight.evidence.slice(0, 2).map((item) => `${String(item.metric || item.source || "signal")}=${String(item.value ?? item.method ?? item.source ?? "ok")}`).join(" · ")}</p> : null}{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div></Card>
     </div>
 
@@ -1743,9 +1762,9 @@ function TrainingLoadRecovery() {
     </Card>
 
     <div className="grid gap-3 md:grid-cols-4">
-      <MetricCard label="CTL" value={current?.ctl.value ?? "--"} hint={current?.ctl.method || "42-day EWMA"} explainer={<CalculationExplainer><p>Chronic Training Load is a long-window EWMA of daily load. It approximates fitness trend, not readiness by itself.</p></CalculationExplainer>} />
-      <MetricCard label="ATL" value={current?.atl.value ?? "--"} hint={current?.atl.method || "7-day EWMA"} explainer={<CalculationExplainer><p>Acute Training Load reacts faster to recent sessions. A sharp ATL rise can indicate short-term fatigue.</p></CalculationExplainer>} />
-      <MetricCard label="TSB" value={current?.tsb.value ?? "--"} hint={current?.tsb.method || "CTL - ATL"} explainer={<CalculationExplainer><p>Training Stress Balance is CTL minus ATL. Negative values often mean higher recent fatigue; positive values often mean fresher legs.</p></CalculationExplainer>} />
+      <MetricCard label="CTL" value={current?.ctl.value ?? "--"} hint={current?.ctl ? `${current.ctl.method} · ${current.ctl.confidence}` : "42-day EWMA"} explainer={<CalculationExplainer><p>Chronic Training Load is a long-window EWMA of daily load. It approximates fitness trend, not readiness by itself.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(current?.ctl)}</p></CalculationExplainer>} />
+      <MetricCard label="ATL" value={current?.atl.value ?? "--"} hint={current?.atl ? `${current.atl.method} · ${current.atl.confidence}` : "7-day EWMA"} explainer={<CalculationExplainer><p>Acute Training Load reacts faster to recent sessions. A sharp ATL rise can indicate short-term fatigue.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(current?.atl)}</p></CalculationExplainer>} />
+      <MetricCard label="TSB" value={current?.tsb.value ?? "--"} hint={current?.tsb ? `${current.tsb.method} · ${current.tsb.confidence}` : "CTL - ATL"} explainer={<CalculationExplainer><p>Training Stress Balance is CTL minus ATL. Negative values often mean higher recent fatigue; positive values often mean fresher legs.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(current?.tsb)}</p></CalculationExplainer>} />
       <MetricCard label="method" value={methodLabel} hint="load source" />
       <MetricCard label="monotony" value={latestWeek?.monotony ?? "--"} explainer={<CalculationExplainer><p>Monotony compares average daily load with day-to-day variation. Higher values can flag repetitive loading.</p></CalculationExplainer>} />
       <MetricCard label="strain" value={latestWeek?.strain ?? "--"} explainer={<CalculationExplainer><p>Strain combines weekly load with monotony. It highlights weeks that are both heavy and repetitive.</p></CalculationExplainer>} />
@@ -1902,7 +1921,7 @@ function LoadBarChart({ title, points, label, value, suffix }: { title: string; 
     <div className="grid gap-2 p-4">
       {points.length ? points.map((point) => {
         const numeric = value(point)
-        return <div key={point.date} className="grid grid-cols-[5rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{label(point)}</span><div className="h-2 rounded bg-zinc-900"><div className={cn("h-full rounded", point.hard_session ? "bg-orange-400" : point.recovery_day ? "bg-zinc-500" : "bg-orange-300/70")} style={{ width: `${Math.max(4, numeric / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{numeric.toFixed(1)} {suffix}</strong></div>
+        return <div key={point.date} className="grid grid-cols-[5rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{label(point)}</span><div className="h-2 rounded bg-zinc-900"><div className={cn("h-full rounded", point.hard_session ? "bg-orange-400" : point.recovery_day ? "bg-zinc-500" : "bg-orange-300/70")} style={{ width: `${Math.max(4, numeric / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{numeric.toFixed(1)} {suffix}</strong><span className="col-span-full text-[10px] text-zinc-600">source: {trainingLoadMethodMetadata(point.load_method, point.load_methods)}</span></div>
       }) : <p className="text-xs text-zinc-500">Нет daily load points.</p>}
     </div>
   </Card>
@@ -1913,7 +1932,7 @@ function WeeklyLoadChart({ points }: { points: TrainingLoadWeekly["points"] }) {
   return <Card>
     <CardHeader><CardTitle>Weekly load</CardTitle><Badge>{points.length} weeks</Badge></CardHeader>
     <div className="grid gap-2 p-4">
-      {points.length ? points.map((point) => <div key={point.week_start} className="grid grid-cols-[6rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{formatDate(point.week_start)}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, point.load / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{point.load.toFixed(1)} au</strong></div>) : <p className="text-xs text-zinc-500">Нет weekly load points.</p>}
+      {points.length ? points.map((point) => <div key={point.week_start} className="grid grid-cols-[6rem_1fr_5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{formatDate(point.week_start)}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, point.load / max * 100)}%` }} /></div><strong className="text-right text-zinc-300">{point.load.toFixed(1)} au</strong><span className="col-span-full text-[10px] text-zinc-600">source: {loadMethodLabel(point.load_method)}</span></div>) : <p className="text-xs text-zinc-500">Нет weekly load points.</p>}
     </div>
   </Card>
 }
@@ -1936,7 +1955,7 @@ function TrainingLoadWarnings({ warnings }: { warnings: TrainingLoadWarning[] })
   return <Card>
     <CardHeader><CardTitle>Load alerts</CardTitle><Badge>{warnings.length} signals</Badge></CardHeader>
     <div className="grid gap-2 p-4">
-      {warnings.map((warning) => <div key={`${warning.title}-${warning.metric || "signal"}`} className={cn("rounded-md border px-3 py-2 text-xs", signalClass(warning.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{warning.title}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{warning.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-300">{warning.message}</p>{warning.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{warning.reasons.slice(0, 3).join(" · ")}</p> : null}</div>)}
+      {warnings.map((warning) => <div key={`${warning.title}-${warning.metric || "signal"}`} className={cn("rounded-md border px-3 py-2 text-xs", signalClass(warning.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{warning.title}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{warning.severity}</Badge></div><p className="mt-1 leading-5 text-zinc-300">{warning.message}</p>{warning.metric ? <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">{warning.metric}: {formatOptionalNumber(warning.value)} / threshold {formatOptionalNumber(warning.threshold)}</p> : null}{warning.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{warning.reasons.slice(0, 3).join(" · ")}</p> : null}</div>)}
       {!warnings.length ? <p className="text-xs text-zinc-500">Нет load alerts.</p> : null}
     </div>
   </Card>
@@ -2095,7 +2114,7 @@ function PerformanceAnalytics() {
       <Card>
         <CardHeader><div><CardTitle>VDOT source</CardTitle><p className="text-xs text-zinc-500">Source selection prefers recent race/time trial results with reliable conditions.</p></div><Badge className={confidenceClass(vdot?.confidence)}>{vdot?.confidence || "low"}</Badge></CardHeader>
         <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_1fr]">
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-3xl font-semibold text-white">{vdot?.estimate?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot?.estimate ? `${vdot.estimate.method} · ${vdot.estimate.source_reference}` : "No eligible race/time trial yet."}</p></div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-3xl font-semibold text-white">{vdot?.estimate?.value ?? "--"}</p><p className="mt-1 text-zinc-500">{vdot?.estimate ? calculationMetadata(vdot.estimate) : "No eligible race/time trial yet."}</p></div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Selected result</p><p className="mt-1 text-lg font-semibold text-white">{source?.name || "--"}</p><p className="mt-1 text-zinc-500">{source ? `${source.distance_km.toFixed(2)} км · ${formatDuration(source.duration_seconds)} · ${source.age_days ?? 0} days old` : "Add a result >= 3 km."}</p>{source?.noisy_reasons.length ? <p className="mt-2 text-orange-200">Noisy: {source.noisy_reasons.join(" · ")}</p> : null}</div>
         </div>
       </Card>
@@ -2124,7 +2143,7 @@ function PerformanceResultsTable({ title, results }: { title: string; results: P
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Result</th><th>Date</th><th>Distance</th><th>Time</th><th>Pace</th><th>VDOT</th><th>Signal</th></tr></thead>
-        <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} км</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}/км</td><td>{result.estimated_vdot?.value ?? "--"}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
+        <tbody>{results.map((result) => <tr key={result.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-medium text-white">{result.name}<div className="text-[11px] text-zinc-500">#{result.id} · {result.source} · {result.terrain}</div></td><td className="text-zinc-400">{formatDateTime(result.result_date)}</td><td>{result.distance_km.toFixed(2)} км</td><td>{formatDuration(result.duration_seconds)}</td><td>{formatPace(result.pace_seconds_per_km)}/км</td><td>{result.estimated_vdot?.value ?? "--"}{result.estimated_vdot ? <div className="mt-1 max-w-[13rem] text-[10px] text-zinc-600">{calculationMetadata(result.estimated_vdot)}</div> : null}</td><td><Badge className={result.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : confidenceClass(result.estimated_vdot?.confidence)}>{result.is_noisy ? "noisy" : result.estimated_vdot?.confidence || "low"}</Badge>{result.noisy_reasons.length ? <div className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">{result.noisy_reasons.join(" · ")}</div> : null}</td></tr>)}</tbody>
       </table>
       {!results.length ? <p className="p-4 text-xs text-zinc-500">Нет сохраненных результатов этого типа.</p> : null}
     </div>
@@ -2137,7 +2156,7 @@ function PerformancePredictions({ predictions }: { predictions: PerformancePredi
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-left text-xs">
         <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Target</th><th>Prediction</th><th>Pace</th><th>Source</th><th>Confidence</th><th>Notes</th></tr></thead>
-        <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} км</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}/км</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}</td></tr>)}</tbody>
+        <tbody>{predictions.map((prediction) => <tr key={prediction.label} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-2 font-semibold text-white">{prediction.label}<div className="text-[11px] text-zinc-500">{prediction.target_distance_km} км</div></td><td>{formatDuration(prediction.predicted_duration_seconds)}</td><td>{formatPace(prediction.predicted_pace_seconds_per_km)}/км</td><td>{prediction.source_result_name || "--"}<div className="text-[11px] text-zinc-500">ratio {prediction.extrapolation_ratio ?? "--"}</div><div className="text-[10px] text-zinc-600">source {prediction.source_distance_km?.toFixed(2) ?? "--"} км · {formatDuration(prediction.source_duration_seconds)}</div></td><td><Badge className={confidenceClass(prediction.confidence)}>{prediction.confidence}</Badge></td><td className="max-w-[15rem] text-zinc-500">{prediction.warnings.length ? prediction.warnings.join(" · ") : prediction.extrapolation_limited ? "extrapolation limited" : prediction.noisy ? "noisy source" : "within range"}<div className="mt-1 text-[10px] text-zinc-600">{prediction.method} · {prediction.source_reference}</div></td></tr>)}</tbody>
       </table>
       {!predictions.length ? <p className="p-4 text-xs text-zinc-500">Нужен race/time trial результат &gt;= 3 км для прогнозов.</p> : null}
     </div>
@@ -2148,7 +2167,7 @@ function PerformancePbs({ pbs, latestPb }: { pbs: PerformancePb[]; latestPb?: Pe
   return <Card>
     <CardHeader><div><CardTitle>Personal bests</CardTitle><p className="text-xs text-zinc-500">PB uses near-exact race/time trial distances only.</p></div><Badge>{latestPb ? latestPb.label : "--"}</Badge></CardHeader>
     <div className="divide-y divide-zinc-800">
-      {pbs.map((pb) => <div key={pb.label} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[4.5rem_1fr_auto]"><div className="font-semibold text-white">{pb.label}</div><div><p className="text-zinc-300">{formatDuration(pb.normalized_duration_seconds)} · {formatPace(pb.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{pb.name} · {formatDateTime(pb.result_date)} · actual {pb.distance_km.toFixed(2)} км</p></div><Badge className={pb.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>VDOT {pb.estimated_vdot?.value ?? "--"}</Badge></div>)}
+      {pbs.map((pb) => <div key={pb.label} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[4.5rem_1fr_auto]"><div className="font-semibold text-white">{pb.label}</div><div><p className="text-zinc-300">{formatDuration(pb.normalized_duration_seconds)} · {formatPace(pb.pace_seconds_per_km)}/км</p><p className="mt-1 text-zinc-500">{pb.name} · {formatDateTime(pb.result_date)} · actual {pb.distance_km.toFixed(2)} км</p>{pb.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(pb.estimated_vdot)}</p> : null}{pb.noisy_reasons.length ? <p className="mt-1 text-[11px] text-orange-200">Noisy: {pb.noisy_reasons.join(" · ")}</p> : null}</div><Badge className={pb.is_noisy ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>VDOT {pb.estimated_vdot?.value ?? "--"}</Badge></div>)}
       {!pbs.length ? <p className="p-4 text-xs text-zinc-500">Нет PB по стандартным дистанциям.</p> : null}
     </div>
   </Card>
@@ -2160,7 +2179,7 @@ function PerformanceThresholdTrend({ points }: { points: PerformanceVdot["thresh
   return <Card>
     <CardHeader><div><CardTitle>Threshold trend</CardTitle><p className="text-xs text-zinc-500">Estimated 60-minute pace from race/time trial results.</p></div><Badge>{points.length} points</Badge></CardHeader>
     <div className="grid gap-2 p-4">
-      {points.map((point) => <div key={point.result_id} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{new Date(point.result_date).toLocaleDateString("ru-RU", { month: "short", day: "2-digit" })}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, min / point.threshold_pace_seconds_per_km * 100)}%` }} /></div><strong className="text-right text-zinc-300">{formatPace(point.threshold_pace_seconds_per_km)}</strong></div>)}
+      {points.map((point) => <div key={point.result_id} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{new Date(point.result_date).toLocaleDateString("ru-RU", { month: "short", day: "2-digit" })}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, min / point.threshold_pace_seconds_per_km * 100)}%` }} /></div><strong className="text-right text-zinc-300">{formatPace(point.threshold_pace_seconds_per_km)}</strong><span className="col-span-full text-[10px] text-zinc-600">{point.source} · {point.confidence}</span></div>)}
       {!points.length ? <p className="text-xs text-zinc-500">Добавьте результаты, чтобы увидеть trend.</p> : null}
     </div>
   </Card>
