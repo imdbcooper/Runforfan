@@ -8,6 +8,7 @@ from app.db.migrations.runner import run_migrations
 from app.db.session import SessionLocal, engine
 from app.models import *  # noqa: F401,F403
 from app.seed.demo import seed_demo_data
+from app.services.activity_metrics import backfill_derived_activity_metrics
 
 
 settings = get_settings()
@@ -31,6 +32,10 @@ def on_startup() -> None:
     if settings.demo_seed:
         with SessionLocal() as db:
             seed_demo_data(db)
+    if settings.derived_metrics_backfill_on_startup and settings.derived_metrics_backfill_startup_limit > 0:
+        with SessionLocal() as db:
+            backfill_derived_activity_metrics(db, limit=settings.derived_metrics_backfill_startup_limit)
+            db.commit()
 
 
 @app.get("/health")

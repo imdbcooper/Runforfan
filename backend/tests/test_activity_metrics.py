@@ -6,8 +6,13 @@ from datetime import UTC, datetime
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.models import Activity, ActivitySegment, ActivityWorkoutBlock, User
-    from app.services.activity_metrics import compute_derived_activity_metrics, sync_derived_activity_metrics
+    from sqlalchemy import create_engine, func, select
+    from sqlalchemy.orm import selectinload, sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.db.base import Base
+    from app.models import Activity, ActivitySegment, ActivityWorkoutBlock, DerivedActivityMetric, User
+    from app.services.activity_metrics import backfill_derived_activity_metrics, compute_derived_activity_metrics, sync_derived_activity_metrics
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for activity metrics tests"
@@ -72,10 +77,101 @@ class ActivityMetricsTests(unittest.TestCase):
         rows = sync_derived_activity_metrics(db, activity)
 
         self.assertTrue(db.flushed)
-        self.assertTrue(db.executed)
+        self.assertFalse(db.executed)
         self.assertEqual(activity.derived_metrics, rows)
         self.assertTrue(any(row.metric_key == "average_pace_seconds_per_km" for row in rows))
         self.assertEqual(db.added, rows)
+
+    def test_sync_replaces_loaded_relationship_rows_in_real_session(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine, tables=[User.__table__, Activity.__table__, ActivitySegment.__table__, ActivityWorkoutBlock.__table__, DerivedActivityMetric.__table__])
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+        with SessionLocal() as db:
+            user = User(id=1, display_name="Runner")
+            activity = Activity(id=7, user_id=1, title="Run", distance_km=5.0, duration_seconds=1500)
+            db.add_all([user, activity])
+            db.commit()
+
+            loaded = db.scalar(select(Activity).where(Activity.id == 7).options(selectinload(Activity.derived_metrics)))
+            self.assertIsNotNone(loaded)
+            first_rows = sync_derived_activity_metrics(db, loaded)
+            db.commit()
+
+            self.assertEqual(len(first_rows), 4)
+            self.assertEqual(db.scalar(select(func.count()).select_from(DerivedActivityMetric).where(DerivedActivityMetric.activity_id == 7)), 4)
+
+            loaded_again = db.scalar(select(Activity).where(Activity.id == 7).options(selectinload(Activity.derived_metrics)))
+            self.assertIsNotNone(loaded_again)
+            self.assertEqual(len(loaded_again.derived_metrics), 4)
+            loaded_again.duration_seconds = 1800
+            second_rows = sync_derived_activity_metrics(db, loaded_again)
+            db.commit()
+
+            metrics = {metric.metric_key: metric.metric_value for metric in second_rows}
+            self.assertEqual(db.scalar(select(func.count()).select_from(DerivedActivityMetric).where(DerivedActivityMetric.activity_id == 7)), 4)
+            self.assertEqual(metrics["duration_minutes"], 30.0)
+            self.assertEqual(metrics["average_pace_seconds_per_km"], 360)
+
+    def test_backfill_syncs_missing_metrics(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine, tables=[User.__table__, Activity.__table__, ActivitySegment.__table__, ActivityWorkoutBlock.__table__, DerivedActivityMetric.__table__])
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+        with SessionLocal() as db:
+            user = User(id=1, display_name="Runner")
+            activity = Activity(id=7, user_id=1, title="Run", distance_km=5.0, duration_seconds=1500)
+            db.add_all([user, activity])
+            db.commit()
+
+            synced_count = backfill_derived_activity_metrics(db)
+            db.commit()
+
+            rows = list(db.scalars(select(DerivedActivityMetric).where(DerivedActivityMetric.activity_id == 7)))
+            hashes = {row.input_hash for row in rows}
+            metrics = {row.metric_key: row.metric_value for row in rows}
+
+            self.assertEqual(synced_count, 1)
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(len(hashes), 1)
+            self.assertEqual(metrics["duration_minutes"], 25.0)
+
+    def test_backfill_repair_mode_updates_stale_metrics(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine, tables=[User.__table__, Activity.__table__, ActivitySegment.__table__, ActivityWorkoutBlock.__table__, DerivedActivityMetric.__table__])
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+        with SessionLocal() as db:
+            user = User(id=1, display_name="Runner")
+            activity = Activity(id=7, user_id=1, title="Run", distance_km=5.0, duration_seconds=1500)
+            stale = DerivedActivityMetric(activity_id=7, metric_key="duration_minutes", metric_value=1, unit="minutes", method="old", source_reference="old", input_hash="stale", computed_at=datetime(2026, 6, 8, tzinfo=UTC))
+            db.add_all([user, activity, stale])
+            db.commit()
+
+            synced_count = backfill_derived_activity_metrics(db, repair_existing=True)
+            db.commit()
+
+            rows = list(db.scalars(select(DerivedActivityMetric).where(DerivedActivityMetric.activity_id == 7)))
+            hashes = {row.input_hash for row in rows}
+            metrics = {row.metric_key: row.metric_value for row in rows}
+
+            self.assertEqual(synced_count, 1)
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(len(hashes), 1)
+            self.assertNotIn("stale", hashes)
+            self.assertEqual(metrics["duration_minutes"], 25.0)
 
 
 if __name__ == "__main__":

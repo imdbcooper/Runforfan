@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from statistics import pstdev
 from typing import Any
 
-from sqlalchemy import delete
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, DerivedActivityMetric
 
@@ -103,8 +103,8 @@ def sync_derived_activity_metrics(db: Session, activity: Activity) -> list[Deriv
     if activity.id is None:
         return []
     metric_dicts = compute_derived_activity_metrics(activity)
-    if hasattr(db, "execute"):
-        db.execute(delete(DerivedActivityMetric).where(DerivedActivityMetric.activity_id == activity.id))
+    activity.derived_metrics.clear()
+    db.flush()
     rows = [
         DerivedActivityMetric(
             activity_id=activity.id,
@@ -122,3 +122,63 @@ def sync_derived_activity_metrics(db: Session, activity: Activity) -> list[Deriv
     for row in rows:
         db.add(row)
     return rows
+
+
+def _metric_rows_are_current(activity: Activity, expected_metrics: list[dict[str, Any]]) -> bool:
+    expected_by_key = {str(metric["metric_key"]): metric for metric in expected_metrics}
+    existing_by_key = {metric.metric_key: metric for metric in activity.derived_metrics or []}
+    if set(existing_by_key) != set(expected_by_key):
+        return False
+    for key, expected in expected_by_key.items():
+        existing = existing_by_key[key]
+        if abs(float(existing.metric_value) - float(expected["metric_value"])) > 0.000001:
+            return False
+        if existing.unit != str(expected["unit"]):
+            return False
+        if existing.method != str(expected["method"]):
+            return False
+        if (existing.source_reference or "") != str(expected["source_reference"] or ""):
+            return False
+        if existing.input_hash != str(expected["input_hash"]):
+            return False
+    return True
+
+
+def _load_backfill_candidates(db: Session, activity_ids: list[int]) -> list[Activity]:
+    if not activity_ids:
+        return []
+    return list(db.scalars(
+        select(Activity)
+        .where(Activity.id.in_(activity_ids))
+        .options(
+            selectinload(Activity.segments),
+            selectinload(Activity.workout_blocks),
+            selectinload(Activity.derived_metrics),
+        )
+        .order_by(Activity.id.asc())
+    ))
+
+
+def backfill_derived_activity_metrics(db: Session, *, limit: int = 500, repair_existing: bool = False) -> int:
+    if limit <= 0:
+        return 0
+    if repair_existing:
+        activity_ids = list(db.scalars(select(Activity.id).order_by(Activity.id.asc()).limit(limit)))
+    else:
+        activity_ids = list(db.scalars(
+            select(Activity.id)
+            .outerjoin(DerivedActivityMetric, DerivedActivityMetric.activity_id == Activity.id)
+            .group_by(Activity.id)
+            .having(func.count(DerivedActivityMetric.metric_key) == 0)
+            .order_by(Activity.id.asc())
+            .limit(limit)
+        ))
+    activities = _load_backfill_candidates(db, activity_ids)
+    synced_count = 0
+    for activity in activities:
+        expected_metrics = compute_derived_activity_metrics(activity)
+        if _metric_rows_are_current(activity, expected_metrics):
+            continue
+        sync_derived_activity_metrics(db, activity)
+        synced_count += 1
+    return synced_count

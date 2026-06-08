@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     llm_timeout: int = 45
     allow_private_llm_base_urls: bool = False
+    derived_metrics_backfill_on_startup: bool = True
+    derived_metrics_backfill_startup_limit: int = 500
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",
