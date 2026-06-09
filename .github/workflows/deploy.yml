@@ -73,6 +73,7 @@ jobs:
       RUNFORFAN_FRONTEND_PORT: ${{ vars.RUNFORFAN_FRONTEND_PORT || '18080' }}
       RUNFORFAN_BACKEND_PORT: ${{ vars.RUNFORFAN_BACKEND_PORT || '18081' }}
       RUNFORFAN_FRONTEND_URL: ${{ vars.RUNFORFAN_FRONTEND_URL || 'https://run.slavx.ru/app/' }}
+      RUNFORFAN_TELEGRAM_BOT_PROXY_URL: ${{ vars.RUNFORFAN_TELEGRAM_BOT_PROXY_URL || 'http://31.57.118.44:3128' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
@@ -119,6 +120,7 @@ jobs:
           RUNFORFAN_SECRET_KEY=$RUNFORFAN_SECRET_KEY
           RUNFORFAN_TELEGRAM_BOT_TOKEN=$RUNFORFAN_TELEGRAM_BOT_TOKEN
           RUNFORFAN_TELEGRAM_WEBHOOK_SECRET=$RUNFORFAN_TELEGRAM_WEBHOOK_SECRET
+          RUNFORFAN_TELEGRAM_BOT_PROXY_URL=$RUNFORFAN_TELEGRAM_BOT_PROXY_URL
           RUNFORFAN_FRONTEND_URL=$RUNFORFAN_FRONTEND_URL
           RUNFORFAN_TELEGRAM_LOGIN_CODE_TTL_SECONDS=300
           RUNFORFAN_APP_ENV=$RUNFORFAN_APP_ENV
@@ -176,4 +178,4 @@ jobs:
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/")" = "302:https://$RUNFORFAN_DOMAIN/app/"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"
           curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/"
-          curl -fsS "https://$RUNFORFAN_DOMAIN/api/auth/telegram/bot-link"
+          curl -fsS --retry 6 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/api/auth/telegram/bot-link"

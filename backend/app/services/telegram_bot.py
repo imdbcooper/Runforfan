@@ -85,7 +85,7 @@ def _get_bot_username() -> str | None:
     if _bot_username_cache:
         return _bot_username_cache
     try:
-        response = httpx.post(_bot_api_url("getMe"), timeout=10)
+        response = httpx.post(_bot_api_url("getMe"), proxy=get_settings().telegram_bot_proxy_url, timeout=10)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Telegram Bot API request failed") from exc
     if not response.is_success:
@@ -105,7 +105,7 @@ def _send_message(chat_id: int | str, text: str, reply_markup: dict[str, Any] | 
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
-        response = httpx.post(_bot_api_url("sendMessage"), json=payload, timeout=10)
+        response = httpx.post(_bot_api_url("sendMessage"), json=payload, proxy=get_settings().telegram_bot_proxy_url, timeout=10)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Telegram Bot API request failed") from exc
     if not response.is_success:

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-change-me"
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
+    telegram_bot_proxy_url: str | None = None
     frontend_url: str = "http://127.0.0.1:5173/app/"
     telegram_login_code_ttl_seconds: int = 300
     llm_timeout: int = 45
