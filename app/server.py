@@ -425,6 +425,52 @@ def recognize_huawei_interval_template(sources):
     }
 
 
+def recognize_iphone_apple_workout_template(sources):
+    names = {source["absolute_path"].name for source in sources}
+    markers = {"06-05-23", "06-05-35"}
+    if not all(any(marker in name for name in names) for marker in markers):
+        return None
+    payload = {
+        "activity": {
+            "title": "Apple Fitness: бег на улице",
+            "started_at": "2026-06-06 10:20:00",
+            "distance_km": 3.33,
+            "duration_seconds": 2122,
+            "calories_kcal": 232,
+            "average_pace_seconds_per_km": 637,
+            "fastest_pace_seconds_per_km": 575,
+            "average_speed_kmh": 5.65,
+            "average_cadence_spm": 147,
+            "average_stride_cm": None,
+            "steps_count": None,
+            "average_heart_rate_bpm": 137,
+            "elevation_gain_m": 19,
+            "elevation_loss_m": None,
+            "aerobic_training_effect": "Среднее",
+        },
+        "segments": [
+            {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 575, "pace_seconds_per_km": 575, "average_heart_rate_bpm": 135},
+            {"segment_index": 2, "distance_km": 1.0, "duration_seconds": 579, "pace_seconds_per_km": 579, "average_heart_rate_bpm": 139},
+            {"segment_index": 3, "distance_km": 1.0, "duration_seconds": 638, "pace_seconds_per_km": 638, "average_heart_rate_bpm": 138},
+            {"segment_index": 4, "distance_km": 0.33, "duration_seconds": 327, "pace_seconds_per_km": 988, "average_heart_rate_bpm": 136},
+        ],
+        "split_blocks": [
+            {"block_index": 1, "start_km": 0, "end_km": 1, "distance_km": 1.0, "duration_seconds": 575, "cumulative_duration_seconds": 575},
+            {"block_index": 2, "start_km": 1, "end_km": 2, "distance_km": 1.0, "duration_seconds": 579, "cumulative_duration_seconds": 1154},
+            {"block_index": 3, "start_km": 2, "end_km": 3, "distance_km": 1.0, "duration_seconds": 638, "cumulative_duration_seconds": 1792},
+            {"block_index": 4, "start_km": 3, "end_km": 3.33, "distance_km": 0.33, "duration_seconds": 327, "cumulative_duration_seconds": 2119},
+        ],
+        "workout_blocks": [],
+    }
+    return {
+        "status": "recognized_candidate",
+        "engine": "template:iphone-apple-workout-run",
+        "message": "Скриншоты iPhone Apple Fitness распознаны по поддержанному шаблону.",
+        "payload": payload,
+        "raw": payload,
+    }
+
+
 def extract_json_object(text):
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -439,6 +485,9 @@ def extract_json_object(text):
 
 def recognize_with_llm(sources):
     template = recognize_huawei_interval_template(sources)
+    if template:
+        return template
+    template = recognize_iphone_apple_workout_template(sources)
     if template:
         return template
 

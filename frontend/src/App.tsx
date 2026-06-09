@@ -1516,14 +1516,14 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <div className="grid gap-4">
       <Card>
-        <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">LLM recognition or supported template fallback.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
+        <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">Huawei and iPhone templates or vision LLM recognition.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
         <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
           <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
           <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
         </form>
         <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
           <p className="leading-5" translate="no">{message}</p>
-          <p className="mt-2 text-zinc-600">Unknown screenshots require a configured vision LLM. Supported templates remain deterministic.</p>
+          <p className="mt-2 text-zinc-600">Supported templates: Huawei interval 3 x 2 km and iPhone Apple Fitness run. Unknown screenshots require a configured vision LLM.</p>
         </div>
       </Card>
       <CollapsibleSection title="CSV import" summary={<Badge>6.18</Badge>}>

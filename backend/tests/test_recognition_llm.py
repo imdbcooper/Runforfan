@@ -155,6 +155,30 @@ class RecognitionLlmTests(unittest.TestCase):
         attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
         self.assertEqual(attempt.status, "rejected_no_llm_template")
 
+    def test_iphone_apple_workout_template_without_provider_is_validated(self):
+        db = FakeDb(None)
+
+        result = llm_or_template_recognize(
+            db,
+            12,
+            [
+                Path("photo_2026-06-09_06-05-23.jpg"),
+                Path("photo_2026-06-09_06-05-35.jpg"),
+            ],
+            type("Settings", (), {})(),
+            User(id=1, display_name="Runner"),
+        )
+
+        self.assertEqual(result["status"], "validated")
+        self.assertFalse(result["requires_confirmation"])
+        self.assertEqual(result["engine"], "template:iphone-apple-workout-run")
+        self.assertEqual(result["payload"]["activity"]["distance_km"], 3.33)
+        self.assertEqual(result["payload"]["activity"]["duration_seconds"], 2122)
+        self.assertEqual(result["payload"]["activity"]["average_heart_rate_bpm"], 137)
+        attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
+        self.assertEqual(attempt.engine, "template:iphone-apple-workout-run")
+        self.assertEqual(attempt.status, "validated")
+
     def test_valid_llm_recognition_returns_pending_confirmation(self):
         provider = LlmProviderSetting(id=1, user_id=1, provider="openai", display_name="Vision", model="gpt-4o-mini", is_active=True, is_default=True)
         db = FakeDb(provider)
