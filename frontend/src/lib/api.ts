@@ -1132,6 +1132,11 @@ export type AuthToken = {
   }
 }
 
+export type TelegramBotLink = {
+  configured: boolean
+  bot_url: string | null
+}
+
 let token = safeStorageGet("runforfan_token")
 
 export const authConfig = {
@@ -1218,6 +1223,18 @@ export async function telegramLogin(payload: TelegramLoginPayload) {
     body: JSON.stringify({ ...payload, id: String(payload.id), auth_date: String(payload.auth_date) }),
   })
   return storeAuthToken(data)
+}
+
+export async function telegramStartCodeLogin(code: string) {
+  const data = await request<AuthToken>("/auth/telegram/start-code", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  })
+  return storeAuthToken(data)
+}
+
+export async function telegramBotLink() {
+  return request<TelegramBotLink>("/auth/telegram/bot-link")
 }
 
 export const api = {

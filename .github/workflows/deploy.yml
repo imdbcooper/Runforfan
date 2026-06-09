@@ -51,7 +51,7 @@ jobs:
           push: true
           build-args: |
             VITE_API_URL=/api
-            VITE_ENABLE_DEV_LOGIN=${{ vars.VITE_ENABLE_DEV_LOGIN || 'true' }}
+            VITE_ENABLE_DEV_LOGIN=false
             VITE_TELEGRAM_BOT_USERNAME=${{ vars.VITE_TELEGRAM_BOT_USERNAME || '' }}
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
@@ -68,13 +68,15 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PATH: /opt/runforfan
       RUNFORFAN_DOMAIN: ${{ vars.RUNFORFAN_DOMAIN || 'run.slavx.ru' }}
-      RUNFORFAN_APP_ENV: ${{ vars.RUNFORFAN_APP_ENV || 'development' }}
-      RUNFORFAN_DEMO_SEED: ${{ vars.RUNFORFAN_DEMO_SEED || 'true' }}
+      RUNFORFAN_APP_ENV: production
+      RUNFORFAN_DEMO_SEED: false
       RUNFORFAN_FRONTEND_PORT: ${{ vars.RUNFORFAN_FRONTEND_PORT || '18080' }}
       RUNFORFAN_BACKEND_PORT: ${{ vars.RUNFORFAN_BACKEND_PORT || '18081' }}
+      RUNFORFAN_FRONTEND_URL: ${{ vars.RUNFORFAN_FRONTEND_URL || 'https://run.slavx.ru/app/' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
+      RUNFORFAN_TELEGRAM_WEBHOOK_SECRET: ${{ secrets.RUNFORFAN_TELEGRAM_WEBHOOK_SECRET }}
     steps:
       - name: Checkout deploy files
         uses: actions/checkout@v4
@@ -85,6 +87,8 @@ jobs:
           test -n "$DEPLOY_USER" || { echo "DEPLOY_USER secret is required"; exit 1; }
           test -n "$RUNFORFAN_POSTGRES_PASSWORD" || { echo "RUNFORFAN_POSTGRES_PASSWORD secret is required"; exit 1; }
           test -n "$RUNFORFAN_SECRET_KEY" || { echo "RUNFORFAN_SECRET_KEY secret is required"; exit 1; }
+          test -n "$RUNFORFAN_TELEGRAM_BOT_TOKEN" || { echo "RUNFORFAN_TELEGRAM_BOT_TOKEN secret is required"; exit 1; }
+          test -n "$RUNFORFAN_TELEGRAM_WEBHOOK_SECRET" || { echo "RUNFORFAN_TELEGRAM_WEBHOOK_SECRET secret is required"; exit 1; }
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -114,6 +118,9 @@ jobs:
           RUNFORFAN_POSTGRES_PASSWORD=$RUNFORFAN_POSTGRES_PASSWORD
           RUNFORFAN_SECRET_KEY=$RUNFORFAN_SECRET_KEY
           RUNFORFAN_TELEGRAM_BOT_TOKEN=$RUNFORFAN_TELEGRAM_BOT_TOKEN
+          RUNFORFAN_TELEGRAM_WEBHOOK_SECRET=$RUNFORFAN_TELEGRAM_WEBHOOK_SECRET
+          RUNFORFAN_FRONTEND_URL=$RUNFORFAN_FRONTEND_URL
+          RUNFORFAN_TELEGRAM_LOGIN_CODE_TTL_SECONDS=300
           RUNFORFAN_APP_ENV=$RUNFORFAN_APP_ENV
           RUNFORFAN_DEMO_SEED=$RUNFORFAN_DEMO_SEED
           RUNFORFAN_AUTO_CREATE_SCHEMA=true
@@ -145,6 +152,23 @@ jobs:
           printf '%s' '${{ github.token }}' | ssh "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
           ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f"
 
+      - name: Configure Telegram webhook
+        run: |
+          webhook_response="$(curl -fsS -X POST "https://api.telegram.org/bot${RUNFORFAN_TELEGRAM_BOT_TOKEN}/setWebhook" \
+            --data-urlencode "url=https://${RUNFORFAN_DOMAIN}/api/auth/telegram/webhook" \
+            --data-urlencode "secret_token=${RUNFORFAN_TELEGRAM_WEBHOOK_SECRET}" \
+            --data-urlencode 'allowed_updates=["message"]')"
+          WEBHOOK_RESPONSE="$webhook_response" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          payload = json.loads(os.environ["WEBHOOK_RESPONSE"])
+          if not payload.get("ok"):
+              print(payload, file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
       - name: Verify deployment
         run: |
           ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose ps"
@@ -152,3 +176,4 @@ jobs:
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/")" = "302:https://$RUNFORFAN_DOMAIN/app/"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"
           curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/"
+          curl -fsS "https://$RUNFORFAN_DOMAIN/api/auth/telegram/bot-link"

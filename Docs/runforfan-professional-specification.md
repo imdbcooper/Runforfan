@@ -1427,7 +1427,7 @@ Add unit tests for:
 ### Phase 6. Integrations and polish
 
 - Add CSV export/import.
-- Add Telegram login production mode.
+- Add Telegram bot `/start` registration production mode.
 - Add provider test endpoint.
 - Add audit log.
 - Add documentation for formulas and source references.
@@ -1452,7 +1452,7 @@ Primary sources to cite in implementation docs and calculation metadata:
 
 - FastAPI backend.
 - PostgreSQL via Docker Compose.
-- User/session auth with dev login and Telegram placeholder.
+- User/session auth with dev login, Telegram Login Widget, and Telegram bot `/start` registration.
 - Activities, segments, split blocks.
 - Import batches and screenshot sources.
 - Goals.

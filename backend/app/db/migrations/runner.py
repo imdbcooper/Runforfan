@@ -339,6 +339,27 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "UPDATE training_plan_workout_feedback AS feedback SET activity_id = workouts.completed_activity_id, completion_status = workouts.status FROM training_plan_workouts AS workouts WHERE feedback.workout_id = workouts.id AND (feedback.activity_id IS NULL OR feedback.completion_status IS NULL)",
         ),
     ),
+    (
+        "20260609_0016_telegram_bot_login_codes",
+        (
+            "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT",
+            """
+            CREATE TABLE IF NOT EXISTS telegram_login_codes (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                telegram_id BIGINT NOT NULL,
+                code_hash VARCHAR(128) NOT NULL UNIQUE,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                used_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_telegram_login_codes_user_id ON telegram_login_codes (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_telegram_login_codes_telegram_id ON telegram_login_codes (telegram_id)",
+            "CREATE INDEX IF NOT EXISTS ix_telegram_login_codes_code_hash ON telegram_login_codes (code_hash)",
+            "CREATE INDEX IF NOT EXISTS ix_telegram_login_codes_expires_at ON telegram_login_codes (expires_at)",
+        ),
+    ),
 )
 
 

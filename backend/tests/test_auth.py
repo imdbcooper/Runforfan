@@ -53,6 +53,23 @@ class AuthTests(unittest.TestCase):
         with patch.object(auth_service, "get_settings", return_value=SimpleNamespace(telegram_bot_token=bot_token)):
             self.assertTrue(auth_service.validate_telegram_login(payload, now=now))
 
+    def test_telegram_bot_login_url_preserves_frontend_query(self):
+        from app.services import telegram_bot
+
+        settings = SimpleNamespace(frontend_url="https://run.slavx.ru/app/?lang=ru")
+        with patch.object(telegram_bot, "get_settings", return_value=settings):
+            self.assertEqual(
+                telegram_bot.build_frontend_login_url("one-time-code"),
+                "https://run.slavx.ru/app/?lang=ru&telegram_login_code=one-time-code",
+            )
+
+    def test_telegram_bot_start_url_is_disabled_without_token(self):
+        from app.services import telegram_bot
+
+        settings = SimpleNamespace(telegram_bot_token=None)
+        with patch.object(telegram_bot, "get_settings", return_value=settings):
+            self.assertIsNone(telegram_bot.telegram_bot_start_url())
+
 
 if __name__ == "__main__":
     unittest.main()

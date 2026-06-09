@@ -25,5 +25,6 @@ from app.models.entities import (  # noqa: F401
     TrainingPlanWorkoutBlock,
     TrainingPlanWorkoutFeedback,
     TrainingZone,
+    TelegramLoginCode,
     User,
 )

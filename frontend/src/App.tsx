@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramLogin, type TelegramLoginPayload, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -527,6 +527,8 @@ function App() {
   const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeStorageGet(ONBOARDING_DISMISSED_KEY) === "true")
   const [authReady, setAuthReady] = useState(() => authConfig.devLoginEnabled || hasAuthToken())
+  const [authExchangePending, setAuthExchangePending] = useState(() => new URLSearchParams(window.location.search).has("telegram_login_code"))
+  const [authError, setAuthError] = useState("")
   const [status, setStatus] = useState("LOADING")
 
   function dismissOnboarding() {
@@ -540,6 +542,7 @@ function App() {
   }
 
   async function loginWithTelegram(payload: TelegramLoginPayload) {
+    setAuthError("")
     await telegramLogin(payload)
     setAuthReady(true)
     setStatus("TELEGRAM USER")
@@ -610,6 +613,31 @@ function App() {
   useEffect(() => {
     if (authReady) void refreshGlobal()
   }, [authReady])
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const code = url.searchParams.get("telegram_login_code")
+    if (!code) return
+    url.searchParams.delete("telegram_login_code")
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`
+    window.history.replaceState(null, "", nextUrl || window.location.pathname)
+    let cancelled = false
+    setStatus("TELEGRAM LOGIN")
+    setAuthError("")
+    void telegramStartCodeLogin(code).then(() => {
+      if (cancelled) return
+      setAuthReady(true)
+      setStatus("TELEGRAM USER")
+    }).catch((error) => {
+      if (cancelled) return
+      console.error(error)
+      setAuthReady(false)
+      setStatus("LOGIN REQUIRED")
+      setAuthError(apiErrorMessage(error, "Telegram bot login failed"))
+    }).finally(() => {
+      if (!cancelled) setAuthExchangePending(false)
+    })
+    return () => { cancelled = true }
+  }, [])
   useEffect(() => onAuthExpired(() => {
     setAuthReady(false)
     setStatus("LOGIN REQUIRED")
@@ -622,7 +650,7 @@ function App() {
   }, [onboardingRequired, page])
   useDomTranslations(language)
 
-  if (!authReady) return <TelegramLoginGate language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} />
+  if (!authReady) return <TelegramLoginGate language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} initialError={authError} loading={authExchangePending} />
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -658,10 +686,23 @@ function App() {
   )
 }
 
-function TelegramLoginGate({ language, onLanguageChange, onLogin }: { language: Language; onLanguageChange: (language: Language) => void; onLogin: (payload: TelegramLoginPayload) => Promise<void> }) {
+function TelegramLoginGate({ language, onLanguageChange, onLogin, initialError, loading }: { language: Language; onLanguageChange: (language: Language) => void; onLogin: (payload: TelegramLoginPayload) => Promise<void>; initialError?: string; loading?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(initialError || "")
+  const [botUrl, setBotUrl] = useState("")
   const botUsername = authConfig.telegramBotUsername
+
+  useEffect(() => setError(initialError || ""), [initialError])
+
+  useEffect(() => {
+    let cancelled = false
+    void telegramBotLink().then((link) => {
+      if (!cancelled && link.bot_url) setBotUrl(link.bot_url)
+    }).catch((caught) => {
+      console.error(caught)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!botUsername || !containerRef.current) return
@@ -698,9 +739,11 @@ function TelegramLoginGate({ language, onLanguageChange, onLogin }: { language: 
           <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
         </div>
         <h1 className="mt-3 text-2xl font-semibold text-white">Sign in with Telegram</h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-400">Production mode uses Telegram Login Widget and the backend validates the signed Telegram payload before issuing a session token. Dev login remains available only in local development.</p>
-        <div className="mt-5 rounded-lg border border-zinc-800 bg-black/30 p-4">
-          {botUsername ? <div ref={containerRef} className="min-h-10" /> : <p className="text-sm text-orange-100">Set `VITE_TELEGRAM_BOT_USERNAME` in the frontend environment to enable the Telegram widget.</p>}
+        <p className="mt-3 text-sm leading-6 text-zinc-400">Open the Telegram bot, press Start, then return through the one-time link the bot sends you. The backend registers your Telegram account and issues a short-lived login code.</p>
+        <div className="mt-5 space-y-3 rounded-lg border border-zinc-800 bg-black/30 p-4">
+          {loading ? <p className="text-sm text-orange-100">Finishing Telegram bot login...</p> : null}
+          {botUrl ? <a className="inline-flex h-10 items-center justify-center rounded-md bg-orange-400 px-4 text-sm font-semibold text-black transition-colors hover:bg-orange-300" href={botUrl} target="_blank" rel="noreferrer">Open Telegram bot</a> : <p className="text-sm text-orange-100">Telegram bot link is unavailable until backend bot settings are configured.</p>}
+          {botUsername ? <div ref={containerRef} className="min-h-10" /> : null}
           {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
         </div>
       </Card>

@@ -56,6 +56,9 @@ GET /health
 
 - `POST /api/auth/dev-login` — dev/demo вход.
 - `POST /api/auth/telegram` — Telegram login validation.
+- `GET /api/auth/telegram/bot-link` — ссылка на Telegram bot registration.
+- `POST /api/auth/telegram/webhook` — webhook Telegram Bot API для `/start`.
+- `POST /api/auth/telegram/start-code` — обмен одноразового bot login code на Bearer token.
 - `GET /api/activities` — тренировки текущего пользователя.
 - `GET /api/activities/{id}` — одна тренировка.
 - `DELETE /api/activities/{id}` — удаление тренировки.
@@ -117,7 +120,8 @@ GET /health
 
 Авторизация:
 
-- Основной целевой вариант — Telegram login.
+- Основной production-вариант — Telegram bot registration: пользователь открывает бота, нажимает `/start`, получает одноразовую ссылку на `/app/` и backend выдает session token после обмена короткоживущего code.
+- Telegram Login Widget route сохранен как альтернативный signed auth callback.
 - Для разработки есть `POST /api/auth/dev-login`, который создает/возвращает `Demo Runner`.
 - Все пользовательские API используют Bearer token.
 

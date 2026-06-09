@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db.session import get_db
-from app.models import AuthSession, User
+from app.models import AuthSession, TelegramLoginCode, User
 
 
 TELEGRAM_LOGIN_MAX_AGE_SECONDS = 86400
@@ -66,27 +66,77 @@ def validate_telegram_login(payload: dict[str, str], now: datetime | None = None
 
 
 def get_or_create_telegram_user(db: Session, payload: dict[str, str]) -> User:
-    telegram_id = int(payload["id"])
+    return get_or_create_telegram_user_from_profile(
+        db,
+        telegram_id=int(payload["id"]),
+        username=payload.get("username"),
+        first_name=payload.get("first_name"),
+        last_name=payload.get("last_name"),
+    )
+
+
+def get_or_create_telegram_user_from_profile(
+    db: Session,
+    *,
+    telegram_id: int,
+    username: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+) -> User:
     user = db.scalar(select(User).where(User.telegram_id == telegram_id))
     if user:
-        user.username = payload.get("username")
-        user.first_name = payload.get("first_name")
-        user.last_name = payload.get("last_name")
-        user.display_name = payload.get("first_name") or payload.get("username") or user.display_name
+        user.username = username
+        user.first_name = first_name
+        user.last_name = last_name
+        user.display_name = first_name or username or user.display_name
         db.commit()
         db.refresh(user)
         return user
     user = User(
         telegram_id=telegram_id,
-        username=payload.get("username"),
-        first_name=payload.get("first_name"),
-        last_name=payload.get("last_name"),
-        display_name=payload.get("first_name") or payload.get("username") or "Runner",
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
+        display_name=first_name or username or "Runner",
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
+
+def create_telegram_login_code(db: Session, user: User, telegram_id: int) -> str:
+    settings = get_settings()
+    code = secrets.token_urlsafe(32)
+    login_code = TelegramLoginCode(
+        user_id=user.id,
+        telegram_id=telegram_id,
+        code_hash=token_hash(code),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.telegram_login_code_ttl_seconds),
+    )
+    db.add(login_code)
+    db.commit()
+    return code
+
+
+def consume_telegram_login_code(db: Session, code: str) -> User:
+    current_time = datetime.now(timezone.utc)
+    login_code = db.scalar(
+        select(TelegramLoginCode)
+        .where(TelegramLoginCode.code_hash == token_hash(code))
+        .with_for_update()
+    )
+    if not login_code or login_code.used_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Telegram login code")
+    expires_at = login_code.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < current_time:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Telegram login code expired")
+    login_code.used_at = current_time
+    db.commit()
+    db.refresh(login_code.user)
+    return login_code.user
 
 
 def get_current_user(
