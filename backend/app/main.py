@@ -10,6 +10,7 @@ from app.db.session import SessionLocal, engine
 from app.models import *  # noqa: F401,F403
 from app.seed.demo import seed_demo_data
 from app.services.activity_metrics import backfill_derived_activity_metrics
+from app.services.telegram_bot import start_telegram_polling, stop_telegram_polling
 from app.services.training_load import backfill_recent_daily_training_loads
 
 
@@ -43,6 +44,12 @@ def on_startup() -> None:
         with SessionLocal() as db:
             backfill_recent_daily_training_loads(db, days=settings.daily_training_load_backfill_days, user_limit=settings.daily_training_load_backfill_user_limit)
             db.commit()
+    start_telegram_polling()
+
+
+@app.on_event("shutdown")
+def on_shutdown() -> None:
+    stop_telegram_polling()
 
 
 @app.get("/health")

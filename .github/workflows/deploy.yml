@@ -74,6 +74,7 @@ jobs:
       RUNFORFAN_BACKEND_PORT: ${{ vars.RUNFORFAN_BACKEND_PORT || '18081' }}
       RUNFORFAN_FRONTEND_URL: ${{ vars.RUNFORFAN_FRONTEND_URL || 'https://run.slavx.ru/app/' }}
       RUNFORFAN_TELEGRAM_BOT_PROXY_URL: ${{ vars.RUNFORFAN_TELEGRAM_BOT_PROXY_URL || 'http://31.57.118.44:3128' }}
+      RUNFORFAN_TELEGRAM_POLLING_ENABLED: ${{ vars.RUNFORFAN_TELEGRAM_POLLING_ENABLED || 'true' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
@@ -121,6 +122,7 @@ jobs:
           RUNFORFAN_TELEGRAM_BOT_TOKEN=$RUNFORFAN_TELEGRAM_BOT_TOKEN
           RUNFORFAN_TELEGRAM_WEBHOOK_SECRET=$RUNFORFAN_TELEGRAM_WEBHOOK_SECRET
           RUNFORFAN_TELEGRAM_BOT_PROXY_URL=$RUNFORFAN_TELEGRAM_BOT_PROXY_URL
+          RUNFORFAN_TELEGRAM_POLLING_ENABLED=$RUNFORFAN_TELEGRAM_POLLING_ENABLED
           RUNFORFAN_FRONTEND_URL=$RUNFORFAN_FRONTEND_URL
           RUNFORFAN_TELEGRAM_LOGIN_CODE_TTL_SECONDS=300
           RUNFORFAN_APP_ENV=$RUNFORFAN_APP_ENV
@@ -154,18 +156,23 @@ jobs:
           printf '%s' '${{ github.token }}' | ssh "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
           ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f"
 
-      - name: Configure Telegram webhook
+      - name: Configure Telegram delivery
         run: |
-          webhook_response="$(curl -fsS -X POST "https://api.telegram.org/bot${RUNFORFAN_TELEGRAM_BOT_TOKEN}/setWebhook" \
-            --data-urlencode "url=https://${RUNFORFAN_DOMAIN}/api/auth/telegram/webhook" \
-            --data-urlencode "secret_token=${RUNFORFAN_TELEGRAM_WEBHOOK_SECRET}" \
-            --data-urlencode 'allowed_updates=["message"]')"
-          WEBHOOK_RESPONSE="$webhook_response" python3 - <<'PY'
+          if [ "$RUNFORFAN_TELEGRAM_POLLING_ENABLED" = "true" ]; then
+            delivery_response="$(curl -fsS -X POST "https://api.telegram.org/bot${RUNFORFAN_TELEGRAM_BOT_TOKEN}/deleteWebhook" \
+              --data-urlencode "drop_pending_updates=false")"
+          else
+            delivery_response="$(curl -fsS -X POST "https://api.telegram.org/bot${RUNFORFAN_TELEGRAM_BOT_TOKEN}/setWebhook" \
+              --data-urlencode "url=https://${RUNFORFAN_DOMAIN}/api/auth/telegram/webhook" \
+              --data-urlencode "secret_token=${RUNFORFAN_TELEGRAM_WEBHOOK_SECRET}" \
+              --data-urlencode 'allowed_updates=["message"]')"
+          fi
+          DELIVERY_RESPONSE="$delivery_response" python3 - <<'PY'
           import json
           import os
           import sys
 
-          payload = json.loads(os.environ["WEBHOOK_RESPONSE"])
+          payload = json.loads(os.environ["DELIVERY_RESPONSE"])
           if not payload.get("ok"):
               print(payload, file=sys.stderr)
               raise SystemExit(1)

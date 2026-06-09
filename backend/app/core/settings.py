@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
     telegram_bot_proxy_url: str | None = None
+    telegram_polling_enabled: bool = False
+    telegram_polling_timeout_seconds: int = 25
+    telegram_polling_error_delay_seconds: int = 5
     frontend_url: str = "http://127.0.0.1:5173/app/"
     telegram_login_code_ttl_seconds: int = 300
     llm_timeout: int = 45
