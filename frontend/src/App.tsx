@@ -1,4 +1,4 @@
-import { Activity, BatteryCharging, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Trophy, Upload, X, Zap } from "lucide-react"
+import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +14,7 @@ import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDom
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
+type Theme = "dark" | "light"
 type FeedbackDraft = { rpe: string; soreness_0_10: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality_0_10: string; sleep_quality: string; pain_notes: string; user_notes: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
 type CalendarMatchState =
@@ -44,6 +45,7 @@ type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" |
 const SUPPORT_WORKOUT_TYPES = new Set(["strength", "ofp", "mobility", "prehab", "core", "cross_training"])
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const ONBOARDING_DISMISSED_KEY = "runforfan_onboarding_dismissed"
+const THEME_KEY = "runforfan_theme"
 const ONBOARDING_READY_SCORE = 0.8
 const DEFAULT_HR_ZONE_ROWS = [
   { zone_key: "z1", label: "Z1 Recovery" },
@@ -67,6 +69,17 @@ function safeStorageSet(key: string, value: string) {
   } catch {
     // Onboarding can still run when browser storage is blocked.
   }
+}
+
+function getInitialTheme(): Theme {
+  const stored = safeStorageGet(THEME_KEY)
+  if (stored === "light" || stored === "dark") return stored
+  if (window.matchMedia?.("(prefers-color-scheme: light)").matches) return "light"
+  return "dark"
+}
+
+function guideHref() {
+  return `${import.meta.env.BASE_URL || "/app/"}alpha-tester-guide.html`
 }
 
 const nav = [
@@ -532,6 +545,7 @@ function trainingLoadMethodMetadata(method?: string | null, methods?: string[] |
 function App() {
   const [page, setPage] = useState<Page>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [theme, setTheme] = useState<Theme>(() => getInitialTheme())
   const [language, setLanguage] = useState<Language>(() => getInitialLanguage())
   const [activities, setActivities] = useState<ActivityType[]>([])
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
@@ -557,6 +571,10 @@ function App() {
   function changeLanguage(nextLanguage: Language) {
     setLanguage(nextLanguage)
     saveLanguage(nextLanguage)
+  }
+
+  function toggleTheme() {
+    setTheme((current) => current === "dark" ? "light" : "dark")
   }
 
   async function loginWithTelegram(payload: TelegramLoginPayload) {
@@ -637,6 +655,12 @@ function App() {
     if (authReady) void refreshGlobal()
   }, [authReady])
   useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light")
+    document.documentElement.classList.toggle("dark", theme === "dark")
+    document.documentElement.style.colorScheme = theme
+    safeStorageSet(THEME_KEY, theme)
+  }, [theme])
+  useEffect(() => {
     const url = new URL(window.location.href)
     const code = url.searchParams.get("telegram_login_code")
     if (!code) return
@@ -675,7 +699,7 @@ function App() {
   }, [onboardingRequired, page])
   useDomTranslations(language)
 
-  if (!authReady) return <TelegramLoginGate language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} initialError={authError} loading={authExchangePending} />
+  if (!authReady) return <TelegramLoginGate theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} initialError={authError} loading={authExchangePending} />
 
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
@@ -690,7 +714,7 @@ function App() {
         </>}
 
         <div className="min-w-0 max-w-full">
-          <Topbar status={status} currentUser={currentUser} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
+          <Topbar status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
             {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
@@ -711,7 +735,7 @@ function App() {
   )
 }
 
-function TelegramLoginGate({ language, onLanguageChange, onLogin, initialError, loading }: { language: Language; onLanguageChange: (language: Language) => void; onLogin: (payload: TelegramLoginPayload) => Promise<void>; initialError?: string; loading?: boolean }) {
+function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, onLogin, initialError, loading }: { theme: Theme; onThemeToggle: () => void; language: Language; onLanguageChange: (language: Language) => void; onLogin: (payload: TelegramLoginPayload) => Promise<void>; initialError?: string; loading?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState(initialError || "")
   const [botUrl, setBotUrl] = useState("")
@@ -761,7 +785,10 @@ function TelegramLoginGate({ language, onLanguageChange, onLogin, initialError, 
       <Card className="w-full max-w-xl border-orange-400/30 bg-zinc-950 p-6">
         <div className="flex items-center justify-between gap-3">
           <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · AUTH</p>
-          <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
+          <div className="flex items-center gap-2">
+            <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
+            <Button type="button" variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
+          </div>
         </div>
         <h1 className="mt-3 text-2xl font-semibold text-white">Sign in with Telegram</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">Open the Telegram bot, press Start, then return through the one-time link the bot sends you. The backend registers your Telegram account and issues a short-lived login code.</p>
@@ -791,6 +818,7 @@ function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Pag
     <div className="mt-4 border-t border-zinc-800 p-2">
       <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Shield className="h-4 w-4" /> Telegram auth</div>
       <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Bot className="h-4 w-4" /> User LLM keys</div>
+      <a href={guideHref()} target="_blank" rel="noreferrer" className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100"><BookOpen className="h-4 w-4" /> Alpha guide</a>
     </div>
   </div>
 }
@@ -808,7 +836,7 @@ function LanguageToggle({ language, onLanguageChange }: { language: Language; on
   </div>
 }
 
-function Topbar({ status, currentUser, language, onLanguageChange, onMenu }: { status: string; currentUser: AuthUser | null; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
+function Topbar({ status, currentUser, theme, onThemeToggle, language, onLanguageChange, onMenu }: { status: string; currentUser: AuthUser | null; theme: Theme; onThemeToggle: () => void; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
   return <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-zinc-800 bg-[#090909]/95 px-3 backdrop-blur">
     <div className="flex items-center gap-2">
       <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
@@ -822,7 +850,7 @@ function Topbar({ status, currentUser, language, onLanguageChange, onMenu }: { s
         <span className="max-w-[7rem] truncate font-mono text-[10px] text-zinc-500" translate="no">{authUserMeta(currentUser)}</span>
       </div>
       <Badge>{status}</Badge>
-      <Button variant="ghost" size="icon" aria-label="Toggle theme"><Moon /></Button>
+      <Button variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
     </div>
   </header>
 }

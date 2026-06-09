@@ -13,6 +13,16 @@
     --destructive: oklch(0.68 0.2 25);
   }
 
+  :root.light {
+    --background: oklch(0.97 0.014 72);
+    --foreground: oklch(0.19 0.016 245);
+    --border: oklch(0.86 0.018 73);
+    --primary: oklch(0.62 0.18 47);
+    --muted: oklch(0.54 0.028 247);
+    --accent: oklch(0.92 0.05 66);
+    --destructive: oklch(0.6 0.2 25);
+  }
+
   body {
     min-height: 100vh;
     background: var(--background);
@@ -27,8 +37,147 @@
     background: oklch(0.72 0.16 55 / 0.28);
   }
 
+  :root.light body {
+    background:
+      radial-gradient(circle at 12% 0%, oklch(0.98 0.075 72 / 0.86), transparent 28rem),
+      radial-gradient(circle at 85% 10%, oklch(0.96 0.055 205 / 0.62), transparent 24rem),
+      linear-gradient(180deg, oklch(0.985 0.012 72), oklch(0.955 0.018 85));
+  }
+
   * {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklch, oklch(0.72 0.16 55), transparent 50%) transparent;
+  }
+}
+
+@layer utilities {
+  .light .bg-\[\#090909\],
+  .light .bg-\[\#090909\]\/95,
+  .light .bg-\[\#111\],
+  .light .bg-zinc-950,
+  .light .bg-zinc-950\/70,
+  .light .bg-zinc-950\/80 {
+    background-color: oklch(0.995 0.006 72) !important;
+  }
+
+  .light .bg-zinc-900,
+  .light .bg-zinc-900\/60,
+  .light .bg-zinc-900\/70 {
+    background-color: oklch(0.955 0.018 78) !important;
+  }
+
+  .light .bg-zinc-800 {
+    background-color: oklch(0.9 0.024 78) !important;
+  }
+
+  .light .bg-black\/70 {
+    background-color: oklch(0.18 0.02 245 / 0.24) !important;
+    backdrop-filter: blur(12px);
+  }
+
+  .light .bg-black\/20,
+  .light .bg-black\/30 {
+    background-color: oklch(0.995 0.006 72 / 0.74) !important;
+  }
+
+  .light .bg-black\/80 {
+    background-color: oklch(0.985 0.012 72 / 0.94) !important;
+    backdrop-filter: blur(14px);
+  }
+
+  .light .bg-orange-400\/10,
+  .light .bg-orange-400\/15,
+  .light .bg-orange-500\/10,
+  .light .bg-rose-500\/10,
+  .light .bg-rose-500\/15 {
+    background-color: color-mix(in oklch, currentColor 8%, white) !important;
+  }
+
+  .light .border-zinc-900,
+  .light .border-zinc-800,
+  .light .border-zinc-700,
+  .light .border-white\/10 {
+    border-color: oklch(0.84 0.018 73) !important;
+  }
+
+  .light .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: oklch(0.84 0.018 73) !important;
+  }
+
+  .light .text-white,
+  .light .text-zinc-50,
+  .light .text-zinc-100 {
+    color: oklch(0.19 0.016 245) !important;
+  }
+
+  .light .text-zinc-200,
+  .light .text-zinc-300 {
+    color: oklch(0.34 0.026 245) !important;
+  }
+
+  .light .text-zinc-400 {
+    color: oklch(0.46 0.026 245) !important;
+  }
+
+  .light .text-zinc-500 {
+    color: oklch(0.55 0.026 245) !important;
+  }
+
+  .light .text-zinc-600 {
+    color: oklch(0.66 0.022 245) !important;
+  }
+
+  .light .text-orange-100,
+  .light .text-orange-100\/80,
+  .light .text-orange-200,
+  .light .text-orange-300 {
+    color: oklch(0.48 0.15 44) !important;
+  }
+
+  .light .text-rose-100,
+  .light .text-rose-200 {
+    color: oklch(0.46 0.17 20) !important;
+  }
+
+  .light .hover\:bg-zinc-900:hover,
+  .light .hover\:bg-zinc-800:hover {
+    background-color: oklch(0.91 0.026 76) !important;
+  }
+
+  .light .hover\:text-zinc-100:hover,
+  .light .hover\:text-zinc-200:hover {
+    color: oklch(0.16 0.018 245) !important;
+  }
+
+  .light .hover\:border-zinc-700:hover {
+    border-color: oklch(0.73 0.028 73) !important;
+  }
+
+  .light .placeholder\:text-zinc-600::placeholder {
+    color: oklch(0.67 0.024 245) !important;
+  }
+
+  .light .shadow-none {
+    box-shadow: 0 1px 2px oklch(0.18 0.02 245 / 0.04), 0 18px 42px oklch(0.32 0.06 45 / 0.08) !important;
+  }
+
+  .light .backdrop-blur {
+    backdrop-filter: blur(18px) saturate(1.18);
+  }
+
+  .light header.sticky {
+    background: color-mix(in oklch, oklch(0.995 0.008 72) 88%, transparent) !important;
+    border-color: oklch(0.84 0.018 73) !important;
+    box-shadow: 0 10px 32px oklch(0.28 0.04 45 / 0.08);
+  }
+
+  .light aside {
+    border-color: oklch(0.84 0.018 73) !important;
+  }
+
+  .light input,
+  .light select,
+  .light textarea {
+    background-color: oklch(0.995 0.006 72) !important;
   }
 }

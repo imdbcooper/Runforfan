@@ -170,7 +170,6 @@ const PHRASES: Array<{ en: string; ru: string }> = [
   { en: "Prev", ru: "Назад" },
   { en: "Next", ru: "Далее" },
   { en: "Why?", ru: "Почему?" },
-  { en: "LEGACY", ru: "LEGACY" },
   { en: "LOADING", ru: "ЗАГРУЗКА" },
   { en: "LOGIN REQUIRED", ru: "НУЖЕН ВХОД" },
   { en: "API ERROR", ru: "ОШИБКА API" },
