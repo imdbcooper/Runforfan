@@ -522,8 +522,9 @@ function calculationMetadata(calculation?: { method?: string | null; confidence?
 
 function authUserName(user: AuthUser | null) {
   if (!user) return "Telegram user"
+  if (user.is_demo) return user.display_name || "Demo Runner"
   const telegramName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
-  return telegramName || user.display_name || (user.username ? `@${user.username}` : "Telegram user")
+  return telegramName || (user.username ? `@${user.username}` : user.display_name || "Telegram user")
 }
 
 function authUserMeta(user: AuthUser | null) {
@@ -836,21 +837,32 @@ function LanguageToggle({ language, onLanguageChange }: { language: Language; on
   </div>
 }
 
+function AuthUserPill({ user, className }: { user: AuthUser | null; className?: string }) {
+  const name = authUserName(user)
+  const meta = authUserMeta(user)
+  return <div className={cn("min-w-0 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1", className)} title={`${name} · ${meta}`}>
+    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-orange-400 text-[10px] font-bold text-black" translate="no">{authUserInitial(user)}</span>
+    <span className="min-w-0 truncate text-xs font-medium text-zinc-100" translate="no">{name}</span>
+    <span className="min-w-0 truncate font-mono text-[10px] text-zinc-500" translate="no">{meta}</span>
+  </div>
+}
+
 function Topbar({ status, currentUser, theme, onThemeToggle, language, onLanguageChange, onMenu }: { status: string; currentUser: AuthUser | null; theme: Theme; onThemeToggle: () => void; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
-  return <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-zinc-800 bg-[#090909]/95 px-3 backdrop-blur">
-    <div className="flex items-center gap-2">
-      <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
-      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN · ADMIN</p>
-    </div>
-    <div className="flex items-center gap-2">
-      <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
-      <div className="hidden items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 sm:flex" title={authUserMeta(currentUser)}>
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-orange-400 text-[10px] font-bold text-black" translate="no">{authUserInitial(currentUser)}</span>
-        <span className="max-w-[9rem] truncate text-xs font-medium text-zinc-100" translate="no">{authUserName(currentUser)}</span>
-        <span className="max-w-[7rem] truncate font-mono text-[10px] text-zinc-500" translate="no">{authUserMeta(currentUser)}</span>
+  return <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#090909]/95 backdrop-blur">
+    <div className="flex h-12 items-center justify-between px-3">
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
+        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN · ADMIN</p>
       </div>
-      <Badge>{status}</Badge>
-      <Button variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
+      <div className="flex items-center gap-2">
+        <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
+        <AuthUserPill user={currentUser} className="hidden max-w-[18rem] sm:flex [&>span:nth-child(2)]:max-w-[9rem] [&>span:nth-child(3)]:max-w-[7rem]" />
+        <Badge>{status}</Badge>
+        <Button variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
+      </div>
+    </div>
+    <div className="border-t border-zinc-900 px-3 py-1.5 sm:hidden">
+      <AuthUserPill user={currentUser} className="flex w-full [&>span:nth-child(2)]:max-w-[55%] [&>span:nth-child(3)]:max-w-[35%]" />
     </div>
   </header>
 }

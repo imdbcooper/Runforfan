@@ -53,6 +53,18 @@ class AuthTests(unittest.TestCase):
         with patch.object(auth_service, "get_settings", return_value=SimpleNamespace(telegram_bot_token=bot_token)):
             self.assertTrue(auth_service.validate_telegram_login(payload, now=now))
 
+    def test_telegram_display_name_uses_full_name(self):
+        self.assertEqual(
+            auth_service.telegram_display_name("  Ivan ", " Petrov  ", "runner"),
+            "Ivan Petrov",
+        )
+
+    def test_telegram_display_name_falls_back_to_username(self):
+        self.assertEqual(auth_service.telegram_display_name(None, None, " runner "), "runner")
+
+    def test_telegram_display_name_keeps_existing_fallback(self):
+        self.assertEqual(auth_service.telegram_display_name(None, None, None, "Old Runner"), "Old Runner")
+
     def test_telegram_bot_login_url_preserves_frontend_query(self):
         from app.services import telegram_bot
 

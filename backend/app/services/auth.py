@@ -75,6 +75,26 @@ def get_or_create_telegram_user(db: Session, payload: dict[str, str]) -> User:
     )
 
 
+def clean_telegram_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def telegram_display_name(
+    first_name: str | None,
+    last_name: str | None,
+    username: str | None,
+    fallback: str = "Runner",
+) -> str:
+    name_parts = [part for part in (clean_telegram_text(first_name), clean_telegram_text(last_name)) if part]
+    full_name = " ".join(name_parts).strip()
+    if full_name:
+        return full_name
+    return clean_telegram_text(username) or fallback
+
+
 def get_or_create_telegram_user_from_profile(
     db: Session,
     *,
@@ -83,12 +103,15 @@ def get_or_create_telegram_user_from_profile(
     first_name: str | None = None,
     last_name: str | None = None,
 ) -> User:
+    username = clean_telegram_text(username)
+    first_name = clean_telegram_text(first_name)
+    last_name = clean_telegram_text(last_name)
     user = db.scalar(select(User).where(User.telegram_id == telegram_id))
     if user:
         user.username = username
         user.first_name = first_name
         user.last_name = last_name
-        user.display_name = first_name or username or user.display_name
+        user.display_name = telegram_display_name(first_name, last_name, username, user.display_name)
         db.commit()
         db.refresh(user)
         return user
@@ -97,7 +120,7 @@ def get_or_create_telegram_user_from_profile(
         username=username,
         first_name=first_name,
         last_name=last_name,
-        display_name=first_name or username or "Runner",
+        display_name=telegram_display_name(first_name, last_name, username),
     )
     db.add(user)
     db.commit()
