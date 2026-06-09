@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -507,6 +507,23 @@ function calculationMetadata(calculation?: { method?: string | null; confidence?
   return parts.length ? parts.join(" · ") : "source reference unavailable"
 }
 
+function authUserName(user: AuthUser | null) {
+  if (!user) return "Telegram user"
+  const telegramName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
+  return telegramName || user.display_name || (user.username ? `@${user.username}` : "Telegram user")
+}
+
+function authUserMeta(user: AuthUser | null) {
+  if (!user) return "authenticated"
+  if (user.username) return `@${user.username}`
+  if (user.telegram_id) return `tg:${user.telegram_id}`
+  return user.is_demo ? "demo" : "authenticated"
+}
+
+function authUserInitial(user: AuthUser | null) {
+  return authUserName(user).trim().charAt(0).toUpperCase() || "T"
+}
+
 function trainingLoadMethodMetadata(method?: string | null, methods?: string[] | null) {
   const labels = methods?.length ? methods.map(loadMethodLabel).join(", ") : loadMethodLabel(method || "unavailable")
   return labels || "load source unavailable"
@@ -525,6 +542,7 @@ function App() {
   const [safety, setSafety] = useState<SafetyCheck | null>(null)
   const [zones, setZones] = useState<Zones | null>(null)
   const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeStorageGet(ONBOARDING_DISMISSED_KEY) === "true")
   const [authReady, setAuthReady] = useState(() => authConfig.devLoginEnabled || hasAuthToken())
   const [authExchangePending, setAuthExchangePending] = useState(() => new URLSearchParams(window.location.search).has("telegram_login_code"))
@@ -543,7 +561,8 @@ function App() {
 
   async function loginWithTelegram(payload: TelegramLoginPayload) {
     setAuthError("")
-    await telegramLogin(payload)
+    const data = await telegramLogin(payload)
+    setCurrentUser(data.user)
     setAuthReady(true)
     setStatus("TELEGRAM USER")
   }
@@ -555,12 +574,14 @@ function App() {
   async function refreshGlobal() {
     try {
       await devLogin()
-      const [nextActivities, nextAnalytics, nextDashboard, nextProviders] = await Promise.all([
+      const [nextUser, nextActivities, nextAnalytics, nextDashboard, nextProviders] = await Promise.all([
+        api.currentUser(),
         api.activities(),
         api.analytics(),
         api.dashboardSummary(),
         api.providers(),
       ])
+      setCurrentUser(nextUser)
       setActivities(nextActivities)
       setAnalytics(nextAnalytics)
       setDashboard(nextDashboard)
@@ -569,6 +590,7 @@ function App() {
     } catch (error) {
       if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
         clearAuthToken()
+        setCurrentUser(null)
         setAuthReady(false)
         setStatus("LOGIN REQUIRED")
         return
@@ -598,6 +620,7 @@ function App() {
     } catch (error) {
       if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
         clearAuthToken()
+        setCurrentUser(null)
         setAuthReady(false)
         setStatus("LOGIN REQUIRED")
         return
@@ -623,8 +646,9 @@ function App() {
     let cancelled = false
     setStatus("TELEGRAM LOGIN")
     setAuthError("")
-    void telegramStartCodeLogin(code).then(() => {
+    void telegramStartCodeLogin(code).then((data) => {
       if (cancelled) return
+      setCurrentUser(data.user)
       setAuthReady(true)
       setStatus("TELEGRAM USER")
     }).catch((error) => {
@@ -639,6 +663,7 @@ function App() {
     return () => { cancelled = true }
   }, [])
   useEffect(() => onAuthExpired(() => {
+    setCurrentUser(null)
     setAuthReady(false)
     setStatus("LOGIN REQUIRED")
   }), [])
@@ -665,7 +690,7 @@ function App() {
         </>}
 
         <div className="min-w-0 max-w-full">
-          <Topbar status={status} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
+          <Topbar status={status} currentUser={currentUser} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
             {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
@@ -783,7 +808,7 @@ function LanguageToggle({ language, onLanguageChange }: { language: Language; on
   </div>
 }
 
-function Topbar({ status, language, onLanguageChange, onMenu }: { status: string; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
+function Topbar({ status, currentUser, language, onLanguageChange, onMenu }: { status: string; currentUser: AuthUser | null; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
   return <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-zinc-800 bg-[#090909]/95 px-3 backdrop-blur">
     <div className="flex items-center gap-2">
       <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
@@ -791,8 +816,12 @@ function Topbar({ status, language, onLanguageChange, onMenu }: { status: string
     </div>
     <div className="flex items-center gap-2">
       <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
+      <div className="hidden items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 sm:flex" title={authUserMeta(currentUser)}>
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-orange-400 text-[10px] font-bold text-black" translate="no">{authUserInitial(currentUser)}</span>
+        <span className="max-w-[9rem] truncate text-xs font-medium text-zinc-100" translate="no">{authUserName(currentUser)}</span>
+        <span className="max-w-[7rem] truncate font-mono text-[10px] text-zinc-500" translate="no">{authUserMeta(currentUser)}</span>
+      </div>
       <Badge>{status}</Badge>
-      <Button variant="secondary" size="sm">LEGACY</Button>
       <Button variant="ghost" size="icon" aria-label="Toggle theme"><Moon /></Button>
     </div>
   </header>
@@ -3585,7 +3614,7 @@ function Planning() {
   const visibleRecommendations = recommendations?.plan_id === result?.id ? recommendations : null
   const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
   const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
-  const planMode = !result ? null : !hasSafetyInfo ? "legacy" : conservative ? "safety gated" : "standard"
+  const planMode = !result || !hasSafetyInfo ? null : conservative ? "safety gated" : "standard"
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
       <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware running plus strength/OFP support sessions.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
@@ -3631,7 +3660,7 @@ function Planning() {
       </div>
     </Card>
     <Card>
-      <CardHeader><div><CardTitle>Plan detail</CardTitle><p className="text-xs text-zinc-500">Structured weeks, execution controls and adaptation history.</p></div>{result && <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{planMode}</Badge>}</CardHeader>
+      <CardHeader><div><CardTitle>Plan detail</CardTitle><p className="text-xs text-zinc-500">Structured weeks, execution controls and adaptation history.</p></div>{planMode ? <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{planMode}</Badge> : null}</CardHeader>
       <div className="grid gap-4 p-4 text-sm text-zinc-400">
         {result ? <>
           <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />

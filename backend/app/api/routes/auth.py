@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.db.session import get_db
 from app.schemas.common import AuthToken, UserOut
-from app.services.auth import consume_telegram_login_code, create_session, get_or_create_demo_user, get_or_create_telegram_user, validate_telegram_login
+from app.services.auth import consume_telegram_login_code, create_session, get_current_user, get_or_create_demo_user, get_or_create_telegram_user, validate_telegram_login
 from app.services.telegram_bot import handle_telegram_webhook_update, telegram_bot_start_url, validate_telegram_webhook_secret
 
 
@@ -58,6 +58,11 @@ def telegram_start_code_login(payload: TelegramStartCodePayload, db: Session = D
     user = consume_telegram_login_code(db, payload.code.strip())
     token = create_session(db, user)
     return AuthToken(access_token=token, user=UserOut.model_validate(user))
+
+
+@router.get("/me", response_model=UserOut)
+def me(user=Depends(get_current_user)):
+    return UserOut.model_validate(user)
 
 
 @router.post("/telegram/webhook")

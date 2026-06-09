@@ -12,6 +12,8 @@ class UserOut(BaseModel):
     id: int
     telegram_id: int | None = None
     username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     display_name: str
     is_demo: bool
 

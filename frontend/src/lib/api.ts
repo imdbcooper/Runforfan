@@ -1121,15 +1121,19 @@ export type TelegramLoginPayload = {
   hash: string
 }
 
+export type AuthUser = {
+  id: number
+  telegram_id: number | null
+  username: string | null
+  first_name: string | null
+  last_name: string | null
+  display_name: string
+  is_demo: boolean
+}
+
 export type AuthToken = {
   access_token: string
-  user: {
-    id: number
-    telegram_id: number | null
-    username: string | null
-    display_name: string
-    is_demo: boolean
-  }
+  user: AuthUser
 }
 
 export type TelegramBotLink = {
@@ -1239,6 +1243,7 @@ export async function telegramBotLink() {
 
 export const api = {
   activities: () => request<Activity[]>("/activities"),
+  currentUser: () => request<AuthUser>("/auth/me"),
   activity: (id: number) => request<Activity>(`/activities/${id}`),
   createActivity: (payload: Record<string, unknown>) => request<Activity>("/activities", { method: "POST", body: JSON.stringify(payload) }),
   updateActivity: (id: number, payload: Record<string, unknown>) => request<Activity>(`/activities/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
