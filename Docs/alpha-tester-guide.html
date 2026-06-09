@@ -3,1046 +3,1302 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Runforfan Alpha Tester Guide</title>
+    <title>Runforfan alpha: тестируем со смартфона</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080808'/%3E%3Cpath d='M9 22 15 8l3 9 4-6' fill='none' stroke='%23f97316' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <style>
       :root {
         color-scheme: dark;
-        --bg: #080808;
-        --panel: #101010;
-        --panel-2: #151515;
-        --line: #27272a;
-        --line-2: #3f3f46;
-        --text: #f4f4f5;
-        --muted: #a1a1aa;
-        --soft: #71717a;
-        --accent: #f97316;
-        --accent-2: #fb923c;
-        --danger: #fb7185;
-        --warn: #f59e0b;
-        --ok: #22c55e;
-        --radius: 14px;
+        --bg: #070707;
+        --ink: #fafafa;
+        --muted: #b6b0aa;
+        --soft: #827a72;
+        --panel: rgba(20, 19, 17, 0.88);
+        --panel-strong: #15120f;
+        --line: rgba(255, 255, 255, 0.12);
+        --line-hot: rgba(249, 115, 22, 0.42);
+        --orange: #f97316;
+        --orange-2: #ffb86b;
+        --amber: #f59e0b;
+        --green: #35d07f;
+        --red: #fb7185;
+        --shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+        --radius: 22px;
+        --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       html {
         scroll-behavior: smooth;
+        scroll-padding-top: 5.75rem;
       }
 
       body {
         margin: 0;
         background:
-          radial-gradient(circle at 15% 0%, rgba(249, 115, 22, 0.16), transparent 34rem),
-          radial-gradient(circle at 90% 8%, rgba(251, 146, 60, 0.08), transparent 30rem),
-          linear-gradient(180deg, #0b0b0b 0%, var(--bg) 36rem, #050505 100%);
-        color: var(--text);
-        font-family: var(--sans);
+          radial-gradient(circle at 20% -8%, rgba(249, 115, 22, 0.34), transparent 18rem),
+          radial-gradient(circle at 100% 18%, rgba(245, 158, 11, 0.13), transparent 20rem),
+          linear-gradient(180deg, #0e0b08 0%, var(--bg) 28rem, #030303 100%);
+        color: var(--ink);
+        font-family: var(--font);
         line-height: 1.55;
       }
 
-      a {
-        color: var(--accent-2);
-        text-decoration: none;
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.22;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 26px 26px;
+        mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
       }
 
-      a:hover {
-        text-decoration: underline;
+      a { color: inherit; }
+
+      img {
+        display: block;
+        height: auto;
+        max-width: 100%;
       }
 
-      .shell {
-        display: grid;
-        grid-template-columns: 18rem minmax(0, 1fr);
-        min-height: 100vh;
-      }
-
-      .mobile-toc {
-        display: none;
-      }
-
-      aside {
+      .topbar {
         position: sticky;
         top: 0;
-        height: 100vh;
-        overflow: auto;
-        border-right: 1px solid var(--line);
-        background: rgba(8, 8, 8, 0.88);
+        z-index: 10;
+        border-bottom: 1px solid var(--line);
+        background: rgba(7, 7, 7, 0.9);
         backdrop-filter: blur(18px);
-        padding: 1.25rem;
       }
 
-      main {
-        min-width: 0;
-        padding: 1.5rem;
-      }
-
-      .brand {
+      .nav-scroll {
         display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-        margin-bottom: 1.25rem;
+        gap: 0.5rem;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        padding: 0.75rem max(1rem, calc((100vw - 1180px) / 2));
+        scrollbar-width: none;
       }
 
-      .eyebrow {
-        color: var(--accent-2);
+      .nav-scroll::-webkit-scrollbar { display: none; }
+
+      .nav-scroll a {
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: #f4e8dc;
         font-family: var(--mono);
         font-size: 0.72rem;
-        font-weight: 700;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        padding: 0.48rem 0.68rem;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .nav-scroll a:focus-visible,
+      .nav-scroll a:hover {
+        border-color: var(--line-hot);
+        color: var(--orange-2);
+        outline: none;
+      }
+
+      .wrap {
+        margin: 0 auto;
+        max-width: 1180px;
+        padding: 1rem;
+      }
+
+      .hero {
+        border: 1px solid var(--line-hot);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
+        margin-top: 0.85rem;
+        overflow: hidden;
+        padding: clamp(1.1rem, 5vw, 3rem);
+        position: relative;
+        background:
+          linear-gradient(135deg, rgba(249, 115, 22, 0.22), transparent 46%),
+          linear-gradient(180deg, rgba(31, 26, 21, 0.92), rgba(10, 9, 8, 0.96));
+      }
+
+      .hero::after {
+        content: "20-30 мин";
+        position: absolute;
+        right: -1.5rem;
+        top: 1rem;
+        transform: rotate(8deg);
+        border: 1px solid rgba(255, 184, 107, 0.48);
+        border-radius: 18px;
+        color: #2a1200;
+        background: var(--orange-2);
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        padding: 0.55rem 2.1rem;
+        text-transform: uppercase;
+      }
+
+      .eyebrow,
+      .step-kicker {
+        color: var(--orange-2);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 900;
         letter-spacing: 0.14em;
         text-transform: uppercase;
       }
 
-      .brand h1 {
-        margin: 0;
-        font-size: 1.05rem;
-        letter-spacing: -0.03em;
-      }
+      h1,
+      h2,
+      h3,
+      p { margin: 0; }
 
-      .nav {
-        display: grid;
-        gap: 0.35rem;
-      }
-
-      .nav a {
-        display: block;
-        border: 1px solid transparent;
-        border-radius: 10px;
-        color: var(--muted);
-        font-size: 0.86rem;
-        padding: 0.46rem 0.6rem;
-      }
-
-      .nav a:hover {
-        border-color: var(--line);
-        background: #111;
-        color: var(--text);
-        text-decoration: none;
-      }
-
-      .hero {
-        border: 1px solid rgba(249, 115, 22, 0.32);
-        border-radius: 22px;
-        background:
-          linear-gradient(135deg, rgba(249, 115, 22, 0.16), transparent 42%),
-          linear-gradient(180deg, rgba(24, 24, 27, 0.92), rgba(9, 9, 11, 0.96));
-        overflow: hidden;
-        padding: clamp(1.25rem, 3vw, 2.2rem);
-      }
-
-      .hero-grid {
-        align-items: end;
-        display: grid;
-        gap: 1.5rem;
-        grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 0.75fr);
-      }
-
-      .hero h2 {
-        font-size: clamp(2.2rem, 5vw, 4.8rem);
-        letter-spacing: -0.07em;
-        line-height: 0.94;
-        margin: 0.35rem 0 1rem;
+      h1 {
+        font-size: clamp(2.45rem, 16vw, 6.6rem);
+        letter-spacing: -0.085em;
+        line-height: 0.88;
+        margin-top: 0.55rem;
+        max-width: 11ch;
       }
 
       .lead {
-        color: #d4d4d8;
-        font-size: 1.04rem;
-        max-width: 58rem;
+        color: #eadfd3;
+        font-size: clamp(1rem, 2.8vw, 1.22rem);
+        margin-top: 1rem;
+        max-width: 54rem;
       }
 
-      .meta-grid,
-      .card-grid,
-      .formula-grid,
-      .scenario-grid,
-      .screenshot-grid {
+      .hero-grid {
         display: grid;
         gap: 1rem;
+        margin-top: 1.3rem;
       }
 
-      .meta-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .hero-note,
+      .rule,
+      .check,
+      .bug-card {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.24);
+        padding: 0.9rem;
       }
 
-      .card-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+      .hero-note strong,
+      .rule strong,
+      .check strong,
+      .bug-card strong { color: #fff; }
+
+      .hero-note p,
+      .rule p,
+      .check li,
+      .bug-card p { color: var(--muted); }
+
+      .section {
+        margin-top: 1rem;
       }
 
-      .formula-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .section-head {
+        align-items: end;
+        display: flex;
+        gap: 0.85rem;
+        justify-content: space-between;
+        margin: 1.8rem 0 0.75rem;
       }
 
-      .scenario-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .section-head h2 {
+        font-size: clamp(1.55rem, 7vw, 3rem);
+        letter-spacing: -0.06em;
+        line-height: 0.98;
       }
 
-      .screenshot-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .section-head .tag {
+        border: 1px solid var(--line-hot);
+        border-radius: 999px;
+        color: var(--orange-2);
+        flex: 0 0 auto;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        font-weight: 900;
+        padding: 0.35rem 0.5rem;
       }
 
-      section {
-        margin-top: 1.5rem;
+      .rules,
+      .bug-grid {
+        display: grid;
+        gap: 0.7rem;
       }
 
-      .section-card,
-      .card,
-      .scenario,
-      .formula,
-      .shot,
-      .callout {
+      .rule {
+        display: grid;
+        gap: 0.18rem;
+      }
+
+      .step-card {
         border: 1px solid var(--line);
         border-radius: var(--radius);
-        background: rgba(16, 16, 16, 0.86);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+        margin-top: 1rem;
+        overflow: hidden;
+        background:
+          linear-gradient(120deg, rgba(249, 115, 22, 0.105), transparent 38%),
+          var(--panel);
       }
 
-      .section-card {
-        padding: clamp(1rem, 2.2vw, 1.5rem);
-      }
-
-      .card,
-      .scenario,
-      .formula,
-      .callout {
+      .step-body {
+        display: grid;
+        gap: 1rem;
         padding: 1rem;
       }
 
-      .card h4,
-      .scenario h4,
-      .formula h4 {
-        margin: 0 0 0.6rem;
-        font-size: 0.98rem;
+      .copy h3 {
+        font-size: clamp(1.4rem, 7vw, 2.35rem);
+        letter-spacing: -0.055em;
+        line-height: 1;
+        margin-top: 0.32rem;
       }
 
-      h2.section-title {
-        font-size: clamp(1.45rem, 2.4vw, 2.1rem);
-        letter-spacing: -0.045em;
-        margin: 0 0 0.8rem;
-      }
-
-      h3 {
-        font-size: 1.15rem;
-        margin: 1.3rem 0 0.65rem;
-      }
-
-      p {
+      .copy p {
         color: var(--muted);
-        margin: 0.45rem 0;
+        margin-top: 0.7rem;
       }
 
-      ul,
-      ol {
-        color: var(--muted);
-        margin: 0.65rem 0 0;
-        padding-left: 1.25rem;
+      .action-list,
+      .check ul {
+        margin: 0;
+        padding-left: 1.15rem;
       }
 
-      li + li {
-        margin-top: 0.35rem;
-      }
-
-      .badge-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.45rem;
+      .action-list {
+        color: #e8ddd2;
         margin-top: 0.85rem;
       }
 
-      .badge {
-        align-items: center;
-        border: 1px solid var(--line-2);
-        border-radius: 999px;
-        color: #e4e4e7;
-        display: inline-flex;
-        font-family: var(--mono);
-        font-size: 0.68rem;
-        gap: 0.3rem;
-        letter-spacing: 0.08em;
-        padding: 0.25rem 0.5rem;
-        text-transform: uppercase;
+      li + li { margin-top: 0.4rem; }
+
+      .check {
+        border-color: rgba(53, 208, 127, 0.28);
+        background: rgba(53, 208, 127, 0.06);
+        margin-top: 0.9rem;
       }
 
-      .badge.orange {
-        border-color: rgba(249, 115, 22, 0.55);
-        color: #fed7aa;
-      }
-
-      .badge.green {
-        border-color: rgba(34, 197, 94, 0.45);
-        color: #bbf7d0;
-      }
-
-      .badge.rose {
-        border-color: rgba(251, 113, 133, 0.5);
-        color: #fecdd3;
-      }
-
-      .tiny {
-        color: var(--soft);
-        font-family: var(--mono);
-        font-size: 0.72rem;
-      }
-
-      table {
-        border-collapse: collapse;
-        margin-top: 0.8rem;
-        width: 100%;
-      }
-
-      th,
-      td {
-        border-bottom: 1px solid var(--line);
-        padding: 0.65rem 0.55rem;
-        text-align: left;
-        vertical-align: top;
-      }
-
-      th {
-        color: #d4d4d8;
-        font-family: var(--mono);
-        font-size: 0.7rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      td {
-        color: var(--muted);
-        font-size: 0.92rem;
-      }
-
-      code,
-      pre {
-        font-family: var(--mono);
-      }
-
-      code {
-        color: #fed7aa;
-      }
-
-      pre {
-        background: #09090b;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        color: #e4e4e7;
-        overflow: auto;
-        overflow-wrap: anywhere;
-        padding: 0.9rem;
-        white-space: pre-wrap;
-      }
-
-      .table-wrap {
-        max-width: 100%;
-        overflow-x: auto;
-      }
-
-      .formula summary {
-        cursor: pointer;
-        font-weight: 700;
-        list-style: none;
-      }
-
-      .formula summary::-webkit-details-marker {
-        display: none;
-      }
-
-      figure {
-        margin: 0;
-      }
-
-      .shot {
-        overflow: hidden;
-      }
-
-      .shot img {
-        background: #050505;
+      .check strong {
         display: block;
+        margin-bottom: 0.45rem;
+      }
+
+      .phone-frame {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 32px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 32%),
+          #050505;
+        box-shadow: inset 0 0 0 7px #111, 0 20px 52px rgba(0, 0, 0, 0.48);
+        margin: 0 auto;
+        max-width: 390px;
+        overflow: hidden;
+        padding: 0.72rem;
+      }
+
+      .phone-top {
+        align-items: center;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        padding: 0.2rem 0 0.62rem;
+      }
+
+      .speaker {
+        background: #2a2a2a;
+        border-radius: 999px;
+        height: 0.28rem;
+        width: 3.8rem;
+      }
+
+      .phone-frame img {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 22px;
+        background: #080808;
         width: 100%;
       }
 
-      .shot figcaption {
-        border-top: 1px solid var(--line);
+      .shot-link {
+        display: block;
+        border-radius: 22px;
+      }
+
+      .shot-link:focus-visible {
+        outline: 2px solid var(--orange-2);
+        outline-offset: 3px;
+      }
+
+      .shot-link:hover img {
+        border-color: rgba(249, 115, 22, 0.45);
+      }
+
+      figcaption {
         color: var(--muted);
-        font-size: 0.86rem;
-        padding: 0.7rem 0.8rem;
+        font-size: 0.84rem;
+        padding: 0.75rem 0.2rem 0.15rem;
       }
 
-      .callout {
-        border-color: rgba(249, 115, 22, 0.4);
-        background: rgba(249, 115, 22, 0.08);
-      }
-
-      .callout.danger {
-        border-color: rgba(251, 113, 133, 0.45);
-        background: rgba(251, 113, 133, 0.08);
-      }
-
-      .steps {
-        counter-reset: steps;
-        display: grid;
-        gap: 0.6rem;
-        margin-top: 0.8rem;
-      }
-
-      .step {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        color: var(--muted);
-        padding: 0.7rem 0.8rem 0.7rem 2.5rem;
-        position: relative;
-      }
-
-      .step::before {
-        background: var(--accent);
-        border-radius: 999px;
-        color: #111;
-        content: counter(steps);
-        counter-increment: steps;
+      .caption-mark {
+        color: var(--orange-2);
         font-family: var(--mono);
         font-size: 0.72rem;
         font-weight: 900;
-        height: 1.35rem;
-        left: 0.75rem;
-        line-height: 1.35rem;
-        position: absolute;
-        text-align: center;
-        top: 0.75rem;
-        width: 1.35rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
 
-      .kbd {
-        border: 1px solid var(--line-2);
-        border-radius: 6px;
-        color: #e4e4e7;
+      details.deep {
+        border-top: 1px solid var(--line);
+        margin-top: 0.9rem;
+        padding-top: 0.8rem;
+      }
+
+      details.deep summary {
+        color: #f8ddc6;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      code {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.055);
+        color: #ffd5ae;
         font-family: var(--mono);
-        font-size: 0.72rem;
-        padding: 0.1rem 0.35rem;
+        font-size: 0.9em;
+        padding: 0.08rem 0.28rem;
+      }
+
+      .bug-card pre {
+        color: #e7dbcf;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        margin: 0.65rem 0 0;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+
+      .appendix-list {
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      .appendix-item {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(16, 16, 16, 0.82);
+        overflow: hidden;
+      }
+
+      .appendix-item summary {
+        cursor: pointer;
+        display: grid;
+        gap: 0.25rem;
+        padding: 1rem;
+      }
+
+      .appendix-item summary strong {
+        color: #fff;
+        font-size: 1rem;
+      }
+
+      .appendix-item summary span {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      .appendix-content {
+        border-top: 1px solid var(--line);
+        padding: 1rem;
+      }
+
+      .formula-grid {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .formula-card {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        background: rgba(0, 0, 0, 0.24);
+        padding: 0.9rem;
+      }
+
+      .formula-card h4 {
+        color: #fff;
+        font-size: 0.96rem;
+        margin: 0 0 0.45rem;
+      }
+
+      .formula-card p,
+      .formula-card li {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .formula-card ul {
+        margin: 0.45rem 0 0;
+        padding-left: 1rem;
+      }
+
+      .state-shot {
+        border: 1px solid rgba(249, 115, 22, 0.2);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(249, 115, 22, 0.08), rgba(0, 0, 0, 0.24));
+        padding: 0.72rem;
+      }
+
+      .state-shot a {
+        display: block;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        background: #050505;
+      }
+
+      .state-shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-height: 27rem;
+        object-fit: cover;
+        object-position: top center;
+      }
+
+      .state-shot strong {
+        display: block;
+        color: #fff;
+        font-size: 0.9rem;
+        margin-top: 0.65rem;
+      }
+
+      .state-shot p {
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-top: 0.25rem;
+      }
+
+      .source {
+        color: var(--soft);
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        margin-top: 0.55rem;
+        overflow-wrap: anywhere;
       }
 
       .footer {
         color: var(--soft);
         font-family: var(--mono);
         font-size: 0.72rem;
-        margin: 2rem 0 0;
-        padding: 1rem 0 0;
+        padding: 1.5rem 0 2.5rem;
       }
 
-      @media (max-width: 1080px) {
-        .shell {
-          grid-template-columns: 1fr;
+      @media (max-width: 520px) {
+        html { scroll-padding-top: 4.8rem; }
+        .wrap { padding: 0.6rem; }
+        .hero { margin-top: 0.55rem; padding: 1rem; }
+        .hero::after { display: none; }
+        .hero-grid { gap: 0.65rem; margin-top: 1rem; }
+        .section-head { margin: 1.35rem 0 0.6rem; }
+        .step-body { gap: 0.7rem; padding: 0.68rem; }
+        .phone-frame {
+          border-radius: 26px;
+          box-shadow: inset 0 0 0 4px #111, 0 18px 44px rgba(0, 0, 0, 0.44);
+          padding: 0.36rem;
         }
+        .phone-top { padding: 0.12rem 0 0.4rem; }
+        .phone-frame img,
+        .shot-link { border-radius: 18px; }
+      }
 
-        aside {
-          display: none;
-        }
-
-        .mobile-toc {
-          background: rgba(8, 8, 8, 0.94);
-          border-bottom: 1px solid var(--line);
-          display: block;
-          padding: 0.75rem 1rem;
-          position: sticky;
-          top: 0;
-          z-index: 20;
-        }
-
-        .mobile-toc summary {
-          color: var(--text);
-          cursor: pointer;
-          font-family: var(--mono);
-          font-size: 0.72rem;
-          font-weight: 800;
-          letter-spacing: 0.14em;
-          list-style: none;
-          text-transform: uppercase;
-        }
-
-        .nav {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
+      @media (min-width: 760px) {
+        .wrap { padding: 1.25rem; }
         .hero-grid,
-        .card-grid,
-        .formula-grid,
-        .scenario-grid,
-        .screenshot-grid {
-          grid-template-columns: 1fr;
+        .rules,
+        .bug-grid,
+        .formula-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .step-body {
+          align-items: start;
+          grid-template-columns: minmax(0, 1fr) minmax(290px, 390px);
+          padding: 1.25rem;
         }
       }
 
-      @media (max-width: 640px) {
-        main,
-        aside {
-          padding: 1rem;
-        }
-
-        .meta-grid,
-        .nav {
-          grid-template-columns: 1fr;
-        }
-
-        .hero {
-          border-radius: 16px;
-        }
-
-        .hero h2 {
-          font-size: clamp(2rem, 14vw, 3.35rem);
-        }
+      @media (min-width: 1120px) {
+        .step-body { gap: 1.4rem; padding: 1.5rem; }
+        .step-card:nth-of-type(even) .copy { order: 2; }
+        .step-card:nth-of-type(even) figure { order: 1; }
       }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <aside>
-        <div class="brand">
-          <span class="eyebrow">Runforfan alpha</span>
-          <h1>Гайд альфа-тестера</h1>
-          <p class="tiny">Подготовлено: 2026-06-08</p>
+    <nav class="topbar" aria-label="Быстрая навигация по шагам">
+      <div class="nav-scroll">
+        <a href="#start">Старт</a>
+        <a href="#rules">Правила</a>
+        <a href="#criteria">Критерии</a>
+        <a href="#step-1">1 Dashboard</a>
+        <a href="#step-2">2 Profile</a>
+        <a href="#step-3">3 Plans</a>
+        <a href="#step-4">4 Imports</a>
+        <a href="#step-5">5 Activities</a>
+        <a href="#step-6">6 Calendar</a>
+        <a href="#step-7">7 Analytics</a>
+        <a href="#step-8">8 Load</a>
+        <a href="#step-9">9 Zones</a>
+        <a href="#step-10">10 VDOT</a>
+        <a href="#step-11">11 Goals</a>
+        <a href="#step-12">12 Data</a>
+        <a href="#full-guide">Все страницы</a>
+        <a href="#appendix">Приложения</a>
+        <a href="#report">Баг-репорт</a>
+      </div>
+    </nav>
+
+    <main class="wrap" id="start">
+      <header class="hero">
+        <span class="eyebrow">Runforfan mobile alpha</span>
+        <h1>Runforfan alpha: тестируем со смартфона</h1>
+        <p class="lead">
+          Это полноценный playbook для альфа-тестера: сначала пройдите 12 основных экранов, затем используйте полный справочник
+          всех страниц, вложенных панелей, форм, пустых состояний, ошибок и опасных действий. Основной формат проверки - смартфон в portrait.
+        </p>
+        <div class="hero-grid" aria-label="Что проверить за проход">
+          <div class="hero-note"><strong>Понятность.</strong><p>Пользователь понимает, что заполнить, почему появилась метрика и что делать дальше.</p></div>
+          <div class="hero-note"><strong>Мобильность.</strong><p>Нет горизонтального скролла, кнопки нажимаются пальцем, клавиатура не закрывает критичные поля.</p></div>
+          <div class="hero-note"><strong>Данные.</strong><p>Импорт, план, календарь, аналитика и экспорт согласованы между экранами.</p></div>
         </div>
-        <nav class="nav" aria-label="Оглавление">
-          <a href="#purpose">1. Что тестируем</a>
-          <a href="#before">2. Перед началом</a>
-          <a href="#screens">3. Скриншоты</a>
-          <a href="#scenarios">4. Сценарии</a>
-          <a href="#formulas">5. Формулы</a>
-          <a href="#quality">6. Критерии качества</a>
-          <a href="#bugs">7. Баг-репорт</a>
-          <a href="#glossary">8. Глоссарий</a>
-          <a href="#limits">9. Ограничения</a>
-        </nav>
-      </aside>
+      </header>
 
-      <main>
-        <details class="mobile-toc">
-          <summary>Оглавление и быстрый переход</summary>
-          <nav class="nav" aria-label="Мобильное оглавление">
-            <a href="#purpose">1. Что тестируем</a>
-            <a href="#before">2. Перед началом</a>
-            <a href="#mobile-checklist">Mobile checklist</a>
-            <a href="#screens">3. Скриншоты</a>
-            <a href="#scenarios">4. Сценарии</a>
-            <a href="#formulas">5. Формулы</a>
-            <a href="#quality">6. Критерии качества</a>
-            <a href="#bugs">7. Баг-репорт</a>
-          </nav>
-        </details>
-        <header class="hero">
-          <div class="hero-grid">
-            <div>
-              <span class="eyebrow">Smartphone-first alpha</span>
-              <h2>Runforfan: mobile alpha testing guide</h2>
-              <p class="lead">
-                Этот документ помогает проверить приложение прежде всего на смартфоне: первый вход, профиль спортсмена, зоны,
-                импорт тренировок, планы, календарь, analytics, load/recovery, performance, goals, LLM providers,
-                экспорт данных и safety-поведение.
-              </p>
-              <div class="badge-row">
-                <span class="badge orange">Alpha</span>
-                <span class="badge">RU/EN UI</span>
-                <span class="badge green">Local screenshots</span>
-                <span class="badge rose">No medical advice</span>
-              </div>
+      <section class="section" id="rules">
+        <div class="section-head">
+          <h2>Перед тестом</h2>
+          <span class="tag">обязательно</span>
+        </div>
+        <div class="rules">
+          <div class="rule"><strong>Держите смартфон вертикально.</strong><p>Основная ширина проверки: 360-430px. Landscape можно проверить после основного прохода.</p></div>
+          <div class="rule"><strong>Откройте admin.</strong><p>Локально: <code>http://127.0.0.1:5173/admin/</code>. Backend health перед тестом: <code>http://127.0.0.1:8080/health</code> должен вернуть <code>ok</code>. Для staging используйте URL, который выдал координатор.</p></div>
+          <div class="rule"><strong>Войдите и выберите язык.</strong><p>Если видите auth gate, используйте Telegram login или локальный dev login. В topbar проверьте переключатель <code>ru/en</code>; основной проход делайте на русском.</p></div>
+          <div class="rule"><strong>Ведите заметки по шагам.</strong><p>Фиксируйте номер шага, фактическое поведение, ожидаемое поведение и данные, которые ввели.</p></div>
+          <div class="rule"><strong>Не удаляйте данные случайно.</strong><p>Danger zone тестируйте только если специально проверяете reset/export/delete.</p></div>
+          <div class="rule"><strong>Подготовьте материалы.</strong><p>Нужны 1-3 скриншота тренировок, опционально CSV и один реальный или тестовый результат гонки.</p></div>
+          <div class="rule"><strong>Без медицинских выводов.</strong><p>Runforfan показывает спортивные эвристики, а не медицинские рекомендации. При боли, головокружении, ухудшении самочувствия или признаках травмы тренировку нужно остановить и обратиться к специалисту.</p></div>
+        </div>
+      </section>
+
+      <section class="section" id="criteria">
+        <div class="section-head">
+          <h2>Как проверять расчеты</h2>
+          <span class="tag">критерии</span>
+        </div>
+        <div class="rules">
+          <div class="rule"><strong>Source и confidence.</strong><p>У каждой расчетной метрики ищите источник данных, method/source reference и confidence. Если источник пустой или странный, это отдельный баг.</p></div>
+          <div class="rule"><strong>Периоды и empty states.</strong><p>Переключайте 7/28/90 дней и custom range. Пустой период должен объяснять отсутствие данных, а не выглядеть как сломанный график.</p></div>
+          <div class="rule"><strong>Проверка на здравый смысл.</strong><p>Weekly distance, pace, HR, adherence, zones и VDOT должны совпадать с вашей тестовой историей по порядку величин. Ошибка в единицах или процентах - критичный report.</p></div>
+          <div class="rule"><strong>Формулы коротко.</strong><p>CTL - долгосрочная EWMA нагрузки, ATL - краткосрочная, TSB = CTL - ATL. VDOT/Riegel используют только качественные race/time-trial sources; easy run не должен становиться главным performance source.</p></div>
+          <div class="rule"><strong>Warnings осторожны.</strong><p>Load, recovery, injury и readiness предупреждения должны звучать как training guidance, не как диагноз и не как гарантия результата.</p></div>
+          <div class="rule"><strong>Скриншоты кликабельны.</strong><p>В каждом шаге нажмите на изображение, чтобы открыть PNG в полном размере и сравнить мелкие UI детали.</p></div>
+        </div>
+      </section>
+
+      <section class="section" aria-label="Пошаговый мобильный проход">
+        <article class="step-card" id="step-1">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 1 / Dashboard</span>
+              <h3>Откройте dashboard и оцените готовность недели</h3>
+              <p>Начните с главного экрана. Он должен быстро объяснить, готов ли профиль, есть ли активный план, что запланировано на текущую неделю и где следующий полезный action.</p>
+              <ol class="action-list">
+                <li>Откройте админку и убедитесь, что попали на dashboard.</li>
+                <li>Посмотрите readiness/completeness, текущую неделю и ближайшие тренировки.</li>
+                <li>Проверьте, что карточки читаются без приближения и не создают горизонтальный скролл.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Понятно ли, чего не хватает для старта.</li><li>Видны ли ключевые статусы плана и недели.</li><li>Можно ли попасть в следующий экран одним очевидным tap.</li></ul></div>
             </div>
-            <div class="meta-grid">
-              <div class="card">
-                <span class="eyebrow">Frontend</span>
-                <p><code>http://127.0.0.1:5173/admin/</code></p>
-              </div>
-              <div class="card">
-                <span class="eyebrow">Backend</span>
-                <p><code>http://127.0.0.1:8080/api</code></p>
-              </div>
-              <div class="card">
-                <span class="eyebrow">Health</span>
-                <p><code>GET /health</code> должен вернуть <code>{"status":"ok"}</code></p>
-              </div>
-              <div class="card">
-                <span class="eyebrow">Login</span>
-                <p>Telegram Login или dev/demo user в development.</p>
-              </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/dashboard.png"><img src="assets/alpha-guide/dashboard.png" alt="Мобильный dashboard Runforfan с readiness и текущей неделей" width="390" height="844" loading="eager" /></a>
+              <figcaption><span class="caption-mark">dashboard.png</span> Первый экран должен работать как навигатор теста.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-2">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 2 / Profile & zones</span>
+              <h3>Сначала заполните профиль спортсмена</h3>
+              <p>Без профиля зоны, нагрузка и план будут неполными. На смартфоне важно, чтобы длинная форма была сгруппирована и не заставляла искать обязательные поля.</p>
+              <ol class="action-list">
+                <li>Заполните дату рождения, пол, часовой пояс, вес и рост.</li>
+                <li>Добавьте resting HR и HRmax или lactate threshold HR.</li>
+                <li>Укажите threshold pace, preferred days, ограничения по дням, safety/recovery flags.</li>
+                <li>Сохраните профиль и посмотрите, пересчитались ли HR/pace/RPE zones.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Клавиатура не закрывает активное поле.</li><li>Понятно, какие поля влияют на зоны.</li><li>После сохранения виден рост готовности профиля.</li></ul></div>
             </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/profile-zones.png"><img src="assets/alpha-guide/profile-zones.png" alt="Мобильный экран профиля спортсмена и зон Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">profile-zones.png</span> Этот экран проверяет ввод физиологии, предпочтений и готовность зон.</figcaption>
+            </figure>
           </div>
-        </header>
+        </article>
 
-        <section id="mobile-checklist" class="section-card">
-          <h2 class="section-title">Mobile quick checklist</h2>
-          <div class="card-grid">
-            <div class="card"><h4>Viewport</h4><p>Основной проход делайте на смартфоне или mobile viewport 360-430px в portrait. Дополнительно проверьте landscape.</p></div>
-            <div class="card"><h4>Touch and keyboard</h4><p>Кнопки должны нажиматься большим пальцем, поля не должны перекрываться клавиатурой, date/time/file inputs открывают нативные picker.</p></div>
-            <div class="card"><h4>Overflow</h4><p>Проверяйте отсутствие горизонтального скролла страницы. Таблицы, код, графики и длинные API-сообщения должны скроллиться внутри блока.</p></div>
-            <div class="card"><h4>Upload</h4><p>Screenshot import должен работать через gallery/file picker, включая несколько PNG/JPEG/WEBP за один batch.</p></div>
-            <div class="card"><h4>Density</h4><p>Вторичные формы, опасные действия, формулы и технические блоки должны быть свернуты или явно отделены.</p></div>
-            <div class="card"><h4>Downloads</h4><p>Проверьте JSON/CSV downloads в mobile browser/webview и понятный fallback, если браузер блокирует загрузку.</p></div>
-          </div>
-        </section>
-
-        <section id="purpose" class="section-card">
-          <h2 class="section-title">1. Что тестируем</h2>
-          <p>
-            Runforfan в alpha должен быть проверен не только на отсутствие ошибок, но и на продуктовую понятность:
-            пользователь должен понимать, почему появилась метрика, предупреждение, кандидат импорта или рекомендация
-            по плану.
-          </p>
-          <div class="card-grid">
-            <div class="card">
-              <h4>Импорт и валидация</h4>
-              <p>Проверяем upload screenshots, CSV import, LLM/template recognition, candidate correction, confirm/reject и activity creation.</p>
+        <article class="step-card" id="step-3">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 3 / Plans</span>
+              <h3>Создайте или внимательно проверьте план</h3>
+              <p>Plan builder должен объяснять, из каких вводных строится план и чем preview отличается от создания активного плана.</p>
+              <ol class="action-list">
+                <li>Укажите цель, дистанцию гонки, дату старта и доступные тренировочные дни.</li>
+                <li>Добавьте performance inputs, текущий недельный объем, ограничения и support/OFP.</li>
+                <li>Сначала нажмите preview и проверьте риски, объем и первые тренировки.</li>
+                <li>Создайте draft или active plan и убедитесь, что dashboard/calendar его видят.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Preview не сохраняет план как активный.</li><li>Risk flags и safety notes заметны на узком экране.</li><li>Карточки недель и тренировок раскрываются предсказуемо.</li></ul></div>
             </div>
-            <div class="card">
-              <h4>Профиль и зоны</h4>
-              <p>Проверяем completeness, safety warnings, HR/pace/RPE zones, manual HR overrides и measurements.</p>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/plans.png"><img src="assets/alpha-guide/plans.png" alt="Мобильный экран создания и просмотра тренировочных планов Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">plans.png</span> Проверьте поля цели, constraints, preview и активный план.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-4">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 4 / Imports</span>
+              <h3>Импортируйте тренировки со скриншота или CSV</h3>
+              <p>Импорт должен быть безопасным: распознавание может ошибаться, поэтому tester проверяет candidate перед созданием activity.</p>
+              <ol class="action-list">
+                <li>Загрузите PNG/JPEG/WEBP через gallery/file picker.</li>
+                <li>Проверьте статус batch и сообщение распознавания.</li>
+                <li>Если recognition неверный, исправьте поля или зафиксируйте ошибку.</li>
+                <li>Проверьте CSV fallback: created, duplicates, matched, failed.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Неверный candidate не превращается в activity без подтверждения.</li><li>Ошибки recognition объясняют, что пошло не так.</li><li>История импорта помещается в мобильные карточки.</li></ul></div>
             </div>
-            <div class="card">
-              <h4>Планы и календарь</h4>
-              <p>Проверяем preview/generate, active plan, workout lifecycle, feedback, matching, reschedule и adherence.</p>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/imports.png"><img src="assets/alpha-guide/imports.png" alt="Мобильный экран импорта тренировок из скриншотов и CSV" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">imports.png</span> Здесь особенно важны file picker, feedback распознавания и confirmation.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-5">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 5 / Activities</span>
+              <h3>Проверьте список и детали активностей</h3>
+              <p>Activities - место, где импортированные и ручные тренировки должны стать понятными мобильными карточками с валидацией и деталями.</p>
+              <ol class="action-list">
+                <li>Найдите активность после импорта и откройте detail panel.</li>
+                <li>Создайте manual activity: title, started, type, duration, distance, avg HR.</li>
+                <li>Проверьте, как показываются pace, load, validation warnings и source metadata.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Карточки не выглядят как обрезанная таблица.</li><li>Manual form не перегружает первый экран.</li><li>Validation помогает исправить данные, а не пугает.</li></ul></div>
             </div>
-            <div class="card">
-              <h4>Расчеты</h4>
-              <p>Проверяем pace, VDOT, Riegel predictions, TRIMP, CTL/ATL/TSB, monotony, strain и execution score.</p>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/activities.png"><img src="assets/alpha-guide/activities.png" alt="Мобильный список тренировочных активностей Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">activities.png</span> Смотрите карточки, ручное создание и панель деталей.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-6">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 6 / Calendar</span>
+              <h3>Сверьте план и факт в календаре</h3>
+              <p>Календарь должен помогать понять, что было запланировано, что выполнено и какие действия доступны для конкретного дня.</p>
+              <ol class="action-list">
+                <li>Переключите This week, Next week, This month и custom range.</li>
+                <li>Откройте день с planned workout и день с actual activity.</li>
+                <li>Проверьте match/link, reschedule, missed/skipped и восстановление planned.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>План и факт различаются визуально.</li><li>Actions не требуют точного попадания в мелкие элементы.</li><li>Слишком большой range отклоняется понятным сообщением.</li></ul></div>
             </div>
-            <div class="card">
-              <h4>Safety</h4>
-              <p>Проверяем conservative mode, injury/recovery flags, fatigue/load warnings и понятные ограничения продукта.</p>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/calendar.png"><img src="assets/alpha-guide/calendar.png" alt="Мобильный календарь Runforfan с планом и фактом" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">calendar.png</span> Проверяйте day cards, planned vs actual и действия с тренировками.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-7">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 7 / Analytics</span>
+              <h3>Сравните аналитику с реальной историей</h3>
+              <p>Analytics должен показывать тренды так, чтобы спортсмен узнал свою тренировочную историю: объем, темп, пульс, adherence, best efforts и insights.</p>
+              <ol class="action-list">
+                <li>Переключите периоды и custom range.</li>
+                <li>Сравните недельный объем, средний темп, пульс и adherence с ожидаемыми значениями.</li>
+                <li>Откройте подсказки Why?, если они есть, и оцените понятность объяснений.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Графики читаются на ширине смартфона.</li><li>Empty state не выглядит как поломка.</li><li>Insights не делают медицинских обещаний.</li></ul></div>
             </div>
-            <div class="card">
-              <h4>Данные</h4>
-              <p>Проверяем export, audit log, LLM provider secrets и удаление данных через подтверждение <code>DELETE</code>.</p>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/analytics.png"><img src="assets/alpha-guide/analytics.png" alt="Мобильный экран аналитики тренировок Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">analytics.png</span> Сверяйте метрики с реальной или тестовой историей тренировок.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="step-card" id="step-8">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 8 / Load & Recovery</span>
+              <h3>Проверьте нагрузку, восстановление и предупреждения</h3>
+              <p>Этот экран должен объяснять CTL, ATL, TSB и показывать, когда нагрузка растет слишком резко или тяжелые тренировки стоят слишком близко.</p>
+              <ol class="action-list">
+                <li>Посмотрите daily и weekly load, CTL/ATL/TSB и предупреждения.</li>
+                <li>Проверьте, есть ли warmup warning при короткой истории данных.</li>
+                <li>Сравните hard session spacing с календарем и планом.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Таблицы и графики не ломают ширину страницы.</li><li>Warnings звучат осторожно и понятно.</li><li>Materialization/recompute actions не выглядят опасными.</li></ul></div>
+              <details class="deep"><summary>Коротко о формулах</summary><p>CTL - долгосрочная EWMA нагрузки, ATL - краткосрочная, TSB = CTL - ATL. Это эвристики формы и усталости, а не диагноз.</p></details>
             </div>
-          </div>
-        </section>
-
-        <section id="before" class="section-card">
-          <h2 class="section-title">2. Перед началом</h2>
-          <div class="callout danger">
-            <h3>Safety disclaimer</h3>
-            <p>
-              Runforfan не является медицинским устройством. Предупреждения в интерфейсе являются спортивными эвристиками.
-              При боли, травме, необычной одышке, головокружении, обмороке или ухудшении самочувствия нужно прекратить
-              тренировку и обратиться к специалисту.
-            </p>
-          </div>
-          <h3>Минимальная подготовка</h3>
-          <div class="steps">
-            <div class="step">Убедитесь, что backend отвечает на <code>GET http://127.0.0.1:8080/health</code>.</div>
-            <div class="step">Откройте <code>http://127.0.0.1:5173/admin/</code> на смартфоне или в mobile viewport 360-430px.</div>
-            <div class="step">Войдите через Telegram или dev/demo login.</div>
-            <div class="step">Переключите язык <span class="kbd">ru/en</span> и проверьте, что UI не ломается.</div>
-            <div class="step">Подготовьте несколько скриншотов тренировок и один CSV-файл, если тестируете import pipeline.</div>
-            <div class="step">Не используйте реальные production API keys в недоверенном alpha-окружении.</div>
-          </div>
-        </section>
-
-        <section id="screens" class="section-card">
-          <h2 class="section-title">3. Карта экранов со скриншотами</h2>
-          <p>Скриншоты сняты с живого admin UI и лежат локально в <code>Docs/assets/alpha-guide/</code>.</p>
-          <div class="screenshot-grid">
-            <figure class="shot">
-              <a href="assets/alpha-guide/dashboard.png"><img src="assets/alpha-guide/dashboard.png" alt="Dashboard screen" loading="lazy" /></a>
-              <figcaption><strong>Dashboard.</strong> На смартфоне проверьте summary cards, mobile menu, current week cards и отсутствие горизонтального скролла.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/activities.png"><img src="assets/alpha-guide/activities.png" alt="Activities screen" loading="lazy" /></a>
-              <figcaption><strong>Activities.</strong> Проверьте mobile cards, свернутую manual form, drawer detail, validation и derived metrics.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/imports.png"><img src="assets/alpha-guide/imports.png" alt="Imports screen" loading="lazy" /></a>
-              <figcaption><strong>Imports.</strong> Проверьте gallery/file picker, CSV accordion, candidate review и history без перегруза экрана.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/calendar.png"><img src="assets/alpha-guide/calendar.png" alt="Calendar screen" loading="lazy" /></a>
-              <figcaption><strong>Calendar.</strong> Проверьте day cards, видимые title/status/score и свернутые actions/reschedule/matching.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/analytics.png"><img src="assets/alpha-guide/analytics.png" alt="Analytics screen" loading="lazy" /></a>
-              <figcaption><strong>Analytics.</strong> Проверьте readability charts, Why? popovers, date controls и custom range на узком экране.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/load-recovery.png"><img src="assets/alpha-guide/load-recovery.png" alt="Load and Recovery screen" loading="lazy" /></a>
-              <figcaption><strong>Load & Recovery.</strong> Проверьте charts readability, CTL/ATL/TSB table scroll и materialization actions.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/zones-analytics.png"><img src="assets/alpha-guide/zones-analytics.png" alt="Zones Analytics screen" loading="lazy" /></a>
-              <figcaption><strong>Zones Analytics.</strong> Проверьте bars, configured zones, table scroll и длинные source references.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/performance.png"><img src="assets/alpha-guide/performance.png" alt="Performance screen" loading="lazy" /></a>
-              <figcaption><strong>Performance.</strong> Проверьте Add result accordion, result cards/tables, VDOT source и prediction readability.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/goals.png"><img src="assets/alpha-guide/goals.png" alt="Goals screen" loading="lazy" /></a>
-              <figcaption><strong>Goals & races.</strong> Проверьте Create goal accordion, readiness badges и More actions без случайных taps.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/profile-zones.png"><img src="assets/alpha-guide/profile-zones.png" alt="Profile and Zones screen" loading="eager" /></a>
-              <figcaption><strong>Profile & zones.</strong> Проверьте Personal/Physiology open, остальные группы collapsed, zones table scroll и keyboard behavior.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/plans.png"><img src="assets/alpha-guide/plans.png" alt="Plans screen" loading="lazy" /></a>
-              <figcaption><strong>Plans.</strong> Проверьте advanced fields accordions, week accordions, workout actions and feedback blocks.</figcaption>
-            </figure>
-            <figure class="shot">
-              <a href="assets/alpha-guide/settings-data.png"><img src="assets/alpha-guide/settings-data.png" alt="Settings screen" loading="lazy" /></a>
-              <figcaption><strong>Settings & data.</strong> Проверьте provider edit accordion, danger zone collapse, exports/downloads и audit mobile cards.</figcaption>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/load-recovery.png"><img src="assets/alpha-guide/load-recovery.png" alt="Мобильный экран нагрузки и восстановления Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">load-recovery.png</span> Смотрите CTL/ATL/TSB, daily load и safety warnings.</figcaption>
             </figure>
           </div>
-        </section>
+        </article>
 
-        <section id="scenarios" class="section-card">
-          <h2 class="section-title">4. Сценарии тестирования</h2>
-          <div class="callout">
-            <p><strong>Mobile pass for every scenario:</strong> проверьте tap targets, keyboard overlap, file picker/gallery upload where relevant, portrait/landscape, horizontal scroll, chart readability, downloads and browser back/refresh behavior.</p>
+        <article class="step-card" id="step-9">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 9 / Zones Analytics</span>
+              <h3>Разберите распределение по зонам</h3>
+              <p>Zones analytics показывает, сколько времени спортсмен проводит в HR, pace и RPE зонах, и насколько факт совпадает с планом.</p>
+              <ol class="action-list">
+                <li>Проверьте HR/pace/RPE distributions и Seiler split.</li>
+                <li>Сравните planned vs actual по зонам.</li>
+                <li>Вернитесь к profile & zones, если зоны выглядят неверно.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Понятно, какие configured zones используются.</li><li>Missing HR/pace/RPE объясняются как lack of data.</li><li>Длинные source references не создают горизонтальный скролл всей страницы.</li></ul></div>
+            </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/zones-analytics.png"><img src="assets/alpha-guide/zones-analytics.png" alt="Мобильная аналитика зон интенсивности Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">zones-analytics.png</span> Проверяйте распределения, configured zones и planned vs actual.</figcaption>
+            </figure>
           </div>
-          <div class="scenario-grid">
-            <article class="scenario">
-              <span class="badge orange">Must test</span>
-              <h4>A. Первый вход и профиль</h4>
-              <ol>
-                <li>Войдите в admin UI.</li>
-                <li>Откройте <strong>Profile & zones</strong>.</li>
-                <li>Заполните дату рождения или HRmax, resting HR, threshold pace или threshold HR, вес, preferred weekdays и max duration.</li>
-                <li>Добавьте injury/health/recovery данные, если тестируете safety warnings.</li>
-                <li>Сохраните профиль и проверьте zones.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> completeness растет, zones recalculated, safety warnings понятны, onboarding исчезает при достаточной готовности.</p>
-            </article>
+        </article>
 
-            <article class="scenario">
-              <span class="badge orange">Must test</span>
-              <h4>B. Импорт скриншотов</h4>
-              <ol>
-                <li>Откройте <strong>Imports</strong>.</li>
-                <li>Загрузите 1-6 изображений PNG/JPEG/WEBP.</li>
-                <li>Проверьте recognition message и batch status.</li>
-                <li>Если появился candidate, исправьте поля и нажмите confirm.</li>
-                <li>Откройте созданную activity в <strong>Activities</strong>.</li>
+        <article class="step-card" id="step-10">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 10 / Performance</span>
+              <h3>Добавьте результат и проверьте VDOT</h3>
+              <p>Performance должен отделять качественный race/time trial source от обычной легкой пробежки и аккуратно показывать прогнозы.</p>
+              <ol class="action-list">
+                <li>Добавьте гонку или time trial не короче 3 км.</li>
+                <li>Проверьте VDOT source, PB, predictions, threshold и pace zones.</li>
+                <li>Посмотрите warnings/confidence для старого, шумного или слишком короткого результата.</li>
               </ol>
-              <p><strong>Ожидается:</strong> batch виден в history, candidate требует подтверждения при uncertainty, created activity имеет validation и source metadata.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>C. CSV import</h4>
-              <ol>
-                <li>Откройте <strong>Imports</strong>.</li>
-                <li>Выберите CSV с title, started_at, duration, distance или HR.</li>
-                <li>Проверьте counters created, duplicates, matched, failed.</li>
-                <li>Повторно загрузите тот же CSV для проверки duplicate detection.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> дубликаты не создают новые активности, ошибки строк понятны, created rows появляются в Activities.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>D. Manual activity</h4>
-              <ol>
-                <li>Откройте <strong>Activities</strong>.</li>
-                <li>Заполните title, started, type, duration, distance и avg HR.</li>
-                <li>Создайте activity.</li>
-                <li>Откройте detail и измените duration/distance через quick edit.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> duration required, pace/speed пересчитываются backend-ом, derived metrics/load обновляются.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge orange">Must test</span>
-              <h4>E. Plan preview и создание плана</h4>
-              <ol>
-                <li>Откройте <strong>Plans</strong>.</li>
-                <li>Заполните goal, distance, target date, available days, current weekly volume, support sessions и constraints.</li>
-                <li>Нажмите Preview.</li>
-                <li>Проверьте baseline, risk flags, volume curve и first workouts.</li>
-                <li>Создайте draft или active plan.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> Preview не сохраняет план, Generate создает план, Dashboard/Calendar видят active plan.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>F. Workout lifecycle</h4>
-              <ol>
-                <li>В плане откройте тренировку.</li>
-                <li>Проверьте blocks, target, purpose и safety note.</li>
-                <li>Заполните manual completion или найдите activity candidate.</li>
-                <li>Сохраните feedback: RPE, soreness, pain, sleep, notes.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> workout получает status done, появляется execution score, adherence обновляется.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>G. Calendar matching</h4>
-              <ol>
-                <li>Откройте <strong>Calendar</strong>.</li>
-                <li>Проверьте This week, Next week, This month и custom range.</li>
-                <li>Перенесите workout, отметьте missed/skipped и восстановите planned.</li>
-                <li>Найдите activity/workout candidates и выполните link.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> range больше 42 дней отклоняется, hard-session warnings видны, matching score/reasons понятны.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge orange">Must test</span>
-              <h4>H. Analytics, load и zones</h4>
-              <ol>
-                <li>Откройте <strong>Analytics</strong> и переключите периоды.</li>
-                <li>Проверьте weighted pace, avg HR, adherence, best efforts и insights.</li>
-                <li>Откройте <strong>Load & Recovery</strong> и проверьте CTL/ATL/TSB.</li>
-                <li>Откройте <strong>Zones Analytics</strong> и проверьте coverage, Seiler split, planned vs actual.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> <code>Why?</code> объясняет расчет, custom range работает, empty states не выглядят как ошибка.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>I. Performance и race goal</h4>
-              <ol>
-                <li>Откройте <strong>Performance</strong>.</li>
-                <li>Добавьте race или time trial не короче 3 км.</li>
-                <li>Проверьте VDOT source, predictions, PBs, threshold trend и pace zones.</li>
-                <li>Создайте race goal в <strong>Goals & races</strong>.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> noisy source помечается, predictions имеют confidence/warnings, race goal показывает readiness и prediction range.</p>
-            </article>
-
-            <article class="scenario">
-              <span class="badge">Core</span>
-              <h4>J. Settings, LLM и export</h4>
-              <ol>
-                <li>Откройте <strong>Settings & data</strong>.</li>
-                <li>Добавьте OpenAI-compatible или Anthropic provider.</li>
-                <li>Проверьте Test provider и Set default.</li>
-                <li>Скачайте JSON export и activities CSV.</li>
-                <li>Проверьте audit log.</li>
-              </ol>
-              <p><strong>Ожидается:</strong> API key не возвращается в UI/export, provider test сообщает status/message, exports не содержат secrets.</p>
-            </article>
+              <div class="check"><strong>Что проверить</strong><ul><li>Predictions не выглядят как гарантированный результат.</li><li>Source результата легко найти и проверить.</li><li>Таблицы результатов читаются на мобильном.</li></ul></div>
+              <details class="deep"><summary>Коротко о VDOT</summary><p>VDOT и Riegel predictions полезны только при качественном источнике. Easy run не должна становиться главным performance source.</p></details>
+            </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/performance.png"><img src="assets/alpha-guide/performance.png" alt="Мобильный экран результатов и VDOT Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">performance.png</span> Проверяйте результаты, прогнозы, confidence и pace zones.</figcaption>
+            </figure>
           </div>
-        </section>
+        </article>
 
-        <section id="formulas" class="section-card">
-          <h2 class="section-title">5. Формулы и расчеты, которые нужно понимать</h2>
-          <p>
-            Формулы ниже нужны не для ручной перепроверки каждого значения, а для корректной оценки поведения продукта,
-            объяснений <code>Why?</code>, confidence и safety warnings.
-          </p>
-          <div class="formula-grid">
-            <details class="formula">
-              <summary>Pace, speed, weighted pace</summary>
-              <pre>pace = duration_seconds / distance_km
-speed_kmh = distance_km / (duration_seconds / 3600)
-weighted_pace = sum(duration) / sum(distance)</pre>
-              <p>Weighted pace используется в analytics и segment summaries, чтобы короткие тренировки не искажали средний темп.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Estimated HRmax, Tanaka</summary>
-              <pre>HRmax = round(208 - 0.7 * age)</pre>
-              <p>Fallback, если нет измеренного HRmax. Не равен лабораторному измерению и должен иметь lower confidence.</p>
-            </details>
-
-            <details class="formula">
-              <summary>HRR zones, Karvonen</summary>
-              <pre>HRR = max_hr - resting_hr
-zone_hr = resting_hr + percent * HRR</pre>
-              <p>Требует resting HR и max HR. Используется для персонализированных HR zones.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Pace zones</summary>
-              <pre>easy      = threshold +45..+95 sec/km
-steady    = threshold +20..+44 sec/km
-threshold = threshold -5..+10 sec/km
-interval  = threshold -35..-6 sec/km
-rep       = threshold -60..-36 sec/km</pre>
-              <p>Threshold pace берется из профиля или fallback из performance source.</p>
-            </details>
-
-            <details class="formula">
-              <summary>VDOT</summary>
-              <pre>velocity = distance_m / time_min
-vo2 = -4.60 + 0.182258*v + 0.000104*v^2
-percent = 0.8 + 0.1894393*e^(-0.012778*t)
-        + 0.2989558*e^(-0.1932605*t)
-VDOT = vo2 / percent</pre>
-              <p>Используется только для race-like или time trial sources. Easy run не должна становиться главным VDOT source.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Riegel prediction</summary>
-              <pre>predicted_time = source_time *
-  (target_distance / source_distance) ^ 1.06</pre>
-              <p>Экстраполяция за пределы отношения 0.25-4 снижает confidence и должна давать warning.</p>
-            </details>
-
-            <details class="formula">
-              <summary>TRIMP</summary>
-              <pre>hr_ratio = (avg_hr - resting_hr) / (max_hr - resting_hr)
-male:   load = min * ratio * 0.64 * exp(1.92 * ratio)
-female: load = min * ratio * 0.86 * exp(1.67 * ratio)</pre>
-              <p>Требует sex male/female и корректные HR inputs. Иначе используется другой load method.</p>
-            </details>
-
-            <details class="formula">
-              <summary>sRPE load</summary>
-              <pre>sRPE = duration_minutes * RPE_0_10</pre>
-              <p>Используется, если workout feedback содержит RPE. Это субъективная оценка нагрузки.</p>
-            </details>
-
-            <details class="formula">
-              <summary>CTL, ATL, TSB</summary>
-              <pre>alpha = 1 - exp(-1 / tau_days)
-EWMA = previous + alpha * (load_today - previous)
-CTL tau = 42 days
-ATL tau = 7 days
-TSB = CTL - ATL</pre>
-              <p>Это эвристики fitness/fatigue/form. При истории меньше 42 дней должен быть warmup warning.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Monotony and strain</summary>
-              <pre>monotony = mean(daily_loads) / stddev(daily_loads)
-strain = sum(daily_loads) * monotony</pre>
-              <p>Высокая monotony означает слишком однообразную нагрузку. При нулевой вариативности расчет может быть недоступен.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Adherence</summary>
-              <pre>completion_rate = done_workouts / planned_workouts</pre>
-              <p>Используется в Dashboard, Plans, Goals. Missed/skipped тренировки снижают completion rate.</p>
-            </details>
-
-            <details class="formula">
-              <summary>Execution score</summary>
-              <pre>volume_score = 1 - abs(actual/planned - 1) / 0.5
-final_score = average(volume, intensity, subjective)</pre>
-              <p>Pain, high fatigue, high RPE и плохой сон ограничивают subjective component.</p>
-            </details>
+        <article class="step-card" id="step-11">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 11 / Goals & races</span>
+              <h3>Проверьте цели и гонки</h3>
+              <p>Цели должны связывать план, readiness, прогнозы и календарь. На смартфоне tester должен быстро понять, готовится ли спортсмен к нужной гонке.</p>
+              <ol class="action-list">
+                <li>Создайте race goal или откройте существующую цель.</li>
+                <li>Проверьте связь с активным планом, датой, дистанцией и readiness.</li>
+                <li>Оцените prediction range, warnings и more actions.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>Цель не дублирует план, а объясняет прогресс к гонке.</li><li>Readiness badges понятны без desktop таблицы.</li><li>Опасные или вторичные действия не нажимаются случайно.</li></ul></div>
+            </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/goals.png"><img src="assets/alpha-guide/goals.png" alt="Мобильный экран целей и гонок Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">goals.png</span> Смотрите goal readiness, связь с планом и race details.</figcaption>
+            </figure>
           </div>
-        </section>
+        </article>
 
-        <section id="quality" class="section-card">
-          <h2 class="section-title">6. Критерии хорошего результата</h2>
-          <div class="table-wrap"><table>
-            <thead>
-              <tr><th>Область</th><th>Что считается хорошим</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>UI</td><td>Нет white screen, нет critical console errors, mobile menu работает, таблицы скроллятся внутри контейнеров.</td></tr>
-              <tr><td>Language</td><td>RU/EN toggle меняет навигацию, кнопки, dates/units и не переводит пользовательские/API-строки.</td></tr>
-              <tr><td>Imports</td><td>Candidate не становится activity без validation/confirmation, ошибки распознавания понятны.</td></tr>
-              <tr><td>Activities</td><td>Duration/distance/pace/HR согласованы, validation объясняет warnings, derived metrics имеют method/source.</td></tr>
-              <tr><td>Plans</td><td>Preview не сохраняет план, risk flags видны, hard sessions не ставятся небезопасно рядом без warning.</td></tr>
-              <tr><td>Analytics</td><td>Периоды работают, формулы объяснимы, missing data показывается как empty state, а не как ошибка.</td></tr>
-              <tr><td>Safety</td><td>Injury/recovery/conservative flags влияют на readiness и plan behavior, без медицинских обещаний.</td></tr>
-              <tr><td>Data</td><td>Secrets не возвращаются в UI/export, destructive delete требует подтверждение.</td></tr>
-            </tbody>
-          </table></div>
-        </section>
-
-        <section id="bugs" class="section-card">
-          <h2 class="section-title">7. Как оформлять баг-репорт</h2>
-          <div class="callout">
-            <p>Хороший баг-репорт должен позволять воспроизвести проблему без догадок.</p>
+        <article class="step-card" id="step-12">
+          <div class="step-body">
+            <div class="copy">
+              <span class="step-kicker">Шаг 12 / Settings & data</span>
+              <h3>Завершите проверкой настроек и безопасности данных</h3>
+              <p>Settings - финальная точка: provider keys, exports, danger zone и audit log должны быть понятны и безопасны на мобильном.</p>
+              <ol class="action-list">
+                <li>Проверьте LLM providers: add/edit, test provider, set default.</li>
+                <li>Скачайте JSON export и activities CSV, если браузер позволяет.</li>
+                <li>Проверьте audit log: записи должны читаться карточками.</li>
+                <li>Danger zone открывайте только для специального теста удаления. Подтверждение должно быть явным.</li>
+              </ol>
+              <div class="check"><strong>Что проверить</strong><ul><li>API key не возвращается в UI или export.</li><li>Download fallback понятен в mobile browser/webview.</li><li>Удаление данных невозможно случайным tap.</li></ul></div>
+            </div>
+            <figure class="phone-frame">
+              <div class="phone-top"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/settings-data.png"><img src="assets/alpha-guide/settings-data.png" alt="Мобильный экран настроек, экспорта и безопасности данных Runforfan" width="390" height="844" loading="lazy" /></a>
+              <figcaption><span class="caption-mark">settings-data.png</span> Проверьте providers, export, danger zone и audit log.</figcaption>
+            </figure>
           </div>
-          <pre>Заголовок:
-  [Экран] Краткое описание проблемы
+        </article>
+      </section>
+
+      <section class="section" id="full-guide">
+        <div class="section-head">
+          <h2>Все страницы и состояния</h2>
+          <span class="tag">page-by-page</span>
+        </div>
+        <div class="bug-card" style="margin-bottom: 0.8rem;">
+          <strong>Как читать этот раздел</strong>
+          <p>12 шагов выше - быстрый маршрут со скриншотами. Этот раздел - полный чеклист покрытия: каждая admin page, вложенная панель, форма, action, empty/loading/error state и рискованное состояние. Используйте его после основного прохода или как regression checklist.</p>
+        </div>
+        <div class="appendix-list">
+          <details class="appendix-item" open>
+            <summary><strong>G0. Shell, auth, navigation и global states</strong><span>Проверяется до входа в конкретные страницы.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Auth gate</h4><ul><li>Production: Telegram Login Widget отображается и не перекрывается на 360-430px.</li><li>Dev/local: dev login работает, статус показывает <code>DEMO USER</code>.</li><li>Если нет <code>VITE_TELEGRAM_BOT_USERNAME</code>, текст ошибки понятен.</li><li>Auth error показывает сообщение, но не ломает layout.</li></ul></div>
+              <div class="formula-card"><h4>Session states</h4><ul><li><code>LOADING</code>: виден skeleton/loading, нет прыжков layout.</li><li><code>LOGIN REQUIRED</code>: пользователь понимает, как войти.</li><li><code>API ERROR</code>: есть понятное объяснение, а не пустая страница.</li><li>Expired token очищает сессию и возвращает к login без бесконечного цикла.</li></ul></div>
+              <div class="formula-card"><h4>Navigation</h4><ul><li>Desktop sidebar и mobile drawer ведут на все 12 pages.</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активная page подсвечивается.</li><li>Переходы Dashboard -> Imports/Plans работают одним tap.</li></ul></div>
+              <div class="formula-card"><h4>Topbar</h4><ul><li>RU/EN переключатель меняет язык и сохраняется.</li><li>Status badge не обрезается на узкой ширине.</li><li><code>LEGACY</code> action виден, но не мешает основному проходу.</li><li>Theme icon не должен обещать рабочий dark/light toggle, если он декоративный.</li></ul></div>
+              <div class="formula-card"><h4>Shared components</h4><ul><li>Collapsible sections раскрываются/закрываются без reset состояния.</li><li>DataTable mobile cards имеют search, sort и pagination.</li><li>Responsive detail panel закрывается и не оставляет scroll lock.</li><li>Calculation explainers раскрываются пальцем и читаются без horizontal scroll.</li></ul></div>
+              <div class="formula-card"><h4>Глобальные баги</h4><ul><li>Любой горизонтальный скролл body на 360-430px.</li><li>Tap targets меньше удобного пальцем размера.</li><li>Metadata с ID/source/hash переводится или переносится нечитаемо.</li><li>Ошибка API выглядит как успешный ноль.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g0-auth-login.png"><img src="assets/alpha-guide/states/g0-auth-login.png" alt="Mobile auth gate and login state" width="390" height="844" loading="lazy" /></a><strong>Auth gate</strong><p>Проверка login-required состояния, Telegram/dev login copy и отсутствия layout overflow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g0-mobile-drawer.png"><img src="assets/alpha-guide/states/g0-mobile-drawer.png" alt="Mobile navigation drawer with admin pages" width="390" height="844" loading="lazy" /></a><strong>Mobile drawer</strong><p>Все 12 admin pages должны быть доступны из меню, active state и close overlay читаемы.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G1. Dashboard / Overview</strong><span>Главная: readiness, week focus, alerts и быстрые действия.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Hero и summary</h4><ul><li>Проверить readiness badge: <code>ok</code>, <code>watch</code>, <code>risk</code>.</li><li>Active plan title или <code>no active plan</code> должны быть понятны.</li><li>Summary stats: activities, distance, week done, providers.</li><li>Кнопки <code>+ Add screenshots</code> и <code>Open plans</code> ведут в правильные pages.</li></ul></div>
+              <div class="formula-card"><h4>Workout focus</h4><ul><li>Есть today workout: видны type, target, date, status, score/risk.</li><li>Есть только next workout: copy не обещает тренировку сегодня.</li><li>Нет active workout: есть action <code>Create or activate plan</code>.</li><li>Linked actual не смешивается с planned target.</li></ul></div>
+              <div class="formula-card"><h4>Readiness signals</h4><ul><li>Factors перечислены короткими карточками.</li><li>Alerts имеют severity и action context.</li><li>Empty state: <code>No dashboard alerts</code>.</li><li>Loading state не выглядит как финальный ноль.</li></ul></div>
+              <div class="formula-card"><h4>Current week</h4><ul><li>Плановые тренировки показываются mobile cards, не desktop table.</li><li>Planned/actual/adherence совпадают с Calendar/Plans.</li><li>Execution score null отображается как <code>--</code>.</li><li>Empty week показывает <code>No workouts in the current calendar week</code>.</li></ul></div>
+              <div class="formula-card"><h4>Embedded activities</h4><ul><li>Compact activities не конфликтуют с полной Activities page.</li><li>Import action открывает Imports.</li><li>Карточки активностей не занимают весь dashboard, если список длинный.</li></ul></div>
+              <div class="formula-card"><h4>Edge states</h4><ul><li>No active plan.</li><li>Profile incomplete.</li><li>No LLM provider.</li><li>Pending imports.</li><li>Coach recommendation требует adjust.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-readiness.png"><img src="assets/alpha-guide/states/g1-dashboard-readiness.png" alt="Dashboard readiness and alerts mobile state" width="390" height="844" loading="lazy" /></a><strong>Readiness + alerts</strong><p>Главный экран показывает status, profile gaps, import/provider alerts и next actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-current-week.png"><img src="assets/alpha-guide/states/g1-dashboard-current-week.png" alt="Dashboard current week mobile workout cards" width="390" height="844" loading="lazy" /></a><strong>Current week</strong><p>Mobile карточки текущей недели: planned, actual, score, status и переход в Plans.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G2. Activities</strong><span>Список, ручное создание, detail overlay, validation и metadata.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>List и mobile cards</h4><ul><li>Search/filter по title/date/id работает.</li><li>Sort на mobile доступен отдельным select.</li><li>Pagination не теряет filter.</li><li>Empty filter показывает <code>No activities match this filter</code> и import action.</li></ul></div>
+              <div class="formula-card"><h4>Manual activity</h4><ul><li>Форма раскрывается в collapsible, не перегружает страницу.</li><li>Required: duration min.</li><li>Поля: title, started, type, distance, duration, avg HR, source note.</li><li>Success сообщает created ID, ошибка API не создает phantom row.</li></ul></div>
+              <div class="formula-card"><h4>Activity detail panel</h4><ul><li>На mobile это full-screen overlay с close action.</li><li>Loading detail не показывает старую activity.</li><li>Race protection: быстрые открытия разных activity не смешивают данные.</li><li>Refresh обновляет activity и validation.</li></ul></div>
+              <div class="formula-card"><h4>Quick edit</h4><ul><li>Duration seconds required и минимум 60.</li><li>После save пересчитываются derived metrics/load.</li><li>Ошибка API остается внутри panel.</li><li>Started/date/type корректно сохраняются.</li></ul></div>
+              <div class="formula-card"><h4>Validation и sources</h4><ul><li>Validation report показывает code, expected, actual.</li><li>Нет issues: текст <code>No validation issues</code>.</li><li>Recognition sources не показывают локальные unsafe paths.</li><li>Derived metrics показывают method, source reference, computed hash.</li></ul></div>
+              <div class="formula-card"><h4>Splits и structures</h4><ul><li>Segments/splits читаются на mobile cards или compact table.</li><li>Workout blocks показывают work/rest/target.</li><li>Interval structures section появляется только если есть blocks.</li><li>Пустые splits/blocks явно подписаны.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activities-manual-form.png"><img src="assets/alpha-guide/states/g2-activities-manual-form.png" alt="Activities manual activity form mobile state" width="390" height="844" loading="lazy" /></a><strong>Manual activity</strong><p>Состояние раскрытой ручной формы и списка activity cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-validation.png"><img src="assets/alpha-guide/states/g2-activity-detail-validation.png" alt="Activity detail validation mobile overlay" width="390" height="844" loading="lazy" /></a><strong>Detail + validation</strong><p>Overlay с quick edit, validation report, splits и source sections.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-calculations.png"><img src="assets/alpha-guide/states/g2-activity-detail-calculations.png" alt="Activity calculations and source metadata mobile state" width="390" height="844" loading="lazy" /></a><strong>Calculations metadata</strong><p>Derived metrics, methods, source references, computed time и hash должны быть читаемы.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G3. Imports</strong><span>Скриншоты, CSV, confirmation, correction, matching и history.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Screenshot upload</h4><ul><li>Нет файла: понятное сообщение, submit не создает batch.</li><li>Больше 6 файлов: reject до API call.</li><li>PNG/JPEG/WEBP принимаются через mobile file picker.</li><li>Processing state блокирует повторный submit.</li></ul></div>
+              <div class="formula-card"><h4>Candidate review</h4><ul><li>Если <code>requires_confirmation</code>, candidate не создает activity сам.</li><li>Видны title, distance, duration, pace, HR, uncertainty notes.</li><li>Estimated fields помечены отдельно.</li><li>Reject candidate оставляет понятную запись в history.</li></ul></div>
+              <div class="formula-card"><h4>Corrections</h4><ul><li>Перед confirm можно исправить title, started, distance, duration, pace, HR.</li><li>Save corrections не должен подтверждать candidate автоматически.</li><li>Ошибки в коррекциях возвращаются в этой же карточке.</li></ul></div>
+              <div class="formula-card"><h4>Plan matching</h4><ul><li>Auto-match явно показывает matched workout.</li><li>Unmatched result показывает candidate list или no confident candidates.</li><li>Link action связывает activity и workout один раз.</li><li>Candidate API error не скрывает успешно созданную activity.</li></ul></div>
+              <div class="formula-card"><h4>CSV import</h4><ul><li>Created, duplicates, matched, failed видны отдельными stat cards.</li><li>Ошибки CSV показываются списком, не всей сырой простыней.</li><li>Duplicate rows не создают новые activities.</li><li>Source app сохраняется как metadata.</li></ul></div>
+              <div class="formula-card"><h4>Import history</h4><ul><li>Empty: <code>История импортов пока пуста</code>.</li><li>Refresh не сбрасывает last result.</li><li>History cards показывают status, engine, activity, created_at.</li><li>Pending confirmation доступна из history.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-upload-csv.png"><img src="assets/alpha-guide/states/g3-imports-upload-csv.png" alt="Imports screenshot upload and CSV mobile state" width="390" height="844" loading="lazy" /></a><strong>Upload + CSV</strong><p>File picker, screenshot upload, CSV import и source app поля в одном mobile flow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-empty-error.png"><img src="assets/alpha-guide/states/g3-imports-empty-error.png" alt="Imports empty file validation message mobile state" width="390" height="844" loading="lazy" /></a><strong>Empty submit</strong><p>Проверка безопасного error state: без файла batch не создается.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-history-review.png"><img src="assets/alpha-guide/states/g3-imports-history-review.png" alt="Import history and review queue mobile state" width="390" height="844" loading="lazy" /></a><strong>History/review</strong><p>История импорта, статусы batch и pending confirmation должны читаться карточками.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G4. Calendar</strong><span>Range, planned vs actual, event actions и matching.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Range controls</h4><ul><li>This week, Next week, This month работают без ручного ввода.</li><li>Custom from/to сохраняются в форме после load.</li><li>from &gt; to показывает validation error.</li><li>Range больше 42 дней отклоняется понятным сообщением.</li></ul></div>
+              <div class="formula-card"><h4>Summary и warnings</h4><ul><li>Planned, done, activities, unlinked совпадают с events.</li><li>Schedule warnings показывают hard spacing и long-run conflicts.</li><li>Warnings не выглядят как медицинский диагноз.</li></ul></div>
+              <div class="formula-card"><h4>Day cards</h4><ul><li>Today выделяется border/marker.</li><li>Пустой день показывает <code>No plan or activity</code>.</li><li>Load bar не ломает ширину.</li><li>Planned и actual визуально различаются.</li></ul></div>
+              <div class="formula-card"><h4>Event actions</h4><ul><li>Reschedule показывает date input и Move.</li><li>Missed, Skipped, Restore работают для допустимых statuses.</li><li>Linked workouts не должны предлагать опасные действия без контекста.</li><li>Busy state показывает <code>busy</code> или <code>Matching...</code>.</li></ul></div>
+              <div class="formula-card"><h4>Matching</h4><ul><li>Find activity для planned workout показывает candidates или empty state.</li><li>Find workout для unlinked activity показывает candidates или empty state.</li><li>Score/reasons видны перед Link.</li><li>Link action обновляет Calendar и Plans.</li></ul></div>
+              <div class="formula-card"><h4>Error states</h4><ul><li>Calendar API failure показывает banner.</li><li>Candidate API failure не закрывает action panel.</li><li>Reschedule failure не меняет дату визуально.</li><li>Restore failure не скрывает исходный status.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-range.png"><img src="assets/alpha-guide/states/g4-calendar-range.png" alt="Calendar range and summary mobile state" width="390" height="844" loading="lazy" /></a><strong>Range + summary</strong><p>Quick ranges, custom inputs, summary stats и day cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-event-actions.png"><img src="assets/alpha-guide/states/g4-calendar-event-actions.png" alt="Calendar event action panel mobile state" width="390" height="844" loading="lazy" /></a><strong>Event actions</strong><p>Reschedule, missed/skipped/restore и matching actions внутри event card.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-invalid-range.png"><img src="assets/alpha-guide/states/g4-calendar-invalid-range.png" alt="Calendar invalid range error mobile state" width="390" height="844" loading="lazy" /></a><strong>Invalid range</strong><p>Validation state для неправильного диапазона дат без повреждения текущего календаря.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G5. Analytics</strong><span>Периоды, метрики, графики, VDOT/VO2, best efforts и insights.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Filters</h4><ul><li>7d, 28d, 90d, year, all переключаются без reload страницы.</li><li>Custom dates активны только для custom period.</li><li>Loading badge появляется во время API calls.</li><li>Retry виден при API error.</li></ul></div>
+              <div class="formula-card"><h4>Metric cards</h4><ul><li>Distance, time, workouts, adherence, pace, HR, load, VDOT читаются на mobile.</li><li>Adherence, weighted pace, avg HR, load, VDOT имеют explainers.</li><li>Empty data не выглядит как нулевой прогресс.</li></ul></div>
+              <div class="formula-card"><h4>Charts</h4><ul><li>Monthly volume не переполняет экран.</li><li>Weekly volume, pace trend, HR trend имеют empty state.</li><li>Null points не ломают график.</li><li>Custom range с малым количеством данных объясняется.</li></ul></div>
+              <div class="formula-card"><h4>VDOT / VO2max</h4><ul><li>Если нет eligible effort, card объясняет источник отсутствует.</li><li>Manual/device VO2max не смешивается с VDOT.</li><li>Confidence/source отображаются.</li></ul></div>
+              <div class="formula-card"><h4>Best efforts</h4><ul><li>1K, 5K, 10K, half marathon появляются при подходящих данных.</li><li>Empty: нужны активности с достаточной дистанцией.</li><li>Normalized duration не должен выглядеть как официальный PB без context.</li></ul></div>
+              <div class="formula-card"><h4>Insights</h4><ul><li>Severity и confidence видны.</li><li>Evidence/reasons короткие и понятные.</li><li>Нет medical claims.</li><li>Empty insights не выглядит как ошибка API.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-overview.png"><img src="assets/alpha-guide/states/g5-analytics-overview.png" alt="Analytics metric cards and period filters mobile state" width="390" height="844" loading="lazy" /></a><strong>Overview metrics</strong><p>Периоды, custom dates, key metrics, explainers и charts в mobile layout.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-insights.png"><img src="assets/alpha-guide/states/g5-analytics-insights.png" alt="Analytics insights and consistency mobile state" width="390" height="844" loading="lazy" /></a><strong>Insights</strong><p>Severity, confidence, evidence и consistency должны читаться без desktop таблицы.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G6. Load & Recovery</strong><span>Materialization, CTL/ATL/TSB, charts, warnings и recovery days.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Period и materialization</h4><ul><li>Filters работают как в Analytics.</li><li>Status line показывает fresh/stale/unavailable состояние.</li><li>Backfill selected range и default 28-day window блокируются во время loading.</li><li>Backfill success обновляет daily/weekly данные.</li></ul></div>
+              <div class="formula-card"><h4>Metrics</h4><ul><li>CTL, ATL, TSB имеют explainers.</li><li>Method показывает источник нагрузки.</li><li>Monotony/strain отсутствуют корректно при малом количестве данных.</li><li>Hard days/recovery days сверяются с Calendar.</li></ul></div>
+              <div class="formula-card"><h4>Charts</h4><ul><li>Daily load chart имеет empty state.</li><li>Weekly load chart имеет empty state.</li><li>Fitness/fatigue points показываются mobile cards и desktop table.</li><li>Графики не создают горизонтальный scroll.</li></ul></div>
+              <div class="formula-card"><h4>Warnings</h4><ul><li>No alerts: <code>Нет load alerts</code>.</li><li>Info/warning/critical визуально различаются.</li><li>TSB, monotony, hard share и long run share объясняются осторожно.</li><li>Короткая история помечается warmup warning.</li></ul></div>
+              <div class="formula-card"><h4>Hard spacing</h4><ul><li>Hard sessions &lt;48h показывают risk.</li><li>Пустое состояние: <code>Hard sessions не обнаружены</code>.</li><li>Gap badge читается на mobile.</li></ul></div>
+              <div class="formula-card"><h4>Recovery days</h4><ul><li>Recovery days за неделю показывают дату и reason.</li><li>Empty: <code>Recovery days за последнюю неделю не найдены</code>.</li><li>Light activity не должна считаться тяжелым днем.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-materialization.png"><img src="assets/alpha-guide/states/g6-load-materialization.png" alt="Load recovery materialization and CTL ATL TSB mobile state" width="390" height="844" loading="lazy" /></a><strong>Materialization + CTL</strong><p>Daily load status, backfill actions, CTL/ATL/TSB и method cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-warnings.png"><img src="assets/alpha-guide/states/g6-load-warnings.png" alt="Load recovery warnings and hard spacing mobile state" width="390" height="844" loading="lazy" /></a><strong>Warnings + spacing</strong><p>Load alerts, hard session spacing и recovery days как safety-oriented cards.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G7. Zones Analytics</strong><span>Distributions, Seiler, planned-vs-actual и configured zones.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Filters</h4><ul><li>Period selector и custom dates работают.</li><li>Granularity переключает week/month buckets.</li><li>API unavailable показывает понятный banner.</li><li>Loading badge не закрывает текущие данные внезапно.</li></ul></div>
+              <div class="formula-card"><h4>Summary</h4><ul><li>Classified duration, coverage, activities, planned workouts отображаются корректно.</li><li>Coverage объясняет unclassified duration.</li><li>Weekly low-intensity target показывает below/within/above/unknown.</li></ul></div>
+              <div class="formula-card"><h4>Distribution bars</h4><ul><li>5-zone actual, Seiler 3-zone, HR, pace, RPE sections есть отдельно.</li><li>Empty: <code>Нет данных для распределения</code>.</li><li>Проценты суммарно близки к 100% с учетом rounding.</li></ul></div>
+              <div class="formula-card"><h4>Planned vs actual</h4><ul><li>Mobile cards показывают planned, actual, diff.</li><li>Delta >=15% заметна.</li><li>Empty planned-vs-actual rows объясняются.</li></ul></div>
+              <div class="formula-card"><h4>Configured zones</h4><ul><li>HR, pace и RPE зоны показываются отдельно.</li><li>Пустые zones: <code>Нет данных для расчета</code>.</li><li>Manual/calculated source не теряется.</li></ul></div>
+              <div class="formula-card"><h4>Classification notes</h4><ul><li>Priority chain понятна: threshold HR, threshold pace, HR, pace, RPE.</li><li>Unclassified duration не скрывается.</li><li>Planned distribution note объясняет, откуда взялся план.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-distribution.png"><img src="assets/alpha-guide/states/g7-zones-distribution.png" alt="Zones analytics distribution mobile state" width="390" height="844" loading="lazy" /></a><strong>Distributions</strong><p>5-zone, Seiler, HR/pace/RPE distributions и coverage summary.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-configured.png"><img src="assets/alpha-guide/states/g7-zones-configured.png" alt="Configured HR pace RPE zones mobile state" width="390" height="844" loading="lazy" /></a><strong>Configured zones</strong><p>Зоны, classification notes, unclassified duration и source confidence.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G8. Performance</strong><span>Results, VDOT source, predictions, PB, threshold trend и pace zones.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Add result</h4><ul><li>Race и time trial сохраняются отдельно.</li><li>Distance/time required: пустые значения дают validation error.</li><li>Noisy source checkbox снижает доверие.</li><li>Activity ID, terrain, weather, elevation, temperature, notes сохраняются.</li></ul></div>
+              <div class="formula-card"><h4>VDOT source</h4><ul><li>Нет results: <code>No eligible race/time trial yet</code>.</li><li>Result &lt;3 км не становится source.</li><li>Selected result, confidence, noisy reasons и warnings видны.</li><li>Easy run не может стать VDOT source.</li></ul></div>
+              <div class="formula-card"><h4>Results tables</h4><ul><li>Race results и time trials имеют отдельные списки.</li><li>Mobile cards читаемы без desktop table.</li><li>Empty: <code>Нет сохраненных результатов этого типа</code>.</li></ul></div>
+              <div class="formula-card"><h4>Predictions</h4><ul><li>Нет source: нужна гонка/time trial >=3 км.</li><li>Prediction показывает distance, predicted time, confidence, source.</li><li>Extrapolation limited явно отмечается.</li><li>Predictions не звучат как гарантия результата.</li></ul></div>
+              <div class="formula-card"><h4>PB и threshold</h4><ul><li>PB empty: <code>Нет PB по стандартным дистанциям</code>.</li><li>Threshold trend empty: <code>Добавьте результаты</code>.</li><li>Threshold trend не строится из noisy/easy source без предупреждения.</li></ul></div>
+              <div class="formula-card"><h4>Pace zones</h4><ul><li>Появляются только при достаточном threshold source.</li><li>Empty: <code>Нет данных для pace zones</code>.</li><li>Зоны совпадают с Profile/Zones и Appendices.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-add-result.png"><img src="assets/alpha-guide/states/g8-performance-add-result.png" alt="Performance add race result mobile state" width="390" height="844" loading="lazy" /></a><strong>Add result</strong><p>Форма race/time trial, noisy source, weather/terrain/elevation и validation context.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-predictions.png"><img src="assets/alpha-guide/states/g8-performance-predictions.png" alt="Performance predictions and PB mobile state" width="390" height="844" loading="lazy" /></a><strong>Predictions/PB</strong><p>VDOT source, predictions, PB, threshold trend и pace zones в одном flow.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G9. Goals & Races</strong><span>Создание целей, race focus, readiness и dangerous actions.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Create goal</h4><ul><li>Типы: race, weekly consistency, monthly distance, long run, custom habit, health.</li><li>Поля race: distance, date, target time, course notes, linked plan.</li><li>Priority/reason сохраняются.</li><li>Saving state блокирует повторный submit.</li></ul></div>
+              <div class="formula-card"><h4>Active race focus</h4><ul><li>Нет race: copy предлагает создать цель.</li><li>Есть race: видны date, distance, priority, readiness.</li><li>Target, predicted range и VDOT source различаются.</li><li>Milestones показаны или empty state объяснен.</li></ul></div>
+              <div class="formula-card"><h4>Goal cards</h4><ul><li>Progress, status, readiness, linked plan и prediction читаются на mobile.</li><li>Race и non-race goals не смешивают поля.</li><li>Course notes/reason не создают overflow.</li></ul></div>
+              <div class="formula-card"><h4>Status actions</h4><ul><li>Pause/Resume меняют active/paused.</li><li>Complete, Missed, Archive доступны через More actions.</li><li>Delete требует осознанного действия и не должен быть первым CTA.</li></ul></div>
+              <div class="formula-card"><h4>Readiness states</h4><ul><li>On track, watch, at risk объясняются сигналами.</li><li>Без prediction, но с plan, состояние не должно обещать успех.</li><li>Completion &lt;70% снижает readiness.</li></ul></div>
+              <div class="formula-card"><h4>Error states</h4><ul><li>Load/save/status/delete API errors показываются banner/message.</li><li>Неуспешный delete не удаляет card визуально.</li><li>Multiple active goals не ломают race focus.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-create-focus.png"><img src="assets/alpha-guide/states/g9-goals-create-focus.png" alt="Goals create form and race focus mobile state" width="390" height="844" loading="lazy" /></a><strong>Create + focus</strong><p>Форма цели, active race focus, predicted range, milestones и linked plan.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-actions.png"><img src="assets/alpha-guide/states/g9-goals-actions.png" alt="Goal actions and status changes mobile state" width="390" height="844" loading="lazy" /></a><strong>More actions</strong><p>Pause/resume, complete/missed/archive/delete должны быть отделены от primary flow.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G10. Profile & Zones</strong><span>Onboarding, profile form, completeness, safety, zones и measurements.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Loading и onboarding</h4><ul><li>Profile loading показывает понятную card.</li><li>First-run banner показывает completeness, missing inputs, zone readiness.</li><li><code>Skip for now</code> скрывает onboarding без удаления данных.</li><li>Ready profile показывает completion message.</li></ul></div>
+              <div class="formula-card"><h4>Profile form</h4><ul><li>Personal, Body, Physiology, Preferences, Safety разделены collapsibles.</li><li>Long run day вне preferred days очищается или объясняется.</li><li>Keyboard не закрывает активные поля.</li><li>Save profile пересчитывает zones и dashboard readiness.</li></ul></div>
+              <div class="formula-card"><h4>Completeness</h4><ul><li>&lt;80% показывает missing inputs.</li><li>HR zones, HRR zones, pace zones readiness видны отдельно.</li><li>Missing HRmax/birthdate/resting HR/threshold pace не скрываются.</li></ul></div>
+              <div class="formula-card"><h4>Safety</h4><ul><li>Injury notes, conditions, recovery status, conservative mode влияют на warnings.</li><li>Нет warnings: <code>Нет активных предупреждений</code>.</li><li>Warnings не медицинские и не категоричные.</li></ul></div>
+              <div class="formula-card"><h4>Zones</h4><ul><li>Recalculate работает и показывает error/success.</li><li>Manual HR override валидирует missing bounds, reversed range, overlap.</li><li>Clear manual HR zones возвращает calculated zones.</li><li>HR/pace/RPE tables имеют empty states.</li></ul></div>
+              <div class="formula-card"><h4>Measurements</h4><ul><li>Add measurement: type, value, threshold pace, date, source, note.</li><li>Lactate threshold measurement обновляет relevant zones.</li><li>Empty: <code>Измерений пока нет</code>.</li><li>Measurement rows читаются mobile cards.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-form.png"><img src="assets/alpha-guide/states/g10-profile-form.png" alt="Profile form collapsibles mobile state" width="390" height="844" loading="lazy" /></a><strong>Profile form</strong><p>Personal/body/physiology/preferences/safety groups и completeness state.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-manual-zones.png"><img src="assets/alpha-guide/states/g10-profile-manual-zones.png" alt="Manual HR zones override mobile state" width="390" height="844" loading="lazy" /></a><strong>Manual HR zones</strong><p>Override rows, bounds, validation messages и clear manual zones action.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-measurements.png"><img src="assets/alpha-guide/states/g10-profile-measurements.png" alt="Profile measurements mobile state" width="390" height="844" loading="lazy" /></a><strong>Measurements</strong><p>Measurement form, history cards и threshold pace inputs.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G11. Plans / Planning</strong><span>Builder, preview, saved plans, details, recommendations, workouts и matching.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Builder</h4><ul><li>Core fields: title, goal, distance, target date, length, days/week.</li><li>Performance inputs, constraints, support/OFP, safety раскрываются отдельно.</li><li>Preview не создает план.</li><li>Create draft и Create active дают разные statuses.</li></ul></div>
+              <div class="formula-card"><h4>Builder preview</h4><ul><li>Показывает explanation, baseline, weekly curve, intensity split, first workouts.</li><li>Risk flags none/info/warning/critical заметны.</li><li>Builder preview error не очищает введенные поля.</li></ul></div>
+              <div class="formula-card"><h4>Saved plans</h4><ul><li>No plans empty state предлагает generate.</li><li>Rename inline работает.</li><li>Activate, Complete, Archive, Duplicate, Delete доступны по status.</li><li>Delete active plan заблокирован или возвращает понятную ошибку.</li></ul></div>
+              <div class="formula-card"><h4>Plan detail</h4><ul><li>Header показывает status, target, weeks, planned/completed km, support, timestamps.</li><li>Versions empty/present покрыты.</li><li>Volume chart и intensity split не переполняют mobile.</li><li>Plan weeks API failure показывает fallback/error.</li></ul></div>
+              <div class="formula-card"><h4>Recommendations</h4><ul><li>Refresh, Preview, Apply states: loading, error, unavailable, no recommendations.</li><li>Preview changes показывает before/after и skipped.</li><li>No safe changes объясняется.</li><li>Apply пишет adjustment history/audit.</li></ul></div>
+              <div class="formula-card"><h4>Week/workout cards</h4><ul><li>Week summary: distance, support, deload, time, hard count, long run, done %.</li><li>Workout types: easy, long, interval, tempo, threshold, race pace, recovery, strength, mobility.</li><li>Blocks, purpose, safety note, linked activity, execution score видны.</li><li>Week warnings не скрыты в свернутом состоянии.</li></ul></div>
+              <div class="formula-card"><h4>Completion/feedback</h4><ul><li>Manual completion validation: distance, duration, HR, RPE, soreness, pain, sleep.</li><li>Support workouts корректно работают без distance.</li><li>Feedback форма доступна для done/missed/skipped.</li><li>Pain checkbox/notes не звучат как медицинская диагностика.</li></ul></div>
+              <div class="formula-card"><h4>Workout actions</h4><ul><li>Reschedule, Missed, Skipped, Restore проверяются по status.</li><li>Find activity показывает candidates или empty/error.</li><li>Link/Unlink activity синхронизирует Calendar и Dashboard.</li><li>Candidate reasons/score видны перед linking.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-builder.png"><img src="assets/alpha-guide/states/g11-plans-builder.png" alt="Plan builder form mobile state" width="390" height="844" loading="lazy" /></a><strong>Builder</strong><p>Goal, performance inputs, constraints, support/OFP, safety gates и create actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-preview.png"><img src="assets/alpha-guide/states/g11-plans-preview.png" alt="Plan builder preview mobile state" width="390" height="844" loading="lazy" /></a><strong>Preview</strong><p>Preview не создает plan, но показывает risk flags, volume curve и first workouts.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-detail-week.png"><img src="assets/alpha-guide/states/g11-plan-detail-week.png" alt="Plan detail week workout mobile state" width="390" height="844" loading="lazy" /></a><strong>Plan week</strong><p>Week summary, deload/support badges, workout blocks, safety notes и linked activity.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-workout-actions.png"><img src="assets/alpha-guide/states/g11-plan-workout-actions.png" alt="Workout actions mobile state" width="390" height="844" loading="lazy" /></a><strong>Workout actions</strong><p>Manual completion, feedback, reschedule, missed/skipped, find activity и candidates.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-recommendations.png"><img src="assets/alpha-guide/states/g11-plan-recommendations.png" alt="Plan recommendations preview apply mobile state" width="390" height="844" loading="lazy" /></a><strong>Recommendations</strong><p>Coach recommendations, preview/apply, skipped changes и adjustment history.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G12. Settings & Data</strong><span>Providers, integrations, exports, danger zone и audit.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Add provider</h4><ul><li>Provider type: OpenAI compatible или Anthropic.</li><li>Display name, base URL, model, API key, default checkbox.</li><li>Save provider не возвращает API key в UI.</li><li>Missing key state понятен.</li></ul></div>
+              <div class="formula-card"><h4>Edit providers</h4><ul><li>Existing provider card показывает default/key stored/vision likely badges.</li><li>Edit name/base/model без key не стирает key.</li><li>Clear key checkbox явно удаляет key.</li><li>Set default, Test, Delete имеют busy/error states.</li></ul></div>
+              <div class="formula-card"><h4>Provider test</h4><ul><li>Success показывает status, response ms, vision likely/unknown, message.</li><li>Failure объясняет provider/API issue.</li><li>Test result не раскрывает secret.</li></ul></div>
+              <div class="formula-card"><h4>Integrations</h4><ul><li>Refresh загружает integrations.</li><li>Показываются name, category, status, configured.</li><li>Empty: <code>No integration data loaded</code>.</li><li>Load failure не ломает providers.</li></ul></div>
+              <div class="formula-card"><h4>Data management</h4><ul><li>Download JSON export сообщает, что secrets omitted.</li><li>Activities CSV download работает или показывает error.</li><li>Danger zone disabled до точного <code>DELETE</code>.</li><li>Delete account data нельзя запустить случайным tap.</li></ul></div>
+              <div class="formula-card"><h4>Audit log</h4><ul><li>Empty: <code>Audit log is empty</code>.</li><li>Action, entity, metadata JSON читаются на mobile cards.</li><li>Большая metadata не создает горизонтальный scroll.</li><li>Provider/export/delete actions оставляют audit event.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-provider-form.png"><img src="assets/alpha-guide/states/g12-settings-provider-form.png" alt="Settings provider form mobile state" width="390" height="844" loading="lazy" /></a><strong>Provider form</strong><p>Add/edit provider, API key handling, set default, test и delete actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-data-danger.png"><img src="assets/alpha-guide/states/g12-settings-data-danger.png" alt="Settings data export and danger zone mobile state" width="390" height="844" loading="lazy" /></a><strong>Data + danger zone</strong><p>JSON/CSV exports, secret omission copy и exact <code>DELETE</code> confirmation.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-audit-log.png"><img src="assets/alpha-guide/states/g12-settings-audit-log.png" alt="Settings audit log mobile state" width="390" height="844" loading="lazy" /></a><strong>Audit log</strong><p>Action/entity/metadata JSON должны переноситься внутри cards без overflow.</p></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>G13. Cross-page состояния и regression matrix</strong><span>Сценарии, которые нужно гонять через несколько pages.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Empty workspace</h4><ul><li>Нет profile, activities, plans, goals, providers.</li><li>Dashboard дает next action, а не тупик.</li><li>Analytics/load/zones/performance показывают empty states.</li><li>Settings позволяет добавить provider и экспорт не падает.</li></ul></div>
+              <div class="formula-card"><h4>Полный workspace</h4><ul><li>Есть profile, active plan, activities, linked workouts, goals, provider.</li><li>Dashboard, Calendar, Plans и Analytics показывают согласованные counts.</li><li>Activity edit пересчитывает Analytics/Load/Zones после refresh.</li><li>Import match меняет Calendar/Plans/Goals context.</li></ul></div>
+              <div class="formula-card"><h4>Bad data</h4><ul><li>Нереальный pace/HR/duration ловится validation.</li><li>Noisy performance source снижает confidence.</li><li>Missing zones не превращаются в некорректные проценты.</li><li>CSV duplicates не плодят активности.</li></ul></div>
+              <div class="formula-card"><h4>API failures</h4><ul><li>Каждая page имеет error message и не падает всем приложением.</li><li>Retry/Refresh actions работают там, где они есть.</li><li>Failed mutation не меняет UI как будто успешно.</li><li>Auth expired возвращает к login.</li></ul></div>
+              <div class="formula-card"><h4>Mobile usability</h4><ul><li>360, 390, 430px portrait без horizontal scroll.</li><li>Long tables заменены cards или scroll container внутри card.</li><li>Sticky/fixed panels не закрывают input при keyboard.</li><li>Dangerous actions не находятся рядом с primary CTA без separation.</li></ul></div>
+              <div class="formula-card"><h4>Safety language</h4><ul><li>Load/recovery/injury warnings - training guidance, не диагноз.</li><li>Predictions/goals не обещают результат.</li><li>Conservative mode объясняет ограничения.</li><li>Danger zone требует явного подтверждения.</li></ul></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png"><img src="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png" alt="Dashboard cross page alerts mobile state" width="390" height="844" loading="lazy" /></a><strong>Dashboard signals</strong><p>Profile gaps, imports, providers and coach alerts должны вести в связанные pages.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-calendar-links.png"><img src="assets/alpha-guide/states/g13-cross-page-calendar-links.png" alt="Calendar plan activity link cross page mobile state" width="390" height="844" loading="lazy" /></a><strong>Calendar links</strong><p>Cross-page consistency: Calendar link state должен совпадать с Plans, Activities и Dashboard.</p></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="section" id="appendix">
+        <div class="section-head">
+          <h2>Приложения: логика и расчеты</h2>
+          <span class="tag">формулы</span>
+        </div>
+        <div class="bug-card" style="margin-bottom: 0.8rem;">
+          <strong>Как пользоваться приложениями</strong>
+          <p>Это справочник для проверки характеристик Runforfan. Если на экране есть `method`, `source_reference`, `confidence`, `Why?` или warning, сверяйте его с соответствующим блоком ниже. Формулы описывают логику продукта, но не являются медицинскими рекомендациями.</p>
+        </div>
+        <div class="appendix-list">
+          <details class="appendix-item" open>
+            <summary><strong>A1. Источники данных, method и confidence</strong><span>Почему у каждой метрики должен быть источник, метод и уровень доверия.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Общий pipeline</h4><p>Пользователь вводит профиль, импортирует активности, создает план и добавляет результаты. Backend пересчитывает derived metrics, зоны, load, analytics, performance и dashboard. Frontend показывает значения вместе с source/confidence, чтобы tester понимал, откуда взялась цифра.</p><span class="source">frontend/src/App.tsx · backend/app/services/*</span></div>
+              <div class="formula-card"><h4>Confidence</h4><p>`high` обычно означает прямой или качественный источник: threshold HR, race/time trial, device stress. `medium` - расчетный, но достаточно надежный источник. `low` - fallback, старый/noisy source или неполные данные.</p><span class="source">calculations.py · performance.py · zones.py</span></div>
+              <div class="formula-card"><h4>Что считать багом</h4><ul><li>Есть число, но нет понятного source/method.</li><li>Confidence завышен при fallback или noisy data.</li><li>Пустые данные выглядят как ноль без объяснения.</li><li>Warning звучит как диагноз или гарантия результата.</li></ul></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A2. Профиль, completeness и safety</strong><span>Какие поля профиля управляют готовностью, зонами и осторожным режимом.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Profile completeness</h4><p>Score считается как доля заполненных обязательных полей. Учитываются birth date, resting HR, HRmax или birthdate, threshold pace, threshold HR, weight, height, preferred weekdays, max run duration. Confidence: `high` от 0.8, `medium` от 0.5, иначе `low`.</p><span class="source">backend/app/services/profile.py</span></div>
+              <div class="formula-card"><h4>HRmax fallback</h4><p>Если HRmax не введен, но есть дата рождения, используется Tanaka: <code>HRmax = 208 - 0.7 * age</code>. Это fallback с низким confidence и должно быть видно tester.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Safety check</h4><p>`conservative_mode` включается при травмах, health conditions, tired/strained/injured recovery status или явном conservative flag. Safety warnings также появляются при отсутствии HRmax/birthdate или threshold pace.</p><span class="source">backend/app/services/profile.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A3. HR, pace и RPE zones</strong><span>Приоритеты зон и формулы границ.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Приоритет HR зон</h4><p>Сначала используются lactate threshold HR zones. Если их нет, используются HRR/Karvonen при наличии resting HR и HRmax. Если resting HR нет, используются HRmax zones. Ручные HR overrides подавляют расчетные HR zones.</p><span class="source">backend/app/services/zones.py</span></div>
+              <div class="formula-card"><h4>Karvonen HRR</h4><p>Формула границы: <code>resting_hr + percent * (max_hr - resting_hr)</code>. Диапазоны HRR: Z1 30-39%, Z2 40-59%, Z3 60-74%, Z4 75-84%, Z5 85-95%.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>HRmax zones</h4><p>Границы от HRmax: Z1 60-69%, Z2 70-79%, Z3 80-87%, Z4 88-92%, Z5 93-100%. Это менее персональный fallback, чем threshold HR или HRR.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Threshold HR zones</h4><p>Границы строятся от lactate threshold HR: Z1 до 84%, Z2 до 89%, Z3 до 94%, Z4 до 99%, Z5 выше threshold. Это самый приоритетный HR-метод.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Threshold pace zones</h4><p>Темп хранится в сек/км. Easy = threshold +45..+95 сек/км, Steady +20..+44, Threshold -5..+10, Interval -35..-6, Rep -60..-36. Меньшее число значит быстрее.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>RPE zones</h4><p>RPE fallback всегда доступен: Z1 0-2, Z2 3-4, Z3 5-6, Z4 7-8, Z5 9-10. Используется для субъективной интенсивности и плановых тренировок.</p><span class="source">backend/app/services/calculations.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A4. Activity metrics и validation</strong><span>Темп, скорость, калории, derived metrics и проверка импорта.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Pace и speed</h4><p>Средний pace: <code>duration_seconds / distance_km</code>. Speed: <code>distance_km / (duration_seconds / 3600)</code>. Segment-weighted pace использует <code>sum(duration) / sum(distance)</code>, а не простое среднее темпов.</p><span class="source">calculations.py · App.tsx Activity detail</span></div>
+              <div class="formula-card"><h4>Energy estimate</h4><p>Если calories не импортированы и есть вес, используется ACSM running estimate: speed в м/мин, grade 0..0.2, VO2 = <code>0.2*speed + 0.9*speed*grade + 3.5</code>, kcal = VO2 * weight / 1000 * 5 * minutes.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Derived metrics</h4><p>Считаются duration_minutes, pace, speed, vertical balance, estimated energy, pace variability по splits, work block count/duration/distance и training load proxy.</p><span class="source">backend/app/services/activity_metrics.py</span></div>
+              <div class="formula-card"><h4>Training load proxy</h4><p>Если есть HR: <code>duration_minutes * clamp(avg_hr / 150, 0.5, 1.8)</code>. Если HR нет, fallback = duration_minutes. Это proxy для activity detail, не полноценный CTL/ATL engine.</p><span class="source">backend/app/services/activity_metrics.py</span></div>
+              <div class="formula-card"><h4>Import validation</h4><p>Distance 0.05..300 км, duration 60..86400 сек, pace 120..1200 сек/км, HR 40..230 bpm. Pace должен совпадать с distance/time, segment sums и workout block sums проверяются с tolerance.</p><span class="source">backend/app/services/recognition.py</span></div>
+              <div class="formula-card"><h4>Что проверять</h4><ul><li>LLM candidate не создает activity без confirmation.</li><li>Ошибки distance/time/pace объяснены.</li><li>Source metadata не переводится и не ломается.</li></ul></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A5. Training load, CTL, ATL, TSB, monotony, strain</strong><span>Как считается нагрузка и почему это coaching heuristic.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Приоритет load source</h4><p>Порядок: импортированный aerobic training stress, затем sRPE, затем HR TRIMP, затем support duration fallback, затем pace fallback. UI должен показывать method, потому что источники имеют разное доверие.</p><span class="source">backend/app/services/training_load.py</span></div>
+              <div class="formula-card"><h4>sRPE</h4><p>Session RPE load: <code>duration_minutes * RPE</code>. Используется, если есть workout feedback RPE.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>HR TRIMP</h4><p><code>HRR = max_hr - resting_hr</code>, <code>ratio = clamp((avg_hr - resting_hr) / HRR, 0, 1)</code>. TRIMP = minutes * ratio * coefficient * exp(exponent * ratio). Coefficients differ by sex.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Pace fallback</h4><p><code>factor = clamp(threshold_pace / actual_pace, 0.75, 1.6)</code>, load = minutes * factor. Быстрее threshold - больше нагрузка, медленнее - меньше.</p><span class="source">backend/app/services/training_load.py</span></div>
+              <div class="formula-card"><h4>CTL/ATL/TSB</h4><p>EWMA: <code>alpha = 1 - exp(-1 / tau_days)</code>, <code>new = previous + alpha*(today - previous)</code>. CTL tau = 42 дня, ATL tau = 7 дней, TSB = CTL - ATL.</p><span class="source">backend/app/services/training_load.py</span></div>
+              <div class="formula-card"><h4>Monotony/strain</h4><p><code>monotony = mean(daily_loads) / pstdev(daily_loads)</code>. <code>strain = sum(daily_loads) * monotony</code>. Если данных мало или SD=0, значения недоступны.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Warnings</h4><p>TSB &lt;= -20 critical, TSB &lt;= -10 warning, monotony &gt;= 2 warning, long run share &gt;= 35%, hard share &gt;40%, hard sessions ближе 48h, recovery days &lt;2 за 7 дней, короткая история &lt;42 дней.</p><span class="source">backend/app/services/training_load.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A6. Analytics, adherence и insights</strong><span>Как считаются сводки по истории тренировок.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Weighted HR</h4><p><code>sum(avg_hr * duration) / sum(duration)</code>. Длинные тренировки влияют сильнее коротких.</p><span class="source">backend/app/services/analytics.py</span></div>
+              <div class="formula-card"><h4>Weighted pace</h4><p><code>sum(duration) / sum(distance)</code>. Это правильно для суммарной истории и не равно среднему арифметическому отдельных pace.</p><span class="source">backend/app/services/analytics.py</span></div>
+              <div class="formula-card"><h4>Adherence</h4><p>Completion rate = done workouts / planned workouts. Distance adherence = completed distance / planned distance. Duration adherence = completed duration / planned duration. Missed/skipped снижают completion.</p><span class="source">backend/app/services/analytics.py</span></div>
+              <div class="formula-card"><h4>Best efforts</h4><p>Цели: 1K, 5K, 10K, half marathon. Activity подходит, если distance в пределах +/-5% target; 1K также ищется по splits. Duration нормализуется на target distance.</p><span class="source">backend/app/services/analytics.py</span></div>
+              <div class="formula-card"><h4>Insights</h4><p>Эвристики: устойчивый рост объема 3 недели подряд, hard share &gt;40%, easy-run improvement при pace лучше и HR не выше, fatigue при высоком RPE/fatigue или spike нагрузки.</p><span class="source">backend/app/services/analytics.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A7. Zone analytics и Seiler split</strong><span>Классификация фактической и плановой интенсивности.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Actual classification priority</h4><p>Приоритет: threshold HR, threshold pace, HR, pace, RPE, support activity fallback. Threshold-based zones считаются надежнее обычных HR/pace зон.</p><span class="source">backend/app/services/zone_analytics.py</span></div>
+              <div class="formula-card"><h4>Zone match</h4><p>Значение попадает в зону, если оно не ниже lower и не выше upper. Границы могут быть открытыми, если lower/upper отсутствует.</p><span class="source">backend/app/services/zone_analytics.py</span></div>
+              <div class="formula-card"><h4>Seiler 3-zone</h4><p>Z1/Z2 -> low, Z3 -> moderate, Z4/Z5 -> high. Default endurance target для low intensity: 75-85% времени.</p><span class="source">backend/app/services/zone_analytics.py</span></div>
+              <div class="formula-card"><h4>Planned vs actual</h4><p><code>percentage = zone_duration / total_duration * 100</code>. <code>diff = actual_percentage - planned_percentage</code>. Плановая длительность берется из duration или оценивается через distance и pace fallback.</p><span class="source">backend/app/services/zone_analytics.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A8. Performance, VDOT, Riegel, PB</strong><span>Почему easy run не должен становиться performance source.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>VDOT Daniels/Gilbert</h4><p>Time in minutes, velocity m/min. VO2 = <code>-4.60 + 0.182258*v + 0.000104*v^2</code>. Percent VO2max зависит от duration. <code>VDOT = VO2 / percent_vo2max</code>.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>VDOT source selection</h4><p>Eligible только race/time_trial, distance &gt;= 3 км, duration &gt;0. Выбор по confidence, свежести и VDOT. Noisy, trail, heat, большой elevation или старый результат снижают confidence.</p><span class="source">backend/app/services/performance.py</span></div>
+              <div class="formula-card"><h4>Riegel prediction</h4><p><code>predicted_time = source_time * (target_distance / source_distance)^1.06</code>. Confidence medium для ratio 0.25..4, иначе low/extrapolation warning.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Threshold pace from result</h4><p>Оценивается 60-minute threshold pace из race/time trial через Riegel exponent 1.06. Confidence high, если duration 20-90 минут; noisy или короткий source снижает confidence.</p><span class="source">backend/app/services/performance.py</span></div>
+              <div class="formula-card"><h4>Personal bests</h4><p>PB учитывает race/time_trial в пределах +/-5% стандартной дистанции. Normalized duration = duration / distance * target_distance. Выбирается минимальное normalized duration.</p><span class="source">backend/app/services/performance.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A9. Goals, predictions и readiness</strong><span>Как цель связывается с планом, прогнозом и прогрессом.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Prediction range</h4><p>Для race goal выбирается prediction близкой дистанции. Margin зависит от confidence: high 3%, medium 6%, low 10%. Диапазон = predicted +/- margin, не точное обещание.</p><span class="source">backend/app/services/goals.py</span></div>
+              <div class="formula-card"><h4>Race readiness</h4><p>Completion &lt;70% -> at_risk. Если predicted upper &lt;= target_time -> on_track. Если predicted lower &gt; target_time -> at_risk. Между ними -> watch. Без прогноза, но с планом -> watch.</p><span class="source">backend/app/services/goals.py</span></div>
+              <div class="formula-card"><h4>Generic progress</h4><p>Для monthly distance, consistency и long run: <code>percentage = clamp(done / target, 0, 1)</code>. Это прогресс к цели, а не готовность к гонке.</p><span class="source">backend/app/services/goals.py</span></div>
+              <div class="formula-card"><h4>Milestones</h4><p>Race milestones: tune-up race за 28 дней, threshold test за 21 день, longest run за 14 дней. Longest target зависит от дистанции гонки.</p><span class="source">backend/app/services/goals.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A10. Dashboard readiness и alerts</strong><span>Почему главный экран показывает ok, watch или risk.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Readiness status</h4><p>Base status = ok. Safety warnings/conservative mode переводят в watch. Missed/skipped this week: 1 -> watch, 2+ -> risk. High subjective risk или plan recommendations adjust -> risk.</p><span class="source">backend/app/services/dashboard.py</span></div>
+              <div class="formula-card"><h4>Alerts</h4><p>Dashboard показывает no active plan, profile completeness &lt;0.8, safety warnings, pending imports, no LLM provider, coach recommendation watch/adjust. Список ограничен первыми 8 сигналами.</p><span class="source">backend/app/services/dashboard.py</span></div>
+              <div class="formula-card"><h4>Что проверять</h4><ul><li>Dashboard не скрывает критичные blockers.</li><li>Readiness status совпадает с profile/plan/import state.</li><li>Next action ведет на правильный экран.</li></ul></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A11. Plan builder, workout blocks и safety gates</strong><span>Как строится программа от текущей подготовки.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Length и training age</h4><p>Если target_date нет - 8 недель. Иначе weeks = ceil(days_to_target / 7), минимум 4 и максимум 24. Training age: beginner/intermediate/advanced по consistent weeks, weekly volume и recent long run.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Growth caps</h4><p>Max weekly growth: beginner 5%, intermediate 8%, advanced 10%. Long run share: 30/33/35%, conservative cap 32%. Каждая 4-я неделя вне taper получает deload multiplier 0.78.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Taper</h4><p>Marathon: 3 недели taper при плане &gt;=16 недель, иначе 2. Half marathon: 2 недели при плане &gt;=8 недель, иначе 1. Shorter goals: 1 неделя. Multipliers постепенно снижают объем.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Hard work caps</h4><p>Interval hard block: 15/20/25 мин по уровню. Tempo: 20/30/40. Hill: 12/16/20. Даже если тренировка длинная, hard part ограничен.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Safety gates</h4><p>Conservative mode включается при injury/health/recovery flags, very short history, missing zones, long-distance goal при низком weekly volume, wizard injury/no hard workouts.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Workout blocks</h4><p>Interval: warmup 15%, cooldown 15%, work cap около 50%, остальное recovery. Tempo/threshold/race pace: work cap около 70%. Long run: 25% warmup, 60% middle, 15% cooldown.</p><span class="source">backend/app/services/planning.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A12. Execution score и coach recommendations</strong><span>Как оценивается выполнение тренировки и корректируется план.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Execution score</h4><p>Volume score = <code>1 - abs(actual/target - 1) / 0.5</code>, clamp 0..1. Intensity score зависит от попадания RPE в target range. Subjective score снижается при pain, high RPE/fatigue, poor sleep.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Plan adherence</h4><p>Session adherence = done / total. Distance adherence = completed / planned. Duration adherence = completed / planned. Warnings появляются при фактическом объеме/длительности &gt;=120% или &lt;=75%.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Recommendations</h4><p>Missed/skipped sessions, pain, high fatigue/RPE, overdone hard sessions, distance completion &gt;=120% или &lt;=75%, upcoming volume spike и 3+ hard sessions в неделю запускают recommendations.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Preview/apply</h4><p>Auto changes сначала показываются preview. Reduce volume масштабирует upcoming distances, reduce intensity переводит hard workouts в easy, cap growth ограничивает upcoming volume. Apply пишет audit.</p><span class="source">backend/app/services/planning.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A13. Import recognition, CSV и matching</strong><span>Как данные попадают из скриншотов/CSV в activity и план.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>LLM recognition</h4><p>Prompt требует JSON only, metric units only и схему activity, segments, split_blocks, workout_blocks, confidence, uncertainty_notes, estimated_fields. Нельзя придумывать невидимые поля.</p><span class="source">backend/app/services/recognition.py</span></div>
+              <div class="formula-card"><h4>CSV normalization</h4><p>Поддерживаются aliases: title/name, distance/distance_km, moving_time/time/duration, avg pace/pace, avg HR/heart rate. Duration может быть seconds, MM:SS или HH:MM:SS. Distance &gt;1000 трактуется как meters и делится на 1000.</p><span class="source">backend/app/services/csv_imports.py</span></div>
+              <div class="formula-card"><h4>Duplicate detection</h4><p>Дубль CSV: same user, started_at, distance_km и duration_seconds. Повторный импорт должен увеличивать skipped duplicates, а не создавать вторую activity.</p><span class="source">backend/app/services/csv_imports.py</span></div>
+              <div class="formula-card"><h4>Match score</h4><p>Date score: same day 1.0, +/-1 day 0.86, +/-2 days 0.68, +/-3 days 0.5, до +/-7 days 0.25. Final score = date*0.48 + volume*0.34 + type*0.18.</p><span class="source">backend/app/services/planning.py</span></div>
+              <div class="formula-card"><h4>Auto-match</h4><p>Auto-match требует score &gt;=0.78, date window 3 days и отсутствие близкого второго кандидата. Если второй score близко к первому, нужен manual review.</p><span class="source">backend/app/services/planning.py</span></div>
+            </div>
+          </details>
+
+          <details class="appendix-item">
+            <summary><strong>A14. Calendar, export, audit и delete safety</strong><span>Контроль календаря, выгрузок и опасных действий.</span></summary>
+            <div class="appendix-content formula-grid">
+              <div class="formula-card"><h4>Calendar warnings</h4><p>Hard workouts ближе 48 часов получают warning. Long run рядом с hard workout получает отдельный warning. Calendar summary считает planned, done/missed/skipped, linked/unlinked и distance plan vs fact.</p><span class="source">backend/app/services/calendar.py</span></div>
+              <div class="formula-card"><h4>JSON export</h4><p>Экспорт содержит user, profile, measurements, zones, activities, plans, goals, performance results, daily loads, imports, providers without secrets, audit log. Screenshot local file paths и API keys исключаются.</p><span class="source">backend/app/services/data_management.py</span></div>
+              <div class="formula-card"><h4>CSV export safety</h4><p>CSV injection protection: строки, начинающиеся с <code>=</code>, <code>+</code>, <code>-</code>, <code>@</code>, получают префикс apostrophe. Activities CSV содержит основные поля тренировки.</p><span class="source">backend/app/services/data_management.py</span></div>
+              <div class="formula-card"><h4>Audit log</h4><p>Audit event сохраняет action, entity_type, entity_id и metadata_json. Export, CSV export, imports, provider actions и delete должны оставлять след.</p><span class="source">backend/app/services/audit.py · api/routes/export.py</span></div>
+              <div class="formula-card"><h4>Delete user data</h4><p>Danger zone удаляет user-owned data после явного подтверждения и считает rows по основным моделям. Tester не должен запускать это без отдельного сценария.</p><span class="source">backend/app/services/data_management.py</span></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="section" id="report">
+        <div class="section-head">
+          <h2>Финальный баг-репорт</h2>
+          <span class="tag">шаблон</span>
+        </div>
+        <div class="bug-grid">
+          <div class="bug-card"><strong>Что приложить</strong><p>Скриншот или видео, номер шага из этого гайда, устройство, OS, браузер/webview, ширина экрана и ориентация.</p></div>
+          <div class="bug-card"><strong>Что описать</strong><p>Ожидаемый результат, фактический результат, данные, которые вводили, и можно ли воспроизвести повторно.</p></div>
+          <div class="bug-card"><strong>Что особенно важно</strong><p>Горизонтальный скролл, перекрытие клавиатурой, потеря данных, неверное распознавание, опасное удаление, непонятные warnings.</p></div>
+        </div>
+        <div class="bug-card" style="margin-top: 0.8rem;">
+          <strong>Копируемый формат</strong>
+          <pre>Заголовок: [Шаг N / экран] Краткое описание
 
 Окружение:
-  Device model:
-  OS version:
+  Устройство:
+  OS:
   Browser/webview:
   Viewport width:
   Orientation:
-  Keyboard/file picker context:
-  Frontend URL:
-  Backend URL:
   Язык UI:
-  Время ошибки:
 
 Шаги воспроизведения:
   1.
   2.
   3.
 
-Ожидаемый результат:
+Ожидалось:
 
-Фактический результат:
+Фактически:
 
-Данные для связи с сущностью:
+Данные:
   activity_id:
   import_batch_id:
   plan_id:
   workout_id:
   goal_id:
 
-Скриншоты или видео:
+Скриншот/видео:
 
 Console/network errors, если есть:
 
-Важность:
-  blocker / high / medium / low</pre>
-        </section>
+Важность: blocker / high / medium / low</pre>
+        </div>
+      </section>
 
-        <section id="glossary" class="section-card">
-          <h2 class="section-title">8. Глоссарий</h2>
-          <div class="table-wrap"><table>
-            <thead>
-              <tr><th>Термин</th><th>Объяснение</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Activity</td><td>Фактическая тренировка или активность.</td></tr>
-              <tr><td>Candidate</td><td>Предварительно распознанная тренировка до подтверждения.</td></tr>
-              <tr><td>Validation</td><td>Проверка согласованности distance, duration, pace, HR, segments и blocks.</td></tr>
-              <tr><td>RPE</td><td>Субъективная тяжесть тренировки по шкале 0-10.</td></tr>
-              <tr><td>VDOT</td><td>Оценка беговой формы по результату гонки или time trial.</td></tr>
-              <tr><td>TRIMP</td><td>Training impulse на основе пульса и длительности.</td></tr>
-              <tr><td>CTL</td><td>Chronic Training Load, долгосрочная EWMA нагрузки.</td></tr>
-              <tr><td>ATL</td><td>Acute Training Load, краткосрочная EWMA нагрузки.</td></tr>
-              <tr><td>TSB</td><td>Training Stress Balance, CTL минус ATL.</td></tr>
-              <tr><td>Monotony</td><td>Однообразие нагрузки, mean divided by standard deviation.</td></tr>
-              <tr><td>Strain</td><td>Суммарная нагрузка, усиленная monotony.</td></tr>
-              <tr><td>Seiler split</td><td>Трехзонное распределение интенсивности: low, moderate, high.</td></tr>
-              <tr><td>Adherence</td><td>Насколько фактическое выполнение совпадает с планом.</td></tr>
-              <tr><td>Execution score</td><td>Оценка выполнения workout по объему, интенсивности и субъективным данным.</td></tr>
-              <tr><td>Confidence</td><td>Доверие к расчету или source: low, medium, high.</td></tr>
-            </tbody>
-          </table></div>
-        </section>
-
-        <section id="limits" class="section-card">
-          <h2 class="section-title">9. Known limitations</h2>
-          <div class="card-grid">
-            <div class="card">
-              <h4>Alpha status</h4>
-              <p>Функции, UX и формулы могут меняться. Нужны баг-репорты по продуктовой понятности, не только по crashes.</p>
-            </div>
-            <div class="card">
-              <h4>LLM recognition</h4>
-              <p>Качество зависит от provider, модели, screenshots и prompt. LLM может ошибаться, поэтому confirmation обязателен.</p>
-            </div>
-            <div class="card">
-              <h4>Training load</h4>
-              <p>CTL/ATL/TSB, monotony и strain являются эвристиками. Они не предсказывают здоровье или травмы.</p>
-            </div>
-            <div class="card">
-              <h4>Performance</h4>
-              <p>VDOT и Riegel predictions требуют качественного race/time trial source. Noisy, старые и короткие results снижают confidence.</p>
-            </div>
-            <div class="card">
-              <h4>Zones</h4>
-              <p>Зоны зависят от профиля. Без HRmax/resting HR/threshold pace часть расчетов будет недоступна.</p>
-            </div>
-            <div class="card">
-              <h4>Matching</h4>
-              <p>Auto-match отклоняет неоднозначные candidates. Это ожидаемо, пользователь должен выбрать link вручную.</p>
-            </div>
-          </div>
-        </section>
-
-        <p class="footer">
-          Runforfan alpha tester guide. Этот HTML можно открыть локально из репозитория. Для инженерных деталей см. <code>Docs/runforfan-professional-documentation.md</code>.
-        </p>
-      </main>
-    </div>
+      <p class="footer">Runforfan alpha tester guide. Все скриншоты подключены локально из <code>assets/alpha-guide/</code>.</p>
+    </main>
   </body>
 </html>
