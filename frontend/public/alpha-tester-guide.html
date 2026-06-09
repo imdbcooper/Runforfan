@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Runforfan alpha: тестируем со смартфона</title>
+    <title>Runforfan: как проверить приложение</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080808'/%3E%3Cpath d='M9 22 15 8l3 9 4-6' fill='none' stroke='%23f97316' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <style>
       :root {
@@ -568,11 +568,11 @@
 
     <main class="wrap" id="start">
       <header class="hero">
-        <span class="eyebrow">Runforfan mobile alpha</span>
-        <h1>Runforfan alpha: тестируем со смартфона</h1>
+        <span class="eyebrow">Runforfan alpha guide</span>
+        <h1>Как проверить Runforfan</h1>
         <p class="lead">
-          Это полноценный playbook для альфа-тестера: сначала пройдите 12 основных экранов, затем используйте полный справочник
-          всех страниц, вложенных панелей, форм, пустых состояний, ошибок и опасных действий. Основной формат проверки - смартфон в portrait.
+          Простая инструкция для первого прохода: откройте приложение, заполните профиль, импортируйте тренировки и проверьте, что план,
+          календарь, зоны и аналитика понятны обычному бегуну. Основной формат проверки - смартфон в portrait.
         </p>
         <div class="hero-grid" aria-label="Что проверить за проход">
           <div class="hero-note"><strong>Понятность.</strong><p>Пользователь понимает, что заполнить, почему появилась метрика и что делать дальше.</p></div>
@@ -588,11 +588,11 @@
         </div>
         <div class="rules">
           <div class="rule"><strong>Держите смартфон вертикально.</strong><p>Основная ширина проверки: 360-430px. Landscape можно проверить после основного прохода.</p></div>
-          <div class="rule"><strong>Откройте app.</strong><p>Локально: <code>http://127.0.0.1:5173/app/</code>. Backend health перед тестом: <code>http://127.0.0.1:8080/health</code> должен вернуть <code>ok</code>. Для staging используйте URL, который выдал координатор.</p></div>
-          <div class="rule"><strong>Войдите и выберите язык.</strong><p>Если видите auth gate, используйте Telegram login или локальный dev login. В topbar проверьте переключатель <code>ru/en</code>; основной проход делайте на русском.</p></div>
+          <div class="rule"><strong>Откройте app.</strong><p>Production: <code>https://run.slavx.ru/app/</code>. Health check: <code>https://run.slavx.ru/health</code> должен вернуть <code>{"status":"ok"}</code>. Старый адрес <code>/admin/</code> должен перенаправлять на <code>/app/</code>.</p></div>
+          <div class="rule"><strong>Войдите и выберите язык.</strong><p>На production используйте Telegram login: откройте бота, нажмите Start и вернитесь по одноразовой ссылке. В topbar проверьте переключатель <code>ru/en</code>; основной проход делайте на русском.</p></div>
           <div class="rule"><strong>Ведите заметки по шагам.</strong><p>Фиксируйте номер шага, фактическое поведение, ожидаемое поведение и данные, которые ввели.</p></div>
           <div class="rule"><strong>Не удаляйте данные случайно.</strong><p>Danger zone тестируйте только если специально проверяете reset/export/delete.</p></div>
-          <div class="rule"><strong>Подготовьте материалы.</strong><p>Нужны 1-3 скриншота тренировок. Без LLM поддержаны шаблоны Huawei и iPhone/Apple Fitness; остальные скрины требуют vision LLM. Дополнительно можно подготовить CSV и один реальный или тестовый результат гонки.</p></div>
+          <div class="rule"><strong>Подготовьте материалы.</strong><p>Нужны 1-3 скриншота одной тренировки. Один upload batch = одна тренировка; несколько тренировок за последние 2 недели загружайте отдельными batches или через CSV. Без LLM поддержаны шаблоны Huawei и iPhone/Apple Fitness; остальные скрины требуют vision LLM.</p></div>
           <div class="rule"><strong>Без медицинских выводов.</strong><p>Runforfan показывает спортивные эвристики, а не медицинские рекомендации. При боли, головокружении, ухудшении самочувствия или признаках травмы тренировку нужно остановить и обратиться к специалисту.</p></div>
         </div>
       </section>
@@ -715,6 +715,7 @@
               <ol class="action-list">
                 <li>Загрузите PNG/JPEG/WEBP через gallery/file picker.</li>
                 <li>Для iPhone загрузите оба Apple Fitness скрина: summary и splits/HR/map.</li>
+                <li>Не смешивайте несколько разных тренировок в одном upload: Runforfan создаёт одну activity на batch.</li>
                 <li>Проверьте статус batch и сообщение распознавания.</li>
                 <li>Если recognition неверный, исправьте поля или зафиксируйте ошибку.</li>
                 <li>Проверьте CSV fallback: created, duplicates, matched, failed.</li>
@@ -957,7 +958,7 @@
           <details class="appendix-item">
             <summary><strong>G3. Imports</strong><span>Скриншоты, CSV, confirmation, correction, matching и history.</span></summary>
             <div class="appendix-content formula-grid">
-              <div class="formula-card"><h4>Screenshot upload</h4><ul><li>Нет файла: понятное сообщение, submit не создает batch.</li><li>Больше 6 файлов: reject до API call.</li><li>PNG/JPEG/WEBP принимаются через mobile file picker.</li><li>Processing state блокирует повторный submit.</li></ul></div>
+              <div class="formula-card"><h4>Screenshot upload</h4><ul><li>Нет файла: понятное сообщение, submit не создает batch.</li><li>Один batch должен содержать скрины только одной тренировки.</li><li>Несколько тренировок за период загружаются отдельными batches или CSV.</li><li>PNG/JPEG/WEBP принимаются через mobile file picker.</li><li>Processing state блокирует повторный submit.</li></ul></div>
               <div class="formula-card"><h4>Supported templates</h4><ul><li>Huawei interval 3 x 2 km и iPhone Apple Fitness run работают без LLM.</li><li>iPhone example состоит из двух screenshots: summary и splits/HR/map.</li><li>Unknown screenshots require active vision LLM provider.</li></ul></div>
               <div class="formula-card"><h4>Candidate review</h4><ul><li>Если <code>requires_confirmation</code>, candidate не создает activity сам.</li><li>Видны title, distance, duration, pace, HR, uncertainty notes.</li><li>Estimated fields помечены отдельно.</li><li>Reject candidate оставляет понятную запись в history.</li></ul></div>
               <div class="formula-card"><h4>Corrections</h4><ul><li>Перед confirm можно исправить title, started, distance, duration, pace, HR.</li><li>Save corrections не должен подтверждать candidate автоматически.</li><li>Ошибки в коррекциях возвращаются в этой же карточке.</li></ul></div>
