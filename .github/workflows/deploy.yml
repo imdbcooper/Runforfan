@@ -70,6 +70,8 @@ jobs:
       RUNFORFAN_DOMAIN: ${{ vars.RUNFORFAN_DOMAIN || 'run.slavx.ru' }}
       RUNFORFAN_APP_ENV: ${{ vars.RUNFORFAN_APP_ENV || 'development' }}
       RUNFORFAN_DEMO_SEED: ${{ vars.RUNFORFAN_DEMO_SEED || 'true' }}
+      RUNFORFAN_FRONTEND_PORT: ${{ vars.RUNFORFAN_FRONTEND_PORT || '18080' }}
+      RUNFORFAN_BACKEND_PORT: ${{ vars.RUNFORFAN_BACKEND_PORT || '18081' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
@@ -107,6 +109,8 @@ jobs:
           RUNFORFAN_DOMAIN=$RUNFORFAN_DOMAIN
           RUNFORFAN_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:latest
           RUNFORFAN_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:latest
+          RUNFORFAN_BACKEND_PORT=$RUNFORFAN_BACKEND_PORT
+          RUNFORFAN_FRONTEND_PORT=$RUNFORFAN_FRONTEND_PORT
           RUNFORFAN_POSTGRES_PASSWORD=$RUNFORFAN_POSTGRES_PASSWORD
           RUNFORFAN_SECRET_KEY=$RUNFORFAN_SECRET_KEY
           RUNFORFAN_TELEGRAM_BOT_TOKEN=$RUNFORFAN_TELEGRAM_BOT_TOKEN
@@ -116,6 +120,25 @@ jobs:
           EOF
           scp runforfan.env "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env"
           rm -f runforfan.env
+
+      - name: Install host Caddy config
+        run: |
+          cat > caddy-runforfan.conf <<EOF
+          [Service]
+          Environment=RUNFORFAN_DOMAIN=$RUNFORFAN_DOMAIN
+          Environment=RUNFORFAN_BACKEND_PORT=$RUNFORFAN_BACKEND_PORT
+          Environment=RUNFORFAN_FRONTEND_PORT=$RUNFORFAN_FRONTEND_PORT
+          EOF
+          scp caddy-runforfan.conf "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/caddy-runforfan.conf"
+          rm -f caddy-runforfan.conf
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "set -e; \
+            if [ -f /etc/caddy/Caddyfile ] && [ ! -f /etc/caddy/Caddyfile.before-runforfan ]; then sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-runforfan; fi; \
+            sudo install -d -m 755 /etc/systemd/system/caddy.service.d; \
+            sudo install -m 644 '$DEPLOY_PATH/caddy-runforfan.conf' /etc/systemd/system/caddy.service.d/runforfan.conf; \
+            sudo install -m 644 '$DEPLOY_PATH/Caddyfile' /etc/caddy/Caddyfile; \
+            sudo systemctl daemon-reload; \
+            sudo env RUNFORFAN_DOMAIN='$RUNFORFAN_DOMAIN' RUNFORFAN_BACKEND_PORT='$RUNFORFAN_BACKEND_PORT' RUNFORFAN_FRONTEND_PORT='$RUNFORFAN_FRONTEND_PORT' caddy validate --config /etc/caddy/Caddyfile; \
+            sudo systemctl reload caddy || sudo systemctl restart caddy"
 
       - name: Pull and restart services
         run: |

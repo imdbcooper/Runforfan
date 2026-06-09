@@ -1,16 +1,16 @@
-{$RUNFORFAN_DOMAIN} {
+{$RUNFORFAN_DOMAIN:run.slavx.ru} {
   encode zstd gzip
 
   handle /api/* {
-    reverse_proxy backend:8080
+    reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
   }
 
   handle /health {
-    reverse_proxy backend:8080
+    reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
   }
 
   handle /admin* {
-    reverse_proxy frontend:80
+    reverse_proxy 127.0.0.1:{$RUNFORFAN_FRONTEND_PORT:18080}
   }
 
   handle {

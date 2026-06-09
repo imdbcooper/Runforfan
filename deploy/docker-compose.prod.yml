@@ -1,29 +1,11 @@
 name: runforfan
 
 services:
-  caddy:
-    image: caddy:2.8-alpine
-    restart: unless-stopped
-    environment:
-      RUNFORFAN_DOMAIN: ${RUNFORFAN_DOMAIN:-run.slavx.ru}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      backend:
-        condition: service_healthy
-      frontend:
-        condition: service_started
-    networks:
-      - runforfan_net
-
   frontend:
     image: ${RUNFORFAN_FRONTEND_IMAGE}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${RUNFORFAN_FRONTEND_PORT:-18080}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -38,6 +20,8 @@ services:
   backend:
     image: ${RUNFORFAN_BACKEND_IMAGE}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${RUNFORFAN_BACKEND_PORT:-18081}:8080"
     environment:
       RUNFORFAN_DATABASE_URL: postgresql+psycopg://runforfan:${RUNFORFAN_POSTGRES_PASSWORD}@db:5432/runforfan
       RUNFORFAN_APP_ENV: ${RUNFORFAN_APP_ENV:-production}
@@ -86,8 +70,6 @@ services:
 volumes:
   postgres_data:
   backend_uploads:
-  caddy_data:
-  caddy_config:
 
 networks:
   runforfan_net:
