@@ -588,7 +588,7 @@
         </div>
         <div class="rules">
           <div class="rule"><strong>Держите смартфон вертикально.</strong><p>Основная ширина проверки: 360-430px. Landscape можно проверить после основного прохода.</p></div>
-          <div class="rule"><strong>Откройте admin.</strong><p>Локально: <code>http://127.0.0.1:5173/admin/</code>. Backend health перед тестом: <code>http://127.0.0.1:8080/health</code> должен вернуть <code>ok</code>. Для staging используйте URL, который выдал координатор.</p></div>
+          <div class="rule"><strong>Откройте app.</strong><p>Локально: <code>http://127.0.0.1:5173/app/</code>. Backend health перед тестом: <code>http://127.0.0.1:8080/health</code> должен вернуть <code>ok</code>. Для staging используйте URL, который выдал координатор.</p></div>
           <div class="rule"><strong>Войдите и выберите язык.</strong><p>Если видите auth gate, используйте Telegram login или локальный dev login. В topbar проверьте переключатель <code>ru/en</code>; основной проход делайте на русском.</p></div>
           <div class="rule"><strong>Ведите заметки по шагам.</strong><p>Фиксируйте номер шага, фактическое поведение, ожидаемое поведение и данные, которые ввели.</p></div>
           <div class="rule"><strong>Не удаляйте данные случайно.</strong><p>Danger zone тестируйте только если специально проверяете reset/export/delete.</p></div>

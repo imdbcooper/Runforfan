@@ -91,29 +91,29 @@ Runforfan не является медицинским устройством и
 
 ## 5. Навигация frontend
 
-Базовый путь Vite: `/admin/`.
+Базовый путь Vite: `/app/`.
 
 Целевые routes:
 
-- `/admin/` - Dashboard.
-- `/admin/onboarding` - первичная настройка профиля.
-- `/admin/activities` - список тренировок.
-- `/admin/activities/:id` - детальная тренировка.
-- `/admin/imports` - импорт и подтверждение распознавания.
-- `/admin/calendar` - календарь тренировок и плана.
-- `/admin/plans` - список планов.
-- `/admin/plans/new` - мастер создания плана.
-- `/admin/plans/:id` - план по неделям.
-- `/admin/workouts/:id` - запланированная тренировка и факт выполнения.
-- `/admin/analytics` - общий analytics hub.
-- `/admin/analytics/performance` - результаты, VDOT, прогнозы.
-- `/admin/analytics/load` - нагрузка, fatigue, monotony, strain.
-- `/admin/analytics/zones` - зоны, распределение интенсивности.
-- `/admin/goals` - цели и забеги.
-- `/admin/profile` - профиль, физиология, ограничения.
-- `/admin/settings/llm` - LLM providers.
-- `/admin/settings/integrations` - источники данных.
-- `/admin/settings/data` - экспорт, удаление, audit.
+- `/app/` - Dashboard.
+- `/app/onboarding` - первичная настройка профиля.
+- `/app/activities` - список тренировок.
+- `/app/activities/:id` - детальная тренировка.
+- `/app/imports` - импорт и подтверждение распознавания.
+- `/app/calendar` - календарь тренировок и плана.
+- `/app/plans` - список планов.
+- `/app/plans/new` - мастер создания плана.
+- `/app/plans/:id` - план по неделям.
+- `/app/workouts/:id` - запланированная тренировка и факт выполнения.
+- `/app/analytics` - общий analytics hub.
+- `/app/analytics/performance` - результаты, VDOT, прогнозы.
+- `/app/analytics/load` - нагрузка, fatigue, monotony, strain.
+- `/app/analytics/zones` - зоны, распределение интенсивности.
+- `/app/goals` - цели и забеги.
+- `/app/profile` - профиль, физиология, ограничения.
+- `/app/settings/llm` - LLM providers.
+- `/app/settings/integrations` - источники данных.
+- `/app/settings/data` - экспорт, удаление, audit.
 
 ## 6. Страницы и профессиональный функционал
 

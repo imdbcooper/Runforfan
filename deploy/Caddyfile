@@ -1,19 +1,23 @@
 {$RUNFORFAN_DOMAIN:run.slavx.ru} {
-  encode zstd gzip
+	encode zstd gzip
 
-  handle /api/* {
-    reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
-  }
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
+	}
 
-  handle /health {
-    reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
-  }
+	handle /health {
+		reverse_proxy 127.0.0.1:{$RUNFORFAN_BACKEND_PORT:18081}
+	}
 
-  handle /admin* {
-    reverse_proxy 127.0.0.1:{$RUNFORFAN_FRONTEND_PORT:18080}
-  }
+	handle /admin* {
+		redir /app/ 301
+	}
 
-  handle {
-    redir /admin/ 302
-  }
+	handle /app* {
+		reverse_proxy 127.0.0.1:{$RUNFORFAN_FRONTEND_PORT:18080}
+	}
+
+	handle {
+		redir /app/ 302
+	}
 }

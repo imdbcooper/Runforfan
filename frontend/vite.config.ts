@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { defineConfig } from "vite"
 
 export default defineConfig({
-  base: "/admin/",
+  base: "/app/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
