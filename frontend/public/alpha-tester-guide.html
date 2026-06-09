@@ -148,10 +148,19 @@
       .step-kicker {
         color: var(--orange-2);
         font-family: var(--mono);
-        font-size: 0.72rem;
         font-weight: 900;
         letter-spacing: 0.14em;
         text-transform: uppercase;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        font-size: 0.84rem;
+        letter-spacing: 0.16em;
+      }
+
+      .step-kicker {
+        font-size: 0.72rem;
       }
 
       h1,
@@ -568,8 +577,7 @@
 
     <main class="wrap" id="start">
       <header class="hero">
-        <span class="eyebrow">Runforfan alpha guide</span>
-        <h1>Как проверить Runforfan</h1>
+        <span class="eyebrow">RUNFORFAN ALPHA GUIDE</span>
         <p class="lead">
           Простая инструкция для первого прохода: откройте приложение, заполните профиль, импортируйте тренировки и проверьте, что план,
           календарь, зоны и аналитика понятны обычному бегуну. Основной формат проверки - смартфон в portrait.
@@ -884,14 +892,19 @@
             <div class="copy">
               <span class="step-kicker">Шаг 12 / Settings & data</span>
               <h3>Завершите проверкой настроек и безопасности данных</h3>
-              <p>Settings - финальная точка: provider keys, exports, danger zone и audit log должны быть понятны и безопасны на мобильном.</p>
+              <p>Settings - финальная точка: LLM provider keys, exports, danger zone и audit log должны быть понятны и безопасны на мобильном. Vision LLM нужен для скриншотов, которые не попали в готовые Huawei/iPhone templates.</p>
               <ol class="action-list">
-                <li>Проверьте LLM providers: add/edit, test provider, set default.</li>
+                <li>Откройте <code>Settings & data</code> и раскройте карточку <code>Add LLM provider</code>.</li>
+                <li>Выберите <code>Provider</code>: <code>OpenAI compatible</code> для OpenAI/local/proxy endpoints или <code>Anthropic</code> для Claude.</li>
+                <li>Заполните <code>Display name</code>, <code>Model</code> и <code>API key</code>. <code>Base URL</code> оставьте пустым для стандартного endpoint или укажите полный endpoint URL для OpenAI-compatible gateway.</li>
+                <li>Отметьте <code>default provider</code>, если именно этот provider должен обрабатывать LLM recognition, и нажмите <code>Save provider</code>.</li>
+                <li>В списке <code>Providers</code> проверьте badges: <code>default</code>, <code>key stored</code> и <code>vision likely</code>/<code>vision unknown</code>.</li>
+                <li>Нажмите <code>Test</code>. Успех показывает status, response time и message; failure означает, что key/model/base URL нужно исправить до теста неизвестных скриншотов.</li>
                 <li>Скачайте JSON export и activities CSV, если браузер позволяет.</li>
                 <li>Проверьте audit log: записи должны читаться карточками.</li>
                 <li>Danger zone открывайте только для специального теста удаления. Подтверждение должно быть явным.</li>
               </ol>
-              <div class="check"><strong>Что проверить</strong><ul><li>API key не возвращается в UI или export.</li><li>Download fallback понятен в mobile browser/webview.</li><li>Удаление данных невозможно случайным tap.</li></ul></div>
+              <div class="check"><strong>Что проверить</strong><ul><li>API key не возвращается в UI или export и не попадает в bug report/screenshots.</li><li>Default provider явно виден, а edit без нового key не стирает сохраненный key.</li><li>Unknown screenshots импортируются только после успешного provider test и требуют подтверждения кандидата перед созданием activity.</li><li>Download fallback понятен в mobile browser/webview.</li><li>Удаление данных невозможно случайным tap.</li></ul></div>
             </div>
             <figure class="phone-frame">
               <div class="phone-top"><span class="speaker"></span></div>
@@ -1099,9 +1112,11 @@
           <details class="appendix-item">
             <summary><strong>G12. Settings & Data</strong><span>Providers, integrations, exports, danger zone и audit.</span></summary>
             <div class="appendix-content formula-grid">
-              <div class="formula-card"><h4>Add provider</h4><ul><li>Provider type: OpenAI compatible или Anthropic.</li><li>Display name, base URL, model, API key, default checkbox.</li><li>Save provider не возвращает API key в UI.</li><li>Missing key state понятен.</li></ul></div>
-              <div class="formula-card"><h4>Edit providers</h4><ul><li>Existing provider card показывает default/key stored/vision likely badges.</li><li>Edit name/base/model без key не стирает key.</li><li>Clear key checkbox явно удаляет key.</li><li>Set default, Test, Delete имеют busy/error states.</li></ul></div>
-              <div class="formula-card"><h4>Provider test</h4><ul><li>Success показывает status, response ms, vision likely/unknown, message.</li><li>Failure объясняет provider/API issue.</li><li>Test result не раскрывает secret.</li></ul></div>
+              <div class="formula-card"><h4>Add provider: путь</h4><ul><li>Откройте sidebar -> <code>Settings & data</code> -> <code>Add LLM provider</code>.</li><li><code>Provider</code>: <code>OpenAI compatible</code> для OpenAI, локального gateway или proxy endpoint; <code>Anthropic</code> для Claude.</li><li><code>Display name</code> - понятное имя card, например <code>OpenAI vision</code> или <code>Claude test</code>.</li><li><code>Model</code> вводится ровно как ожидает provider, например <code>gpt-4o-mini</code> или <code>claude-3-5-sonnet</code>.</li></ul></div>
+              <div class="formula-card"><h4>Endpoint и API key</h4><ul><li><code>Base URL</code> оставьте пустым для стандартного endpoint выбранного provider.</li><li><code>Base URL</code> заполняйте только для OpenAI-compatible gateway/custom endpoint; нужен полный endpoint URL.</li><li><code>API key</code> вводится в password field; после <code>Save provider</code> key не возвращается в UI и export.</li><li>Для alpha используйте key с ограниченной квотой и не вставляйте secret в bug report или screenshots.</li></ul></div>
+              <div class="formula-card"><h4>Default и vision</h4><ul><li>Отметьте <code>default provider</code>, если этот provider должен быть основным для LLM recognition.</li><li>После save card должна показать <code>default</code>, <code>key stored</code> и <code>vision likely</code> или <code>vision unknown</code>.</li><li><code>vision unknown</code> не всегда ошибка, но такой provider нужно проверить через <code>Test</code> до импорта неизвестных screenshots.</li><li>Без активного LLM provider работают только deterministic templates: Huawei и iPhone/Apple Fitness.</li></ul></div>
+              <div class="formula-card"><h4>Edit providers</h4><ul><li>Existing provider card показывает default/key stored/vision likely badges.</li><li>Edit name/base/model без new API key не стирает сохраненный key.</li><li><code>Clear key</code> checkbox явно удаляет key и должен показать missing key state.</li><li><code>Set default</code>, <code>Test</code>, <code>Delete</code> имеют busy/error states.</li></ul></div>
+              <div class="formula-card"><h4>Provider test</h4><ul><li><code>Test</code> отправляет safe prompt и возвращает status, response ms, vision likely/unknown и message.</li><li>Failure объясняет provider/API issue: неверный key, model, base URL, quota или network.</li><li>Test result не раскрывает secret.</li><li>Если test failed, unknown screenshots не должны считаться готовыми к проверке.</li></ul></div>
               <div class="formula-card"><h4>Integrations</h4><ul><li>Refresh загружает integrations.</li><li>Показываются name, category, status, configured.</li><li>Empty: <code>No integration data loaded</code>.</li><li>Load failure не ломает providers.</li></ul></div>
               <div class="formula-card"><h4>Data management</h4><ul><li>Download JSON export сообщает, что secrets omitted.</li><li>Activities CSV download работает или показывает error.</li><li>Danger zone disabled до точного <code>DELETE</code>.</li><li>Delete account data нельзя запустить случайным tap.</li></ul></div>
               <div class="formula-card"><h4>Audit log</h4><ul><li>Empty: <code>Audit log is empty</code>.</li><li>Action, entity, metadata JSON читаются на mobile cards.</li><li>Большая metadata не создает горизонтальный scroll.</li><li>Provider/export/delete actions оставляют audit event.</li></ul></div>
