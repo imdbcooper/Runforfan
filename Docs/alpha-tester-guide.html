@@ -66,6 +66,40 @@
         max-width: 100%;
       }
 
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .skip-link {
+        position: fixed;
+        left: 1rem;
+        top: 0.75rem;
+        z-index: 30;
+        border: 2px solid var(--orange-2);
+        border-radius: 999px;
+        background: #070707;
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        font-weight: 900;
+        padding: 0.55rem 0.8rem;
+        transform: translateY(-150%);
+        transition: transform 0.16s ease;
+      }
+
+      .skip-link:focus-visible {
+        outline: 0;
+        transform: translateY(0);
+      }
+
       .topbar {
         position: sticky;
         top: 0;
@@ -81,10 +115,16 @@
         overflow-x: auto;
         overscroll-behavior-x: contain;
         padding: 0.75rem max(1rem, calc((100vw - 1180px) / 2));
-        scrollbar-width: none;
+        scrollbar-color: rgba(255, 184, 107, 0.65) transparent;
+        scrollbar-width: thin;
       }
 
-      .nav-scroll::-webkit-scrollbar { display: none; }
+      .nav-scroll::-webkit-scrollbar { height: 0.38rem; }
+
+      .nav-scroll::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: rgba(255, 184, 107, 0.52);
+      }
 
       .nav-scroll a {
         flex: 0 0 auto;
@@ -100,11 +140,16 @@
         text-transform: uppercase;
       }
 
-      .nav-scroll a:focus-visible,
       .nav-scroll a:hover {
         border-color: var(--line-hot);
         color: var(--orange-2);
-        outline: none;
+      }
+
+      .nav-scroll a:focus-visible {
+        border-color: var(--line-hot);
+        color: var(--orange-2);
+        outline: 2px solid var(--orange-2);
+        outline-offset: 3px;
       }
 
       .wrap {
@@ -126,8 +171,7 @@
           linear-gradient(180deg, rgba(31, 26, 21, 0.92), rgba(10, 9, 8, 0.96));
       }
 
-      .hero::after {
-        content: "20-30 мин";
+      .hero-duration {
         position: absolute;
         right: -1.5rem;
         top: 1rem;
@@ -242,6 +286,31 @@
       .bug-grid {
         display: grid;
         gap: 0.7rem;
+      }
+
+      .route-list { counter-reset: route; }
+
+      .route-list .rule {
+        position: relative;
+        padding-left: 3rem;
+      }
+
+      .route-list .rule::before {
+        counter-increment: route;
+        content: counter(route);
+        position: absolute;
+        left: 0.9rem;
+        top: 0.9rem;
+        display: grid;
+        place-items: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 999px;
+        background: var(--orange-2);
+        color: #2a1200;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 900;
       }
 
       .rule {
@@ -378,6 +447,12 @@
         font-weight: 800;
       }
 
+      details summary:focus-visible {
+        border-radius: 12px;
+        outline: 2px solid var(--orange-2);
+        outline-offset: 4px;
+      }
+
       code {
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 7px;
@@ -475,6 +550,11 @@
         background: #050505;
       }
 
+      .state-shot a:focus-visible {
+        outline: 2px solid var(--orange-2);
+        outline-offset: 3px;
+      }
+
       .state-shot img {
         display: block;
         width: 100%;
@@ -513,13 +593,46 @@
         padding: 1.5rem 0 2.5rem;
       }
 
+      .mt-sm { margin-top: 0.8rem; }
+      .mb-sm { margin-bottom: 0.8rem; }
+
+      .back-top {
+        display: inline-flex;
+        margin-top: 0.9rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--orange-2);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 900;
+        padding: 0.48rem 0.72rem;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .back-top:focus-visible,
+      .back-top:hover {
+        border-color: var(--line-hot);
+        outline: 2px solid var(--orange-2);
+        outline-offset: 3px;
+      }
+
       @media (max-width: 520px) {
         html { scroll-padding-top: 4.8rem; }
         .wrap { padding: 0.6rem; }
         .hero { margin-top: 0.55rem; padding: 1rem; }
-        .hero::after { display: none; }
+        .hero-duration {
+          display: inline-block;
+          margin-top: 0.72rem;
+          position: static;
+          transform: none;
+        }
         .hero-grid { gap: 0.65rem; margin-top: 1rem; }
-        .section-head { margin: 1.35rem 0 0.6rem; }
+        .section-head {
+          align-items: start;
+          flex-direction: column;
+          margin: 1.35rem 0 0.6rem;
+        }
         .step-body { gap: 0.7rem; padding: 0.68rem; }
         .phone-frame {
           border-radius: 26px;
@@ -529,6 +642,45 @@
         .phone-top { padding: 0.12rem 0 0.4rem; }
         .phone-frame img,
         .shot-link { border-radius: 18px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        .skip-link { transition: none; }
+      }
+
+      @media print {
+        :root { color-scheme: light; }
+        body {
+          background: #fff;
+          color: #111;
+        }
+        body::before,
+        .topbar,
+        .skip-link,
+        .back-top,
+        .phone-top { display: none !important; }
+        .wrap { max-width: none; padding: 0; }
+        .hero,
+        .step-card,
+        .rule,
+        .check,
+        .bug-card,
+        .appendix-item,
+        .formula-card,
+        .state-shot {
+          break-inside: avoid;
+          box-shadow: none;
+          background: #fff;
+          color: #111;
+        }
+        .hero-note p,
+        .rule p,
+        .check li,
+        .bug-card p,
+        .formula-card p,
+        .formula-card li,
+        .state-shot p { color: #333; }
       }
 
       @media (min-width: 760px) {
@@ -552,23 +704,27 @@
     </style>
   </head>
   <body>
+    <a class="skip-link" href="#start">К основному содержимому</a>
     <nav class="topbar" aria-label="Быстрая навигация по шагам">
       <div class="nav-scroll">
         <a href="#start">Старт</a>
-        <a href="#rules">Правила</a>
-        <a href="#criteria">Критерии</a>
-        <a href="#step-1">1 Dashboard</a>
-        <a href="#step-2">2 Profile</a>
-        <a href="#step-3">3 Plans</a>
-        <a href="#step-4">4 Imports</a>
-        <a href="#step-5">5 Activities</a>
-        <a href="#step-6">6 Calendar</a>
-        <a href="#step-7">7 Analytics</a>
-        <a href="#step-8">8 Load</a>
-        <a href="#step-9">9 Zones</a>
+        <a href="#scenario">Сценарий</a>
+        <a href="#rules">Доступ</a>
+        <a href="#test-data">Данные</a>
+        <a href="#terms">Словарь</a>
+        <a href="#criteria">Расчеты</a>
+        <a href="#step-1">1 Главная</a>
+        <a href="#step-2">2 Профиль</a>
+        <a href="#step-3">3 План</a>
+        <a href="#step-4">4 Импорт</a>
+        <a href="#step-5">5 Активности</a>
+        <a href="#step-6">6 Календарь</a>
+        <a href="#step-7">7 Аналитика</a>
+        <a href="#step-8">8 Нагрузка</a>
+        <a href="#step-9">9 Зоны</a>
         <a href="#step-10">10 VDOT</a>
-        <a href="#step-11">11 Goals</a>
-        <a href="#step-12">12 Data</a>
+        <a href="#step-11">11 Цели</a>
+        <a href="#step-12">12 Данные</a>
         <a href="#full-guide">Все страницы</a>
         <a href="#appendix">Приложения</a>
         <a href="#report">Баг-репорт</a>
@@ -577,7 +733,9 @@
 
     <main class="wrap" id="start">
       <header class="hero">
+        <h1 class="sr-only">Runforfan alpha tester guide</h1>
         <span class="eyebrow">RUNFORFAN ALPHA GUIDE</span>
+        <span class="hero-duration" aria-label="Быстрый проход занимает примерно 30-45 минут">30-45 мин</span>
         <p class="lead">
           Простая инструкция для первого прохода: откройте приложение, заполните профиль, импортируйте тренировки и проверьте, что план,
           календарь, зоны и аналитика понятны обычному бегуну. Основной формат проверки - смартфон в portrait.
@@ -589,19 +747,71 @@
         </div>
       </header>
 
+      <section class="section" id="scenario">
+        <div class="section-head">
+          <h2>Минимальный сценарий альфа-теста</h2>
+          <span class="tag">happy path</span>
+        </div>
+        <div class="bug-card mb-sm">
+          <strong>Проход считается завершенным, если</strong>
+          <p>Тестер вошел через Telegram, заполнил минимальный профиль, создал или активировал план, импортировал одну тренировку, связал план и факт, проверил расчеты на здравый смысл и оформил отдельный report на каждую найденную проблему.</p>
+        </div>
+        <div class="rules route-list">
+          <div class="rule"><strong>Войти и выбрать русский язык.</strong><p>Ожидаемо: открыт dashboard, topbar показывает Telegram имя, язык сохраняется после refresh.</p></div>
+          <div class="rule"><strong>Заполнить минимальный профиль.</strong><p>Ожидаемо: после Save profile появляется понятный completeness, HR/HRR/Pace zones либо объяснение, каких данных не хватает.</p></div>
+          <div class="rule"><strong>Создать план.</strong><p>Ожидаемо: preview не создает active plan, а созданный active plan виден на Dashboard, Plans и Calendar.</p></div>
+          <div class="rule"><strong>Импортировать одну тренировку.</strong><p>Ожидаемо: один upload batch создает одну activity; Huawei/iPhone templates работают без LLM, unknown screenshots требуют понятного blocked state или confirmation.</p></div>
+          <div class="rule"><strong>Проверить activity и связать ее с workout.</strong><p>Ожидаемо: details показывают pace, duration, distance, validation и source; Calendar/Plans видят связь после Link.</p></div>
+          <div class="rule"><strong>Сверить аналитику и нагрузку.</strong><p>Ожидаемо: недельный объем, pace, zones, load и warnings согласованы с тестовой историей и не звучат как медицинский диагноз.</p></div>
+          <div class="rule"><strong>Проверить настройки и экспорт.</strong><p>Ожидаемо: API keys не возвращаются в UI/export, опасные действия требуют явного подтверждения, audit log фиксирует действия.</p></div>
+          <div class="rule"><strong>Оформить баг-репорт.</strong><p>Ожидаемо: один report описывает одну проблему, содержит шаг, устройство, данные, expected/actual, важность и вложение без секретов.</p></div>
+        </div>
+      </section>
+
       <section class="section" id="rules">
         <div class="section-head">
-          <h2>Перед тестом</h2>
+          <h2>Доступ, устройство и безопасность</h2>
           <span class="tag">обязательно</span>
         </div>
         <div class="rules">
-          <div class="rule"><strong>Держите смартфон вертикально.</strong><p>Основная ширина проверки: 360-430px. Landscape можно проверить после основного прохода.</p></div>
-          <div class="rule"><strong>Откройте app.</strong><p>Production: <code>https://run.slavx.ru/app/</code>. Health check: <code>https://run.slavx.ru/health</code> должен вернуть <code>{"status":"ok"}</code>. Старый адрес <code>/admin/</code> должен перенаправлять на <code>/app/</code>.</p></div>
-          <div class="rule"><strong>Войдите и выберите язык.</strong><p>На production используйте Telegram login: откройте бота, нажмите Start и вернитесь по одноразовой ссылке. В topbar проверьте переключатель <code>ru/en</code>; основной проход делайте на русском.</p></div>
-          <div class="rule"><strong>Ведите заметки по шагам.</strong><p>Фиксируйте номер шага, фактическое поведение, ожидаемое поведение и данные, которые ввели.</p></div>
-          <div class="rule"><strong>Не удаляйте данные случайно.</strong><p>Danger zone тестируйте только если специально проверяете reset/export/delete.</p></div>
-          <div class="rule"><strong>Подготовьте материалы.</strong><p>Нужны 1-3 скриншота одной тренировки. Один upload batch = одна тренировка; несколько тренировок за последние 2 недели загружайте отдельными batches или через CSV. Без LLM поддержаны шаблоны Huawei и iPhone/Apple Fitness; остальные скрины требуют vision LLM.</p></div>
-          <div class="rule"><strong>Без медицинских выводов.</strong><p>Runforfan показывает спортивные эвристики, а не медицинские рекомендации. При боли, головокружении, ухудшении самочувствия или признаках травмы тренировку нужно остановить и обратиться к специалисту.</p></div>
+          <div class="rule"><strong>Устройство и браузер.</strong><p>Основная проверка: смартфон vertical/portrait шириной 360-430px. Desktop responsive mode допустим, но баги по клавиатуре и file picker лучше проверять на реальном телефоне.</p></div>
+          <div class="rule"><strong>Адрес приложения.</strong><p>Production: <code>https://run.slavx.ru/app/</code>. Старый адрес <code>/admin/</code> должен перенаправлять на <code>/app/</code>. Health check <code>/health</code> - технический smoke-check, не обязательный для обычного тестера.</p></div>
+          <div class="rule"><strong>Telegram login.</strong><p>На production используйте кнопку/ссылку Telegram: откройте бота, нажмите <code>Start</code> и вернитесь по одноразовой ссылке. Если бот не отвечает или ссылка не открывает приложение, оформите auth-баг и не продолжайте основной сценарий.</p></div>
+          <div class="rule"><strong>Язык и локализация.</strong><p>Основной проход делайте на русском. Отдельно переключите <code>ru</code> -> <code>en</code> -> <code>ru</code>, обновите страницу и проверьте, что язык, даты, километры, pace и единицы не ломаются.</p></div>
+          <div class="rule"><strong>Заметки по шагам.</strong><p>Фиксируйте номер шага, экран, время, фактическое поведение, ожидаемое поведение и данные, которые ввели. Один баг-репорт должен описывать одну проблему.</p></div>
+          <div class="rule"><strong>Privacy и secrets.</strong><p>Не отправляйте API keys, полный JSON export, screenshots с ключами, чужие персональные скрины, точные карты/адреса и медицинские подробности, которые не хотите раскрывать.</p></div>
+          <div class="rule"><strong>Опасные действия.</strong><p>Danger zone, удаление данных, реальные provider keys и нагрузочные/stress tests проверяйте только по отдельному сценарию. Для alpha используйте ключи с лимитом, а не production secrets.</p></div>
+          <div class="rule"><strong>Медицинская осторожность.</strong><p>Runforfan показывает спортивные эвристики, а не медицинские рекомендации. При боли, головокружении, ухудшении самочувствия или признаках травмы тренировку нужно остановить и обратиться к специалисту.</p></div>
+        </div>
+      </section>
+
+      <section class="section" id="test-data">
+        <div class="section-head">
+          <h2>Рекомендуемый набор тестовых данных</h2>
+          <span class="tag">воспроизводимость</span>
+        </div>
+        <div class="rules">
+          <div class="rule"><strong>Профиль.</strong><p>Возраст или HRmax, пульс покоя, пороговый темп, 3 тренировочных дня, день длинной пробежки, max duration. Если значение неизвестно, оставьте пустым и проверьте missing state.</p></div>
+          <div class="rule"><strong>План.</strong><p>Цель: 5K через 8 недель, 3 тренировки в неделю, умеренный текущий объем, без агрессивного роста. Preview должен объяснить риски до создания active plan.</p></div>
+          <div class="rule"><strong>Импорт.</strong><p>Для обычного теста используйте Huawei или iPhone/Apple Fitness example. Один batch = одна тренировка; несколько тренировок загружайте отдельными batches или CSV.</p></div>
+          <div class="rule"><strong>Performance и goal.</strong><p>Добавьте race/time trial 5K с реалистичным временем и цель гонки на дату плана. Это проверяет VDOT source, predictions, goal readiness и связь с plan.</p></div>
+          <div class="rule"><strong>Локализация.</strong><p>На русском проверьте километры, сек/км, даты и десятичные числа. На английском достаточно smoke-pass: навигация, dashboard, imports, settings.</p></div>
+          <div class="rule"><strong>Скриншоты как ориентир.</strong><p>Изображения в гайде - не pixel-perfect эталон. Багуйте расхождение, если оно ломает смысл, данные, доступность или мобильную верстку.</p></div>
+        </div>
+      </section>
+
+      <section class="section" id="terms">
+        <div class="section-head">
+          <h2>Словарь терминов</h2>
+          <span class="tag">коротко</span>
+        </div>
+        <div class="rules">
+          <div class="rule"><strong>Готовность / readiness.</strong><p>Сводный сигнал: можно ли продолжать план без явных проблем. Это спортивная подсказка, не диагноз.</p></div>
+          <div class="rule"><strong>Completeness.</strong><p>Насколько профиль заполнен для расчетов. Низкий score не ошибка, если UI ясно объясняет, чего не хватает.</p></div>
+          <div class="rule"><strong>Source и confidence.</strong><p>Источник расчета и уровень доверия. Хороший экран показывает, откуда взялась цифра и насколько ей можно верить.</p></div>
+          <div class="rule"><strong>Batch и candidate.</strong><p>Batch - один пакет загрузки скриншотов одной тренировки. Candidate - распознанная LLM версия activity, которую нужно подтвердить.</p></div>
+          <div class="rule"><strong>Matching.</strong><p>Связь фактической activity с плановой workout. Баг, если связь выглядит успешной только визуально, но теряется в Calendar/Plans.</p></div>
+          <div class="rule"><strong>Empty/loading/error state.</strong><p>Состояния без данных, загрузки и ошибки. Они должны объяснять ситуацию, а не выглядеть как нулевой результат.</p></div>
         </div>
       </section>
 
@@ -611,12 +821,12 @@
           <span class="tag">критерии</span>
         </div>
         <div class="rules">
-          <div class="rule"><strong>Source и confidence.</strong><p>У каждой расчетной метрики ищите источник данных, method/source reference и confidence. Если источник пустой или странный, это отдельный баг.</p></div>
-          <div class="rule"><strong>Периоды и empty states.</strong><p>Переключайте 7/28/90 дней и custom range. Пустой период должен объяснять отсутствие данных, а не выглядеть как сломанный график.</p></div>
-          <div class="rule"><strong>Проверка на здравый смысл.</strong><p>Weekly distance, pace, HR, adherence, zones и VDOT должны совпадать с вашей тестовой историей по порядку величин. Ошибка в единицах или процентах - критичный report.</p></div>
-          <div class="rule"><strong>Формулы коротко.</strong><p>CTL - долгосрочная EWMA нагрузки, ATL - краткосрочная, TSB = CTL - ATL. VDOT/Riegel используют только качественные race/time-trial sources; easy run не должен становиться главным performance source.</p></div>
+          <div class="rule"><strong>Source и confidence.</strong><p>У каждой расчетной метрики ищите источник данных, <code>method</code>/<code>source_reference</code> и <code>confidence</code>. Если источник пустой или странный, это отдельный баг.</p></div>
+          <div class="rule"><strong>Простая арифметика.</strong><p>Pace примерно равен duration / distance, недельный объем равен сумме тренировок недели, проценты зон близки к 100%, HR zones не должны быть выше HRmax.</p></div>
+          <div class="rule"><strong>Периоды и empty states.</strong><p>Переключайте 7/28/90 дней и custom range. Пустой период должен объяснять отсутствие данных, а не выглядеть как сломанный график или реальный ноль.</p></div>
+          <div class="rule"><strong>Качество источника.</strong><p>VDOT/Riegel используют только качественные race/time-trial sources; easy run не должен становиться главным performance source или личным рекордом без context.</p></div>
           <div class="rule"><strong>Warnings осторожны.</strong><p>Load, recovery, injury и readiness предупреждения должны звучать как training guidance, не как диагноз и не как гарантия результата.</p></div>
-          <div class="rule"><strong>Скриншоты кликабельны.</strong><p>В каждом шаге нажмите на изображение, чтобы открыть PNG в полном размере и сравнить мелкие UI детали.</p></div>
+          <div class="rule"><strong>Скриншоты кликабельны.</strong><p>В каждом шаге нажмите на изображение, чтобы открыть его полностью. State previews могут быть обрезаны в карточке, поэтому полный размер важен для мелких UI деталей.</p></div>
         </div>
       </section>
 
@@ -635,8 +845,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Понятно ли, чего не хватает для старта.</li><li>Видны ли ключевые статусы плана и недели.</li><li>Можно ли попасть в следующий экран одним очевидным tap.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/dashboard.png"><img src="assets/alpha-guide/dashboard.png" alt="Мобильный dashboard Runforfan с readiness и текущей неделей" width="390" height="844" loading="eager" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/dashboard.png"><img src="assets/alpha-guide/dashboard.png" alt="Мобильный dashboard Runforfan с readiness и текущей неделей" width="390" height="844" loading="eager" decoding="async" /></a>
               <figcaption><span class="caption-mark">dashboard.png</span> Первый экран должен работать как навигатор теста.</figcaption>
             </figure>
           </div>
@@ -655,10 +865,10 @@
                 <li>В конце укажите ограничения: травмы, состояния здоровья, recovery status и conservative mode.</li>
                 <li>Сохраните профиль и проверьте, появились ли HR zones, HRR zones, Pace zones и вырос ли completeness.</li>
               </ol>
-              <div class="check"><strong>Что проверить</strong><ul><li>Клавиатура не закрывает активное поле.</li><li>Понятно, какие поля влияют на зоны.</li><li>После сохранения виден рост готовности профиля.</li><li>Если данных нет, tester не должен выдумывать числа: лучше оставить поле пустым и увидеть понятное missing state.</li></ul></div>
-              <details class="deep" open>
+              <div class="check"><strong>Что проверить</strong><ul><li>Клавиатура не закрывает активное поле.</li><li>Понятно, какие поля влияют на зоны.</li><li>После сохранения виден рост готовности профиля.</li><li>Если данных нет, тестер не должен выдумывать числа: лучше оставить поле пустым и увидеть понятное missing state.</li></ul></div>
+              <details class="deep">
                 <summary>Памятка по каждому полю профиля</summary>
-                <div class="formula-grid" style="margin-top: 0.8rem;">
+                <div class="formula-grid mt-sm">
                   <div class="formula-card"><h4>Дата рождения</h4><p>Нужна, чтобы примерно оценить максимальный пульс, если HRmax не введен вручную. Откуда взять: обычная дата рождения пользователя. Для расчетов: HR zones, HRR zones, readiness и completeness. Если дату не хочется указывать, можно вместо нее ввести HRmax.</p></div>
                   <div class="formula-card"><h4>Пол</h4><p>Сейчас это вспомогательное поле для профиля и будущих физиологических эвристик. Откуда взять: выбрать то, что пользователь считает корректным, или оставить <code>Не указан</code>. Для расчетов: не должен блокировать старт и не должен звучать как медицинский вывод.</p></div>
                   <div class="formula-card"><h4>Timezone</h4><p>Нужен, чтобы тренировка попадала в правильный день, неделю и календарь. Откуда взять: часовой пояс телефона или города, например <code>Europe/Moscow</code>. Для расчетов: Dashboard, Calendar, Analytics periods, Training Load по дням.</p></div>
@@ -685,8 +895,8 @@
               </details>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/profile-zones.png"><img src="assets/alpha-guide/profile-zones.png" alt="Мобильный экран профиля спортсмена и зон Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/profile-zones.png"><img src="assets/alpha-guide/profile-zones.png" alt="Мобильный экран профиля спортсмена и зон Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">profile-zones.png</span> Этот экран проверяет ввод физиологии, предпочтений и готовность зон.</figcaption>
             </figure>
           </div>
@@ -707,8 +917,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Preview не сохраняет план как активный.</li><li>Risk flags и safety notes заметны на узком экране.</li><li>Карточки недель и тренировок раскрываются предсказуемо.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/plans.png"><img src="assets/alpha-guide/plans.png" alt="Мобильный экран создания и просмотра тренировочных планов Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/plans.png"><img src="assets/alpha-guide/plans.png" alt="Мобильный экран создания и просмотра тренировочных планов Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">plans.png</span> Проверьте поля цели, constraints, preview и активный план.</figcaption>
             </figure>
           </div>
@@ -731,8 +941,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Huawei и iPhone examples создают корректную activity без LLM.</li><li>LLM candidate не превращается в activity без подтверждения.</li><li>Ошибки recognition объясняют, что пошло не так.</li><li>История импорта помещается в мобильные карточки.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/imports.png"><img src="assets/alpha-guide/imports.png" alt="Мобильный экран импорта тренировок из скриншотов и CSV" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/imports.png"><img src="assets/alpha-guide/imports.png" alt="Мобильный экран импорта тренировок из скриншотов и CSV" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">imports.png</span> Здесь особенно важны file picker, feedback распознавания и confirmation.</figcaption>
             </figure>
           </div>
@@ -752,8 +962,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Карточки не выглядят как обрезанная таблица.</li><li>Manual form не перегружает первый экран.</li><li>Validation помогает исправить данные, а не пугает.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/activities.png"><img src="assets/alpha-guide/activities.png" alt="Мобильный список тренировочных активностей Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/activities.png"><img src="assets/alpha-guide/activities.png" alt="Мобильный список тренировочных активностей Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">activities.png</span> Смотрите карточки, ручное создание и панель деталей.</figcaption>
             </figure>
           </div>
@@ -773,8 +983,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>План и факт различаются визуально.</li><li>Actions не требуют точного попадания в мелкие элементы.</li><li>Слишком большой range отклоняется понятным сообщением.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/calendar.png"><img src="assets/alpha-guide/calendar.png" alt="Мобильный календарь Runforfan с планом и фактом" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/calendar.png"><img src="assets/alpha-guide/calendar.png" alt="Мобильный календарь Runforfan с планом и фактом" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">calendar.png</span> Проверяйте day cards, planned vs actual и действия с тренировками.</figcaption>
             </figure>
           </div>
@@ -794,8 +1004,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Графики читаются на ширине смартфона.</li><li>Empty state не выглядит как поломка.</li><li>Insights не делают медицинских обещаний.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/analytics.png"><img src="assets/alpha-guide/analytics.png" alt="Мобильный экран аналитики тренировок Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/analytics.png"><img src="assets/alpha-guide/analytics.png" alt="Мобильный экран аналитики тренировок Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">analytics.png</span> Сверяйте метрики с реальной или тестовой историей тренировок.</figcaption>
             </figure>
           </div>
@@ -816,8 +1026,8 @@
               <details class="deep"><summary>Коротко о формулах</summary><p>CTL - долгосрочная EWMA нагрузки, ATL - краткосрочная, TSB = CTL - ATL. Это эвристики формы и усталости, а не диагноз.</p></details>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/load-recovery.png"><img src="assets/alpha-guide/load-recovery.png" alt="Мобильный экран нагрузки и восстановления Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/load-recovery.png"><img src="assets/alpha-guide/load-recovery.png" alt="Мобильный экран нагрузки и восстановления Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">load-recovery.png</span> Смотрите CTL/ATL/TSB, daily load и safety warnings.</figcaption>
             </figure>
           </div>
@@ -837,8 +1047,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Понятно, какие configured zones используются.</li><li>Missing HR/pace/RPE объясняются как lack of data.</li><li>Длинные source references не создают горизонтальный скролл всей страницы.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/zones-analytics.png"><img src="assets/alpha-guide/zones-analytics.png" alt="Мобильная аналитика зон интенсивности Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/zones-analytics.png"><img src="assets/alpha-guide/zones-analytics.png" alt="Мобильная аналитика зон интенсивности Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">zones-analytics.png</span> Проверяйте распределения, configured zones и planned vs actual.</figcaption>
             </figure>
           </div>
@@ -859,8 +1069,8 @@
               <details class="deep"><summary>Коротко о VDOT</summary><p>VDOT и Riegel predictions полезны только при качественном источнике. Easy run не должна становиться главным performance source.</p></details>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/performance.png"><img src="assets/alpha-guide/performance.png" alt="Мобильный экран результатов и VDOT Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/performance.png"><img src="assets/alpha-guide/performance.png" alt="Мобильный экран результатов и VDOT Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">performance.png</span> Проверяйте результаты, прогнозы, confidence и pace zones.</figcaption>
             </figure>
           </div>
@@ -871,7 +1081,7 @@
             <div class="copy">
               <span class="step-kicker">Шаг 11 / Goals & races</span>
               <h3>Проверьте цели и гонки</h3>
-              <p>Цели должны связывать план, readiness, прогнозы и календарь. На смартфоне tester должен быстро понять, готовится ли спортсмен к нужной гонке.</p>
+              <p>Цели должны связывать план, readiness, прогнозы и календарь. На смартфоне тестер должен быстро понять, готовится ли спортсмен к нужной гонке.</p>
               <ol class="action-list">
                 <li>Создайте race goal или откройте существующую цель.</li>
                 <li>Проверьте связь с активным планом, датой, дистанцией и readiness.</li>
@@ -880,8 +1090,8 @@
               <div class="check"><strong>Что проверить</strong><ul><li>Цель не дублирует план, а объясняет прогресс к гонке.</li><li>Readiness badges понятны без desktop таблицы.</li><li>Опасные или вторичные действия не нажимаются случайно.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/goals.png"><img src="assets/alpha-guide/goals.png" alt="Мобильный экран целей и гонок Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/goals.png"><img src="assets/alpha-guide/goals.png" alt="Мобильный экран целей и гонок Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">goals.png</span> Смотрите goal readiness, связь с планом и race details.</figcaption>
             </figure>
           </div>
@@ -892,23 +1102,22 @@
             <div class="copy">
               <span class="step-kicker">Шаг 12 / Settings & data</span>
               <h3>Завершите проверкой настроек и безопасности данных</h3>
-              <p>Settings - финальная точка: LLM provider keys, exports, danger zone и audit log должны быть понятны и безопасны на мобильном. Vision LLM нужен для скриншотов, которые не попали в готовые Huawei/iPhone templates.</p>
+              <p>Settings - финальная точка: exports, provider safety, danger zone и audit log должны быть понятны и безопасны на мобильном. Обычный тестер не обязан добавлять LLM provider; это отдельный технический сценарий.</p>
               <ol class="action-list">
-                <li>Откройте <code>Settings & data</code> и раскройте карточку <code>Add LLM provider</code>.</li>
-                <li>Выберите <code>Provider</code>: <code>OpenAI compatible</code> для OpenAI/local/proxy endpoints или <code>Anthropic</code> для Claude.</li>
-                <li>Заполните <code>Display name</code>, <code>Model</code> и <code>API key</code>. <code>Base URL</code> оставьте пустым для стандартного endpoint или укажите полный endpoint URL для OpenAI-compatible gateway.</li>
-                <li>Отметьте <code>default provider</code>, если именно этот provider должен обрабатывать LLM recognition, и нажмите <code>Save provider</code>.</li>
+                <li>Обычный тестер: не добавляйте provider, если вам не выдали тестовый key. Проверьте, что Huawei/iPhone templates работают без LLM, а unknown screenshots показывают понятный blocked state.</li>
+                <li>Технический тестер: откройте <code>Settings & data</code>, раскройте <code>Add LLM provider</code> и используйте только тестовый API key с лимитом.</li>
+                <li>Выберите <code>OpenAI compatible</code> для OpenAI/local/proxy endpoints или <code>Anthropic</code> для Claude. Заполните <code>Display name</code>, <code>Model</code>, <code>API key</code>; <code>Base URL</code> оставьте пустым для стандартного endpoint.</li>
+                <li>Отметьте <code>default provider</code>, если именно он должен обрабатывать LLM recognition, нажмите <code>Save provider</code>, затем <code>Test</code>.</li>
                 <li>В списке <code>Providers</code> проверьте badges: <code>default</code>, <code>key stored</code> и <code>vision likely</code>/<code>vision unknown</code>.</li>
-                <li>Нажмите <code>Test</code>. Успех показывает status, response time и message; failure означает, что key/model/base URL нужно исправить до теста неизвестных скриншотов.</li>
                 <li>Скачайте JSON export и activities CSV, если браузер позволяет.</li>
                 <li>Проверьте audit log: записи должны читаться карточками.</li>
                 <li>Danger zone открывайте только для специального теста удаления. Подтверждение должно быть явным.</li>
               </ol>
-              <div class="check"><strong>Что проверить</strong><ul><li>API key не возвращается в UI или export и не попадает в bug report/screenshots.</li><li>Default provider явно виден, а edit без нового key не стирает сохраненный key.</li><li>Unknown screenshots импортируются только после успешного provider test и требуют подтверждения кандидата перед созданием activity.</li><li>Download fallback понятен в mobile browser/webview.</li><li>Удаление данных невозможно случайным tap.</li></ul></div>
+              <div class="check"><strong>Что проверить</strong><ul><li>API key не возвращается в UI или export и не попадает в bug report/screenshots.</li><li>Default provider явно виден, а edit без нового key не стирает сохраненный key.</li><li>Unknown screenshots без provider не падают молча, а показывают понятную причину.</li><li>После успешного provider test LLM candidate требует подтверждения перед созданием activity.</li><li>Download fallback понятен в mobile browser/webview.</li><li>Удаление данных невозможно случайным tap.</li></ul></div>
             </div>
             <figure class="phone-frame">
-              <div class="phone-top"><span class="speaker"></span></div>
-              <a class="shot-link" href="assets/alpha-guide/settings-data.png"><img src="assets/alpha-guide/settings-data.png" alt="Мобильный экран настроек, экспорта и безопасности данных Runforfan" width="390" height="844" loading="lazy" /></a>
+              <div class="phone-top" aria-hidden="true"><span class="speaker"></span></div>
+              <a class="shot-link" href="assets/alpha-guide/settings-data.png"><img src="assets/alpha-guide/settings-data.png" alt="Мобильный экран настроек, экспорта и безопасности данных Runforfan" width="390" height="844" loading="lazy" decoding="async" /></a>
               <figcaption><span class="caption-mark">settings-data.png</span> Проверьте providers, export, danger zone и audit log.</figcaption>
             </figure>
           </div>
@@ -920,9 +1129,9 @@
           <h2>Все страницы и состояния</h2>
           <span class="tag">page-by-page</span>
         </div>
-        <div class="bug-card" style="margin-bottom: 0.8rem;">
+        <div class="bug-card mb-sm">
           <strong>Как читать этот раздел</strong>
-          <p>12 шагов выше - быстрый маршрут со скриншотами. Этот раздел - полный чеклист покрытия: каждая admin page, вложенная панель, форма, action, empty/loading/error state и рискованное состояние. Используйте его после основного прохода или как regression checklist.</p>
+          <p>12 шагов выше - быстрый маршрут со скриншотами. Этот раздел - полный чеклист покрытия: каждый раздел приложения, вложенная панель, форма, action, empty/loading/error state и рискованное состояние. Порядок G-разделов ближе к структуре приложения, поэтому для быстрого маршрута используйте шаги 1-12, а этот блок - как regression checklist.</p>
         </div>
         <div class="appendix-list">
           <details class="appendix-item" open>
@@ -930,12 +1139,12 @@
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>Auth gate</h4><ul><li>Production: Telegram Login Widget отображается и не перекрывается на 360-430px.</li><li>Dev/local: dev login работает, статус показывает <code>DEMO USER</code>.</li><li>Если нет <code>VITE_TELEGRAM_BOT_USERNAME</code>, текст ошибки понятен.</li><li>Auth error показывает сообщение, но не ломает layout.</li></ul></div>
               <div class="formula-card"><h4>Session states</h4><ul><li><code>LOADING</code>: виден skeleton/loading, нет прыжков layout.</li><li><code>LOGIN REQUIRED</code>: пользователь понимает, как войти.</li><li><code>API ERROR</code>: есть понятное объяснение, а не пустая страница.</li><li>Expired token очищает сессию и возвращает к login без бесконечного цикла.</li></ul></div>
-              <div class="formula-card"><h4>Navigation</h4><ul><li>Desktop sidebar и mobile drawer ведут на все 12 pages.</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активная page подсвечивается.</li><li>Переходы Dashboard -> Imports/Plans работают одним tap.</li></ul></div>
+              <div class="formula-card"><h4>Navigation</h4><ul><li>Desktop sidebar и mobile drawer ведут на все 12 разделов приложения.</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активный раздел подсвечивается.</li><li>Переходы Dashboard -> Imports/Plans работают одним tap.</li></ul></div>
               <div class="formula-card"><h4>Topbar</h4><ul><li>RU/EN переключатель меняет язык и сохраняется.</li><li>Status badge не обрезается на узкой ширине.</li><li><code>LEGACY</code> action виден, но не мешает основному проходу.</li><li>Theme icon не должен обещать рабочий dark/light toggle, если он декоративный.</li></ul></div>
               <div class="formula-card"><h4>Shared components</h4><ul><li>Collapsible sections раскрываются/закрываются без reset состояния.</li><li>DataTable mobile cards имеют search, sort и pagination.</li><li>Responsive detail panel закрывается и не оставляет scroll lock.</li><li>Calculation explainers раскрываются пальцем и читаются без horizontal scroll.</li></ul></div>
               <div class="formula-card"><h4>Глобальные баги</h4><ul><li>Любой горизонтальный скролл body на 360-430px.</li><li>Tap targets меньше удобного пальцем размера.</li><li>Metadata с ID/source/hash переводится или переносится нечитаемо.</li><li>Ошибка API выглядит как успешный ноль.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g0-auth-login.png"><img src="assets/alpha-guide/states/g0-auth-login.png" alt="Mobile auth gate and login state" width="390" height="844" loading="lazy" /></a><strong>Auth gate</strong><p>Проверка login-required состояния, Telegram/dev login copy и отсутствия layout overflow.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g0-mobile-drawer.png"><img src="assets/alpha-guide/states/g0-mobile-drawer.png" alt="Mobile navigation drawer with admin pages" width="390" height="844" loading="lazy" /></a><strong>Mobile drawer</strong><p>Все 12 admin pages должны быть доступны из меню, active state и close overlay читаемы.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g0-auth-login.png"><img src="assets/alpha-guide/states/g0-auth-login.png" alt="Mobile auth gate and login state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Auth gate</strong><p>Проверка login-required состояния, Telegram/dev login copy и отсутствия layout overflow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g0-mobile-drawer.png"><img src="assets/alpha-guide/states/g0-mobile-drawer.png" alt="Mobile navigation drawer with application sections" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Mobile drawer</strong><p>Все 12 разделов приложения должны быть доступны из меню, active state и close overlay читаемы.</p></div>
             </div>
           </details>
 
@@ -948,8 +1157,8 @@
               <div class="formula-card"><h4>Current week</h4><ul><li>Плановые тренировки показываются mobile cards, не desktop table.</li><li>Planned/actual/adherence совпадают с Calendar/Plans.</li><li>Execution score null отображается как <code>--</code>.</li><li>Empty week показывает <code>No workouts in the current calendar week</code>.</li></ul></div>
               <div class="formula-card"><h4>Embedded activities</h4><ul><li>Compact activities не конфликтуют с полной Activities page.</li><li>Import action открывает Imports.</li><li>Карточки активностей не занимают весь dashboard, если список длинный.</li></ul></div>
               <div class="formula-card"><h4>Edge states</h4><ul><li>No active plan.</li><li>Profile incomplete.</li><li>No LLM provider.</li><li>Pending imports.</li><li>Coach recommendation требует adjust.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-readiness.png"><img src="assets/alpha-guide/states/g1-dashboard-readiness.png" alt="Dashboard readiness and alerts mobile state" width="390" height="844" loading="lazy" /></a><strong>Readiness + alerts</strong><p>Главный экран показывает status, profile gaps, import/provider alerts и next actions.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-current-week.png"><img src="assets/alpha-guide/states/g1-dashboard-current-week.png" alt="Dashboard current week mobile workout cards" width="390" height="844" loading="lazy" /></a><strong>Current week</strong><p>Mobile карточки текущей недели: planned, actual, score, status и переход в Plans.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-readiness.png"><img src="assets/alpha-guide/states/g1-dashboard-readiness.png" alt="Dashboard readiness and alerts mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Readiness + alerts</strong><p>Главный экран показывает status, profile gaps, import/provider alerts и next actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g1-dashboard-current-week.png"><img src="assets/alpha-guide/states/g1-dashboard-current-week.png" alt="Dashboard current week mobile workout cards" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Current week</strong><p>Mobile карточки текущей недели: planned, actual, score, status и переход в Plans.</p></div>
             </div>
           </details>
 
@@ -962,9 +1171,9 @@
               <div class="formula-card"><h4>Quick edit</h4><ul><li>Duration seconds required и минимум 60.</li><li>После save пересчитываются derived metrics/load.</li><li>Ошибка API остается внутри panel.</li><li>Started/date/type корректно сохраняются.</li></ul></div>
               <div class="formula-card"><h4>Validation и sources</h4><ul><li>Validation report показывает code, expected, actual.</li><li>Нет issues: текст <code>No validation issues</code>.</li><li>Recognition sources не показывают локальные unsafe paths.</li><li>Derived metrics показывают method, source reference, computed hash.</li></ul></div>
               <div class="formula-card"><h4>Splits и structures</h4><ul><li>Segments/splits читаются на mobile cards или compact table.</li><li>Workout blocks показывают work/rest/target.</li><li>Interval structures section появляется только если есть blocks.</li><li>Пустые splits/blocks явно подписаны.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activities-manual-form.png"><img src="assets/alpha-guide/states/g2-activities-manual-form.png" alt="Activities manual activity form mobile state" width="390" height="844" loading="lazy" /></a><strong>Manual activity</strong><p>Состояние раскрытой ручной формы и списка activity cards.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-validation.png"><img src="assets/alpha-guide/states/g2-activity-detail-validation.png" alt="Activity detail validation mobile overlay" width="390" height="844" loading="lazy" /></a><strong>Detail + validation</strong><p>Overlay с quick edit, validation report, splits и source sections.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-calculations.png"><img src="assets/alpha-guide/states/g2-activity-detail-calculations.png" alt="Activity calculations and source metadata mobile state" width="390" height="844" loading="lazy" /></a><strong>Calculations metadata</strong><p>Derived metrics, methods, source references, computed time и hash должны быть читаемы.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activities-manual-form.png"><img src="assets/alpha-guide/states/g2-activities-manual-form.png" alt="Activities manual activity form mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Manual activity</strong><p>Состояние раскрытой ручной формы и списка activity cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-validation.png"><img src="assets/alpha-guide/states/g2-activity-detail-validation.png" alt="Activity detail validation mobile overlay" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Detail + validation</strong><p>Overlay с quick edit, validation report, splits и source sections.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g2-activity-detail-calculations.png"><img src="assets/alpha-guide/states/g2-activity-detail-calculations.png" alt="Activity calculations and source metadata mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Calculations metadata</strong><p>Derived metrics, methods, source references, computed time и hash должны быть читаемы.</p></div>
             </div>
           </details>
 
@@ -978,11 +1187,11 @@
               <div class="formula-card"><h4>Plan matching</h4><ul><li>Auto-match явно показывает matched workout.</li><li>Unmatched result показывает candidate list или no confident candidates.</li><li>Link action связывает activity и workout один раз.</li><li>Candidate API error не скрывает успешно созданную activity.</li></ul></div>
               <div class="formula-card"><h4>CSV import</h4><ul><li>Created, duplicates, matched, failed видны отдельными stat cards.</li><li>Ошибки CSV показываются списком, не всей сырой простыней.</li><li>Duplicate rows не создают новые activities.</li><li>Source app сохраняется как metadata.</li></ul></div>
               <div class="formula-card"><h4>Import history</h4><ul><li>Empty: <code>История импортов пока пуста</code>.</li><li>Refresh не сбрасывает last result.</li><li>History cards показывают status, engine, activity, created_at.</li><li>Pending confirmation доступна из history.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-upload-csv.png"><img src="assets/alpha-guide/states/g3-imports-upload-csv.png" alt="Imports screenshot upload and CSV mobile state" width="390" height="844" loading="lazy" /></a><strong>Upload + CSV</strong><p>File picker, screenshot upload, CSV import и source app поля в одном mobile flow.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/iphone-apple-workout-summary.jpg"><img src="assets/alpha-guide/iphone-apple-workout-summary.jpg" alt="iPhone Apple Fitness workout summary screenshot" width="585" height="1280" loading="lazy" /></a><strong>iPhone summary</strong><p>Apple Fitness summary: 3.33 км, 35:22, 10:37/км, HR 137, 232 active kcal.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/iphone-apple-workout-splits.jpg"><img src="assets/alpha-guide/iphone-apple-workout-splits.jpg" alt="iPhone Apple Fitness splits heart rate and map screenshot" width="585" height="1280" loading="lazy" /></a><strong>iPhone splits</strong><p>Отрезки, HR chart и map для той же тренировки; загружайте вместе с summary.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-empty-error.png"><img src="assets/alpha-guide/states/g3-imports-empty-error.png" alt="Imports empty file validation message mobile state" width="390" height="844" loading="lazy" /></a><strong>Empty submit</strong><p>Проверка безопасного error state: без файла batch не создается.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-history-review.png"><img src="assets/alpha-guide/states/g3-imports-history-review.png" alt="Import history and review queue mobile state" width="390" height="844" loading="lazy" /></a><strong>History/review</strong><p>История импорта, статусы batch и pending confirmation должны читаться карточками.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-upload-csv.png"><img src="assets/alpha-guide/states/g3-imports-upload-csv.png" alt="Imports screenshot upload and CSV mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Upload + CSV</strong><p>File picker, screenshot upload, CSV import и source app поля в одном mobile flow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/iphone-apple-workout-summary.jpg"><img src="assets/alpha-guide/iphone-apple-workout-summary.jpg" alt="iPhone Apple Fitness workout summary screenshot" width="585" height="1280" loading="lazy" decoding="async" /></a><strong>iPhone summary</strong><p>Apple Fitness summary: 3.33 км, 35:22, 10:37/км, HR 137, 232 active kcal.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/iphone-apple-workout-splits.jpg"><img src="assets/alpha-guide/iphone-apple-workout-splits.jpg" alt="iPhone Apple Fitness splits heart rate and map screenshot" width="585" height="1280" loading="lazy" decoding="async" /></a><strong>iPhone splits</strong><p>Отрезки, HR chart и map для той же тренировки; загружайте вместе с summary.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-empty-error.png"><img src="assets/alpha-guide/states/g3-imports-empty-error.png" alt="Imports empty file validation message mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Empty submit</strong><p>Проверка безопасного error state: без файла batch не создается.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g3-imports-history-review.png"><img src="assets/alpha-guide/states/g3-imports-history-review.png" alt="Import history and review queue mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>History/review</strong><p>История импорта, статусы batch и pending confirmation должны читаться карточками.</p></div>
             </div>
           </details>
 
@@ -995,9 +1204,9 @@
               <div class="formula-card"><h4>Event actions</h4><ul><li>Reschedule показывает date input и Move.</li><li>Missed, Skipped, Restore работают для допустимых statuses.</li><li>Linked workouts не должны предлагать опасные действия без контекста.</li><li>Busy state показывает <code>busy</code> или <code>Matching...</code>.</li></ul></div>
               <div class="formula-card"><h4>Matching</h4><ul><li>Find activity для planned workout показывает candidates или empty state.</li><li>Find workout для unlinked activity показывает candidates или empty state.</li><li>Score/reasons видны перед Link.</li><li>Link action обновляет Calendar и Plans.</li></ul></div>
               <div class="formula-card"><h4>Error states</h4><ul><li>Calendar API failure показывает banner.</li><li>Candidate API failure не закрывает action panel.</li><li>Reschedule failure не меняет дату визуально.</li><li>Restore failure не скрывает исходный status.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-range.png"><img src="assets/alpha-guide/states/g4-calendar-range.png" alt="Calendar range and summary mobile state" width="390" height="844" loading="lazy" /></a><strong>Range + summary</strong><p>Quick ranges, custom inputs, summary stats и day cards.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-event-actions.png"><img src="assets/alpha-guide/states/g4-calendar-event-actions.png" alt="Calendar event action panel mobile state" width="390" height="844" loading="lazy" /></a><strong>Event actions</strong><p>Reschedule, missed/skipped/restore и matching actions внутри event card.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-invalid-range.png"><img src="assets/alpha-guide/states/g4-calendar-invalid-range.png" alt="Calendar invalid range error mobile state" width="390" height="844" loading="lazy" /></a><strong>Invalid range</strong><p>Validation state для неправильного диапазона дат без повреждения текущего календаря.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-range.png"><img src="assets/alpha-guide/states/g4-calendar-range.png" alt="Calendar range and summary mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Range + summary</strong><p>Quick ranges, custom inputs, summary stats и day cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-event-actions.png"><img src="assets/alpha-guide/states/g4-calendar-event-actions.png" alt="Calendar event action panel mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Event actions</strong><p>Reschedule, missed/skipped/restore и matching actions внутри event card.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g4-calendar-invalid-range.png"><img src="assets/alpha-guide/states/g4-calendar-invalid-range.png" alt="Calendar invalid range error mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Invalid range</strong><p>Validation state для неправильного диапазона дат без повреждения текущего календаря.</p></div>
             </div>
           </details>
 
@@ -1010,8 +1219,8 @@
               <div class="formula-card"><h4>VDOT / VO2max</h4><ul><li>Если нет eligible effort, card объясняет источник отсутствует.</li><li>Manual/device VO2max не смешивается с VDOT.</li><li>Confidence/source отображаются.</li></ul></div>
               <div class="formula-card"><h4>Best efforts</h4><ul><li>1K, 5K, 10K, half marathon появляются при подходящих данных.</li><li>Empty: нужны активности с достаточной дистанцией.</li><li>Normalized duration не должен выглядеть как официальный PB без context.</li></ul></div>
               <div class="formula-card"><h4>Insights</h4><ul><li>Severity и confidence видны.</li><li>Evidence/reasons короткие и понятные.</li><li>Нет medical claims.</li><li>Empty insights не выглядит как ошибка API.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-overview.png"><img src="assets/alpha-guide/states/g5-analytics-overview.png" alt="Analytics metric cards and period filters mobile state" width="390" height="844" loading="lazy" /></a><strong>Overview metrics</strong><p>Периоды, custom dates, key metrics, explainers и charts в mobile layout.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-insights.png"><img src="assets/alpha-guide/states/g5-analytics-insights.png" alt="Analytics insights and consistency mobile state" width="390" height="844" loading="lazy" /></a><strong>Insights</strong><p>Severity, confidence, evidence и consistency должны читаться без desktop таблицы.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-overview.png"><img src="assets/alpha-guide/states/g5-analytics-overview.png" alt="Analytics metric cards and period filters mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Overview metrics</strong><p>Периоды, custom dates, key metrics, explainers и charts в mobile layout.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g5-analytics-insights.png"><img src="assets/alpha-guide/states/g5-analytics-insights.png" alt="Analytics insights and consistency mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Insights</strong><p>Severity, confidence, evidence и consistency должны читаться без desktop таблицы.</p></div>
             </div>
           </details>
 
@@ -1024,8 +1233,8 @@
               <div class="formula-card"><h4>Warnings</h4><ul><li>No alerts: <code>Нет load alerts</code>.</li><li>Info/warning/critical визуально различаются.</li><li>TSB, monotony, hard share и long run share объясняются осторожно.</li><li>Короткая история помечается warmup warning.</li></ul></div>
               <div class="formula-card"><h4>Hard spacing</h4><ul><li>Hard sessions &lt;48h показывают risk.</li><li>Пустое состояние: <code>Hard sessions не обнаружены</code>.</li><li>Gap badge читается на mobile.</li></ul></div>
               <div class="formula-card"><h4>Recovery days</h4><ul><li>Recovery days за неделю показывают дату и reason.</li><li>Empty: <code>Recovery days за последнюю неделю не найдены</code>.</li><li>Light activity не должна считаться тяжелым днем.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-materialization.png"><img src="assets/alpha-guide/states/g6-load-materialization.png" alt="Load recovery materialization and CTL ATL TSB mobile state" width="390" height="844" loading="lazy" /></a><strong>Materialization + CTL</strong><p>Daily load status, backfill actions, CTL/ATL/TSB и method cards.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-warnings.png"><img src="assets/alpha-guide/states/g6-load-warnings.png" alt="Load recovery warnings and hard spacing mobile state" width="390" height="844" loading="lazy" /></a><strong>Warnings + spacing</strong><p>Load alerts, hard session spacing и recovery days как safety-oriented cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-materialization.png"><img src="assets/alpha-guide/states/g6-load-materialization.png" alt="Load recovery materialization and CTL ATL TSB mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Materialization + CTL</strong><p>Daily load status, backfill actions, CTL/ATL/TSB и method cards.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g6-load-warnings.png"><img src="assets/alpha-guide/states/g6-load-warnings.png" alt="Load recovery warnings and hard spacing mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Warnings + spacing</strong><p>Load alerts, hard session spacing и recovery days как safety-oriented cards.</p></div>
             </div>
           </details>
 
@@ -1038,8 +1247,8 @@
               <div class="formula-card"><h4>Planned vs actual</h4><ul><li>Mobile cards показывают planned, actual, diff.</li><li>Delta >=15% заметна.</li><li>Empty planned-vs-actual rows объясняются.</li></ul></div>
               <div class="formula-card"><h4>Configured zones</h4><ul><li>HR, pace и RPE зоны показываются отдельно.</li><li>Пустые zones: <code>Нет данных для расчета</code>.</li><li>Manual/calculated source не теряется.</li></ul></div>
               <div class="formula-card"><h4>Classification notes</h4><ul><li>Priority chain понятна: threshold HR, threshold pace, HR, pace, RPE.</li><li>Unclassified duration не скрывается.</li><li>Planned distribution note объясняет, откуда взялся план.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-distribution.png"><img src="assets/alpha-guide/states/g7-zones-distribution.png" alt="Zones analytics distribution mobile state" width="390" height="844" loading="lazy" /></a><strong>Distributions</strong><p>5-zone, Seiler, HR/pace/RPE distributions и coverage summary.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-configured.png"><img src="assets/alpha-guide/states/g7-zones-configured.png" alt="Configured HR pace RPE zones mobile state" width="390" height="844" loading="lazy" /></a><strong>Configured zones</strong><p>Зоны, classification notes, unclassified duration и source confidence.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-distribution.png"><img src="assets/alpha-guide/states/g7-zones-distribution.png" alt="Zones analytics distribution mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Distributions</strong><p>5-zone, Seiler, HR/pace/RPE distributions и coverage summary.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g7-zones-configured.png"><img src="assets/alpha-guide/states/g7-zones-configured.png" alt="Configured HR pace RPE zones mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Configured zones</strong><p>Зоны, classification notes, unclassified duration и source confidence.</p></div>
             </div>
           </details>
 
@@ -1052,8 +1261,8 @@
               <div class="formula-card"><h4>Predictions</h4><ul><li>Нет source: нужна гонка/time trial >=3 км.</li><li>Prediction показывает distance, predicted time, confidence, source.</li><li>Extrapolation limited явно отмечается.</li><li>Predictions не звучат как гарантия результата.</li></ul></div>
               <div class="formula-card"><h4>PB и threshold</h4><ul><li>PB empty: <code>Нет PB по стандартным дистанциям</code>.</li><li>Threshold trend empty: <code>Добавьте результаты</code>.</li><li>Threshold trend не строится из noisy/easy source без предупреждения.</li></ul></div>
               <div class="formula-card"><h4>Pace zones</h4><ul><li>Появляются только при достаточном threshold source.</li><li>Empty: <code>Нет данных для pace zones</code>.</li><li>Зоны совпадают с Profile/Zones и Appendices.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-add-result.png"><img src="assets/alpha-guide/states/g8-performance-add-result.png" alt="Performance add race result mobile state" width="390" height="844" loading="lazy" /></a><strong>Add result</strong><p>Форма race/time trial, noisy source, weather/terrain/elevation и validation context.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-predictions.png"><img src="assets/alpha-guide/states/g8-performance-predictions.png" alt="Performance predictions and PB mobile state" width="390" height="844" loading="lazy" /></a><strong>Predictions/PB</strong><p>VDOT source, predictions, PB, threshold trend и pace zones в одном flow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-add-result.png"><img src="assets/alpha-guide/states/g8-performance-add-result.png" alt="Performance add race result mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Add result</strong><p>Форма race/time trial, noisy source, weather/terrain/elevation и validation context.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g8-performance-predictions.png"><img src="assets/alpha-guide/states/g8-performance-predictions.png" alt="Performance predictions and PB mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Predictions/PB</strong><p>VDOT source, predictions, PB, threshold trend и pace zones в одном flow.</p></div>
             </div>
           </details>
 
@@ -1066,8 +1275,8 @@
               <div class="formula-card"><h4>Status actions</h4><ul><li>Pause/Resume меняют active/paused.</li><li>Complete, Missed, Archive доступны через More actions.</li><li>Delete требует осознанного действия и не должен быть первым CTA.</li></ul></div>
               <div class="formula-card"><h4>Readiness states</h4><ul><li>On track, watch, at risk объясняются сигналами.</li><li>Без prediction, но с plan, состояние не должно обещать успех.</li><li>Completion &lt;70% снижает readiness.</li></ul></div>
               <div class="formula-card"><h4>Error states</h4><ul><li>Load/save/status/delete API errors показываются banner/message.</li><li>Неуспешный delete не удаляет card визуально.</li><li>Multiple active goals не ломают race focus.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-create-focus.png"><img src="assets/alpha-guide/states/g9-goals-create-focus.png" alt="Goals create form and race focus mobile state" width="390" height="844" loading="lazy" /></a><strong>Create + focus</strong><p>Форма цели, active race focus, predicted range, milestones и linked plan.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-actions.png"><img src="assets/alpha-guide/states/g9-goals-actions.png" alt="Goal actions and status changes mobile state" width="390" height="844" loading="lazy" /></a><strong>More actions</strong><p>Pause/resume, complete/missed/archive/delete должны быть отделены от primary flow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-create-focus.png"><img src="assets/alpha-guide/states/g9-goals-create-focus.png" alt="Goals create form and race focus mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Create + focus</strong><p>Форма цели, active race focus, predicted range, milestones и linked plan.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g9-goals-actions.png"><img src="assets/alpha-guide/states/g9-goals-actions.png" alt="Goal actions and status changes mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>More actions</strong><p>Pause/resume, complete/missed/archive/delete должны быть отделены от primary flow.</p></div>
             </div>
           </details>
 
@@ -1084,9 +1293,9 @@
               <div class="formula-card"><h4>Zones</h4><ul><li>Recalculate работает и показывает error/success.</li><li>Manual HR override валидирует missing bounds, reversed range, overlap.</li><li>Clear manual HR zones возвращает calculated zones.</li><li>HR/pace/RPE tables имеют empty states.</li></ul></div>
               <div class="formula-card"><h4>Measurements</h4><ul><li>Add measurement: type, value, threshold pace, date, source, note.</li><li>Lactate threshold measurement обновляет relevant zones.</li><li>Empty: <code>Измерений пока нет</code>.</li><li>Measurement rows читаются mobile cards.</li></ul></div>
               <div class="formula-card"><h4>После Save profile</h4><ul><li>Completeness score и missing badges обновляются.</li><li>HR/Pace zones появляются или ясно объясняют, каких данных не хватает.</li><li>Safety card показывает warnings при injury/conditions/tired/strained/injured.</li><li>Dashboard readiness должен учитывать новые profile данные после refresh.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-form.png"><img src="assets/alpha-guide/states/g10-profile-form.png" alt="Profile form collapsibles mobile state" width="390" height="844" loading="lazy" /></a><strong>Profile form</strong><p>Personal/body/physiology/preferences/safety groups и completeness state.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-manual-zones.png"><img src="assets/alpha-guide/states/g10-profile-manual-zones.png" alt="Manual HR zones override mobile state" width="390" height="844" loading="lazy" /></a><strong>Manual HR zones</strong><p>Override rows, bounds, validation messages и clear manual zones action.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-measurements.png"><img src="assets/alpha-guide/states/g10-profile-measurements.png" alt="Profile measurements mobile state" width="390" height="844" loading="lazy" /></a><strong>Measurements</strong><p>Measurement form, history cards и threshold pace inputs.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-form.png"><img src="assets/alpha-guide/states/g10-profile-form.png" alt="Profile form collapsibles mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Profile form</strong><p>Personal/body/physiology/preferences/safety groups и completeness state.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-manual-zones.png"><img src="assets/alpha-guide/states/g10-profile-manual-zones.png" alt="Manual HR zones override mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Manual HR zones</strong><p>Override rows, bounds, validation messages и clear manual zones action.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g10-profile-measurements.png"><img src="assets/alpha-guide/states/g10-profile-measurements.png" alt="Profile measurements mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Measurements</strong><p>Measurement form, history cards и threshold pace inputs.</p></div>
             </div>
           </details>
 
@@ -1101,11 +1310,11 @@
               <div class="formula-card"><h4>Week/workout cards</h4><ul><li>Week summary: distance, support, deload, time, hard count, long run, done %.</li><li>Workout types: easy, long, interval, tempo, threshold, race pace, recovery, strength, mobility.</li><li>Blocks, purpose, safety note, linked activity, execution score видны.</li><li>Week warnings не скрыты в свернутом состоянии.</li></ul></div>
               <div class="formula-card"><h4>Completion/feedback</h4><ul><li>Manual completion validation: distance, duration, HR, RPE, soreness, pain, sleep.</li><li>Support workouts корректно работают без distance.</li><li>Feedback форма доступна для done/missed/skipped.</li><li>Pain checkbox/notes не звучат как медицинская диагностика.</li></ul></div>
               <div class="formula-card"><h4>Workout actions</h4><ul><li>Reschedule, Missed, Skipped, Restore проверяются по status.</li><li>Find activity показывает candidates или empty/error.</li><li>Link/Unlink activity синхронизирует Calendar и Dashboard.</li><li>Candidate reasons/score видны перед linking.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-builder.png"><img src="assets/alpha-guide/states/g11-plans-builder.png" alt="Plan builder form mobile state" width="390" height="844" loading="lazy" /></a><strong>Builder</strong><p>Goal, performance inputs, constraints, support/OFP, safety gates и create actions.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-preview.png"><img src="assets/alpha-guide/states/g11-plans-preview.png" alt="Plan builder preview mobile state" width="390" height="844" loading="lazy" /></a><strong>Preview</strong><p>Preview не создает plan, но показывает risk flags, volume curve и first workouts.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-detail-week.png"><img src="assets/alpha-guide/states/g11-plan-detail-week.png" alt="Plan detail week workout mobile state" width="390" height="844" loading="lazy" /></a><strong>Plan week</strong><p>Week summary, deload/support badges, workout blocks, safety notes и linked activity.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-workout-actions.png"><img src="assets/alpha-guide/states/g11-plan-workout-actions.png" alt="Workout actions mobile state" width="390" height="844" loading="lazy" /></a><strong>Workout actions</strong><p>Manual completion, feedback, reschedule, missed/skipped, find activity и candidates.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-recommendations.png"><img src="assets/alpha-guide/states/g11-plan-recommendations.png" alt="Plan recommendations preview apply mobile state" width="390" height="844" loading="lazy" /></a><strong>Recommendations</strong><p>Coach recommendations, preview/apply, skipped changes и adjustment history.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-builder.png"><img src="assets/alpha-guide/states/g11-plans-builder.png" alt="Plan builder form mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Builder</strong><p>Goal, performance inputs, constraints, support/OFP, safety gates и create actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plans-preview.png"><img src="assets/alpha-guide/states/g11-plans-preview.png" alt="Plan builder preview mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Preview</strong><p>Preview не создает plan, но показывает risk flags, volume curve и first workouts.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-detail-week.png"><img src="assets/alpha-guide/states/g11-plan-detail-week.png" alt="Plan detail week workout mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Plan week</strong><p>Week summary, deload/support badges, workout blocks, safety notes и linked activity.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-workout-actions.png"><img src="assets/alpha-guide/states/g11-plan-workout-actions.png" alt="Workout actions mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Workout actions</strong><p>Manual completion, feedback, reschedule, missed/skipped, find activity и candidates.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g11-plan-recommendations.png"><img src="assets/alpha-guide/states/g11-plan-recommendations.png" alt="Plan recommendations preview apply mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Recommendations</strong><p>Coach recommendations, preview/apply, skipped changes и adjustment history.</p></div>
             </div>
           </details>
 
@@ -1120,43 +1329,45 @@
               <div class="formula-card"><h4>Integrations</h4><ul><li>Refresh загружает integrations.</li><li>Показываются name, category, status, configured.</li><li>Empty: <code>No integration data loaded</code>.</li><li>Load failure не ломает providers.</li></ul></div>
               <div class="formula-card"><h4>Data management</h4><ul><li>Download JSON export сообщает, что secrets omitted.</li><li>Activities CSV download работает или показывает error.</li><li>Danger zone disabled до точного <code>DELETE</code>.</li><li>Delete account data нельзя запустить случайным tap.</li></ul></div>
               <div class="formula-card"><h4>Audit log</h4><ul><li>Empty: <code>Audit log is empty</code>.</li><li>Action, entity, metadata JSON читаются на mobile cards.</li><li>Большая metadata не создает горизонтальный scroll.</li><li>Provider/export/delete actions оставляют audit event.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-provider-form.png"><img src="assets/alpha-guide/states/g12-settings-provider-form.png" alt="Settings provider form mobile state" width="390" height="844" loading="lazy" /></a><strong>Provider form</strong><p>Add/edit provider, API key handling, set default, test и delete actions.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-data-danger.png"><img src="assets/alpha-guide/states/g12-settings-data-danger.png" alt="Settings data export and danger zone mobile state" width="390" height="844" loading="lazy" /></a><strong>Data + danger zone</strong><p>JSON/CSV exports, secret omission copy и exact <code>DELETE</code> confirmation.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-audit-log.png"><img src="assets/alpha-guide/states/g12-settings-audit-log.png" alt="Settings audit log mobile state" width="390" height="844" loading="lazy" /></a><strong>Audit log</strong><p>Action/entity/metadata JSON должны переноситься внутри cards без overflow.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-provider-form.png"><img src="assets/alpha-guide/states/g12-settings-provider-form.png" alt="Settings provider form mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Provider form</strong><p>Add/edit provider, API key handling, set default, test и delete actions.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-data-danger.png"><img src="assets/alpha-guide/states/g12-settings-data-danger.png" alt="Settings data export and danger zone mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Data + danger zone</strong><p>JSON/CSV exports, secret omission copy и exact <code>DELETE</code> confirmation.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g12-settings-audit-log.png"><img src="assets/alpha-guide/states/g12-settings-audit-log.png" alt="Settings audit log mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Audit log</strong><p>Action/entity/metadata JSON должны переноситься внутри cards без overflow.</p></div>
             </div>
           </details>
 
           <details class="appendix-item">
-            <summary><strong>G13. Cross-page состояния и regression matrix</strong><span>Сценарии, которые нужно гонять через несколько pages.</span></summary>
+            <summary><strong>G13. Cross-page состояния и regression matrix</strong><span>Сценарии, которые нужно гонять через несколько разделов.</span></summary>
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>Empty workspace</h4><ul><li>Нет profile, activities, plans, goals, providers.</li><li>Dashboard дает next action, а не тупик.</li><li>Analytics/load/zones/performance показывают empty states.</li><li>Settings позволяет добавить provider и экспорт не падает.</li></ul></div>
               <div class="formula-card"><h4>Полный workspace</h4><ul><li>Есть profile, active plan, activities, linked workouts, goals, provider.</li><li>Dashboard, Calendar, Plans и Analytics показывают согласованные counts.</li><li>Activity edit пересчитывает Analytics/Load/Zones после refresh.</li><li>Import match меняет Calendar/Plans/Goals context.</li></ul></div>
               <div class="formula-card"><h4>Bad data</h4><ul><li>Нереальный pace/HR/duration ловится validation.</li><li>Noisy performance source снижает confidence.</li><li>Missing zones не превращаются в некорректные проценты.</li><li>CSV duplicates не плодят активности.</li></ul></div>
-              <div class="formula-card"><h4>API failures</h4><ul><li>Каждая page имеет error message и не падает всем приложением.</li><li>Retry/Refresh actions работают там, где они есть.</li><li>Failed mutation не меняет UI как будто успешно.</li><li>Auth expired возвращает к login.</li></ul></div>
+              <div class="formula-card"><h4>API failures</h4><ul><li>Каждый раздел имеет error message и не падает всем приложением.</li><li>Retry/Refresh actions работают там, где они есть.</li><li>Failed mutation не меняет UI как будто успешно.</li><li>Auth expired возвращает к login.</li></ul></div>
               <div class="formula-card"><h4>Mobile usability</h4><ul><li>360, 390, 430px portrait без horizontal scroll.</li><li>Long tables заменены cards или scroll container внутри card.</li><li>Sticky/fixed panels не закрывают input при keyboard.</li><li>Dangerous actions не находятся рядом с primary CTA без separation.</li></ul></div>
               <div class="formula-card"><h4>Safety language</h4><ul><li>Load/recovery/injury warnings - training guidance, не диагноз.</li><li>Predictions/goals не обещают результат.</li><li>Conservative mode объясняет ограничения.</li><li>Danger zone требует явного подтверждения.</li></ul></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png"><img src="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png" alt="Dashboard cross page alerts mobile state" width="390" height="844" loading="lazy" /></a><strong>Dashboard signals</strong><p>Profile gaps, imports, providers and coach alerts должны вести в связанные pages.</p></div>
-              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-calendar-links.png"><img src="assets/alpha-guide/states/g13-cross-page-calendar-links.png" alt="Calendar plan activity link cross page mobile state" width="390" height="844" loading="lazy" /></a><strong>Calendar links</strong><p>Cross-page consistency: Calendar link state должен совпадать с Plans, Activities и Dashboard.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png"><img src="assets/alpha-guide/states/g13-cross-page-dashboard-alerts.png" alt="Dashboard cross page alerts mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Dashboard signals</strong><p>Profile gaps, imports, providers and coach alerts должны вести в связанные разделы.</p></div>
+              <div class="state-shot"><a href="assets/alpha-guide/states/g13-cross-page-calendar-links.png"><img src="assets/alpha-guide/states/g13-cross-page-calendar-links.png" alt="Calendar plan activity link cross page mobile state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Calendar links</strong><p>Cross-page consistency: Calendar link state должен совпадать с Plans, Activities и Dashboard.</p></div>
             </div>
           </details>
         </div>
       </section>
+
+      <a class="back-top" href="#start">Наверх</a>
 
       <section class="section" id="appendix">
         <div class="section-head">
           <h2>Приложения: логика и расчеты</h2>
           <span class="tag">формулы</span>
         </div>
-        <div class="bug-card" style="margin-bottom: 0.8rem;">
+        <div class="bug-card mb-sm">
           <strong>Как пользоваться приложениями</strong>
-          <p>Это справочник для проверки характеристик Runforfan. Если на экране есть `method`, `source_reference`, `confidence`, `Why?` или warning, сверяйте его с соответствующим блоком ниже. Формулы описывают логику продукта, но не являются медицинскими рекомендациями.</p>
+          <p>Это справочник для продвинутых тестеров и проверки расчетов; он не обязателен для первого прохода. Если на экране есть <code>method</code>, <code>source_reference</code>, <code>confidence</code>, <code>Why?</code> или warning, сверяйте его с соответствующим блоком ниже. Формулы описывают логику продукта, но не являются медицинскими рекомендациями.</p>
         </div>
         <div class="appendix-list">
-          <details class="appendix-item" open>
+          <details class="appendix-item">
             <summary><strong>A1. Источники данных, method и confidence</strong><span>Почему у каждой метрики должен быть источник, метод и уровень доверия.</span></summary>
             <div class="appendix-content formula-grid">
-              <div class="formula-card"><h4>Общий pipeline</h4><p>Пользователь вводит профиль, импортирует активности, создает план и добавляет результаты. Backend пересчитывает derived metrics, зоны, load, analytics, performance и dashboard. Frontend показывает значения вместе с source/confidence, чтобы tester понимал, откуда взялась цифра.</p><span class="source">frontend/src/App.tsx · backend/app/services/*</span></div>
-              <div class="formula-card"><h4>Confidence</h4><p>`high` обычно означает прямой или качественный источник: threshold HR, race/time trial, device stress. `medium` - расчетный, но достаточно надежный источник. `low` - fallback, старый/noisy source или неполные данные.</p><span class="source">calculations.py · performance.py · zones.py</span></div>
+              <div class="formula-card"><h4>Общий pipeline</h4><p>Пользователь вводит профиль, импортирует активности, создает план и добавляет результаты. Backend пересчитывает derived metrics, зоны, load, analytics, performance и dashboard. Frontend показывает значения вместе с source/confidence, чтобы тестер понимал, откуда взялась цифра.</p><span class="source">frontend/src/App.tsx · backend/app/services/*</span></div>
+              <div class="formula-card"><h4>Confidence</h4><p><code>high</code> обычно означает прямой или качественный источник: threshold HR, race/time trial, device stress. <code>medium</code> - расчетный, но достаточно надежный источник. <code>low</code> - fallback, старый/noisy source или неполные данные.</p><span class="source">calculations.py · performance.py · zones.py</span></div>
               <div class="formula-card"><h4>Что считать багом</h4><ul><li>Есть число, но нет понятного source/method.</li><li>Confidence завышен при fallback или noisy data.</li><li>Пустые данные выглядят как ноль без объяснения.</li><li>Warning звучит как диагноз или гарантия результата.</li></ul></div>
             </div>
           </details>
@@ -1164,9 +1375,9 @@
           <details class="appendix-item">
             <summary><strong>A2. Профиль, completeness и safety</strong><span>Какие поля профиля управляют готовностью, зонами и осторожным режимом.</span></summary>
             <div class="appendix-content formula-grid">
-              <div class="formula-card"><h4>Profile completeness</h4><p>Score считается как доля заполненных обязательных полей. Учитываются birth date, resting HR, HRmax или birthdate, threshold pace, threshold HR, weight, height, preferred weekdays, max run duration. Confidence: `high` от 0.8, `medium` от 0.5, иначе `low`.</p><span class="source">backend/app/services/profile.py</span></div>
-              <div class="formula-card"><h4>HRmax fallback</h4><p>Если HRmax не введен, но есть дата рождения, используется Tanaka: <code>HRmax = 208 - 0.7 * age</code>. Это fallback с низким confidence и должно быть видно tester.</p><span class="source">backend/app/services/calculations.py</span></div>
-              <div class="formula-card"><h4>Safety check</h4><p>`conservative_mode` включается при травмах, health conditions, tired/strained/injured recovery status или явном conservative flag. Safety warnings также появляются при отсутствии HRmax/birthdate или threshold pace.</p><span class="source">backend/app/services/profile.py</span></div>
+              <div class="formula-card"><h4>Profile completeness</h4><p>Score считается как доля заполненных обязательных полей. Учитываются birth date, resting HR, HRmax или birthdate, threshold pace, threshold HR, weight, height, preferred weekdays, max run duration. Confidence: <code>high</code> от 0.8, <code>medium</code> от 0.5, иначе <code>low</code>.</p><span class="source">backend/app/services/profile.py</span></div>
+              <div class="formula-card"><h4>HRmax fallback</h4><p>Если HRmax не введен, но есть дата рождения, используется Tanaka: <code>HRmax = 208 - 0.7 * age</code>. Это fallback с низким confidence и должно быть видно тестеру.</p><span class="source">backend/app/services/calculations.py</span></div>
+              <div class="formula-card"><h4>Safety check</h4><p><code>conservative_mode</code> включается при травмах, health conditions, tired/strained/injured recovery status или явном conservative flag. Safety warnings также появляются при отсутствии HRmax/birthdate или threshold pace.</p><span class="source">backend/app/services/profile.py</span></div>
             </div>
           </details>
 
@@ -1299,7 +1510,7 @@
               <div class="formula-card"><h4>JSON export</h4><p>Экспорт содержит user, profile, measurements, zones, activities, plans, goals, performance results, daily loads, imports, providers without secrets, audit log. Screenshot local file paths и API keys исключаются.</p><span class="source">backend/app/services/data_management.py</span></div>
               <div class="formula-card"><h4>CSV export safety</h4><p>CSV injection protection: строки, начинающиеся с <code>=</code>, <code>+</code>, <code>-</code>, <code>@</code>, получают префикс apostrophe. Activities CSV содержит основные поля тренировки.</p><span class="source">backend/app/services/data_management.py</span></div>
               <div class="formula-card"><h4>Audit log</h4><p>Audit event сохраняет action, entity_type, entity_id и metadata_json. Export, CSV export, imports, provider actions и delete должны оставлять след.</p><span class="source">backend/app/services/audit.py · api/routes/export.py</span></div>
-              <div class="formula-card"><h4>Delete user data</h4><p>Danger zone удаляет user-owned data после явного подтверждения и считает rows по основным моделям. Tester не должен запускать это без отдельного сценария.</p><span class="source">backend/app/services/data_management.py</span></div>
+              <div class="formula-card"><h4>Delete user data</h4><p>Danger zone удаляет user-owned data после явного подтверждения и считает rows по основным моделям. Тестер не должен запускать это без отдельного сценария.</p><span class="source">backend/app/services/data_management.py</span></div>
             </div>
           </details>
         </div>
@@ -1311,21 +1522,29 @@
           <span class="tag">шаблон</span>
         </div>
         <div class="bug-grid">
-          <div class="bug-card"><strong>Что приложить</strong><p>Скриншот или видео, номер шага из этого гайда, устройство, OS, браузер/webview, ширина экрана и ориентация.</p></div>
-          <div class="bug-card"><strong>Что описать</strong><p>Ожидаемый результат, фактический результат, данные, которые вводили, и можно ли воспроизвести повторно.</p></div>
-          <div class="bug-card"><strong>Что особенно важно</strong><p>Горизонтальный скролл, перекрытие клавиатурой, потеря данных, неверное распознавание, опасное удаление, непонятные warnings.</p></div>
+          <div class="bug-card"><strong>Один report = одна проблема.</strong><p>Не объединяйте auth, import и mobile layout в один ticket: так сложнее воспроизвести и закрыть баг.</p></div>
+          <div class="bug-card"><strong>Что приложить.</strong><p>Скриншот или видео, номер шага, URL, дату/время, устройство, OS, браузер/webview, ширину экрана, ориентацию и язык UI.</p></div>
+          <div class="bug-card"><strong>Что не прикладывать.</strong><p>API keys, полный export, screenshots с ключами, чужие персональные скрины, точные карты/адреса и медицинские сведения без необходимости.</p></div>
+          <div class="bug-card"><strong>Severity.</strong><p><code>blocker</code>: нельзя войти, потеря данных, опасное действие без подтверждения. <code>high</code>: неверный импорт/расчет или сценарий нельзя завершить. <code>medium</code>: mobile overflow, broken empty state, непонятный UX. <code>low</code>: typo/cosmetic.</p></div>
+          <div class="bug-card"><strong>Console/network.</strong><p>Если тестируете на телефоне и не знаете, как открыть Console/Network, оставьте поле пустым. Достаточно видео и точного времени. В desktop responsive mode приложите screenshot Console/Network.</p></div>
+          <div class="bug-card"><strong>Куда отправлять.</strong><p>Используйте согласованный канал альфа-теста: GitHub issue, Telegram thread или форму проекта. Если канала нет, сохраните report в текстовом виде и передайте владельцу теста.</p></div>
         </div>
-        <div class="bug-card" style="margin-top: 0.8rem;">
+        <div class="bug-card mt-sm">
           <strong>Копируемый формат</strong>
           <pre>Заголовок: [Шаг N / экран] Краткое описание
 
 Окружение:
+  URL:
+  Дата/время теста:
+  App version/build/commit, если видно:
+  Окружение: production / dev / local
   Устройство:
   OS:
   Browser/webview:
   Viewport width:
   Orientation:
   Язык UI:
+  Telegram username/user id, если безопасно:
 
 Шаги воспроизведения:
   1.
@@ -1347,8 +1566,12 @@
 
 Console/network errors, если есть:
 
-Важность: blocker / high / medium / low</pre>
+Важность: blocker / high / medium / low
+Почему такая важность:
+
+Воспроизводимость: always / sometimes / once / unknown</pre>
         </div>
+        <a class="back-top" href="#start">Наверх</a>
       </section>
 
       <p class="footer">Runforfan alpha tester guide. Все скриншоты подключены локально из <code>assets/alpha-guide/</code>.</p>
