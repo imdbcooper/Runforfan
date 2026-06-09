@@ -1,0 +1,94 @@
+name: runforfan
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    environment:
+      RUNFORFAN_DOMAIN: ${RUNFORFAN_DOMAIN:-run.slavx.ru}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - runforfan_net
+
+  frontend:
+    image: ${RUNFORFAN_FRONTEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/admin/ >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks:
+      - runforfan_net
+
+  backend:
+    image: ${RUNFORFAN_BACKEND_IMAGE}
+    restart: unless-stopped
+    environment:
+      RUNFORFAN_DATABASE_URL: postgresql+psycopg://runforfan:${RUNFORFAN_POSTGRES_PASSWORD}@db:5432/runforfan
+      RUNFORFAN_APP_ENV: ${RUNFORFAN_APP_ENV:-production}
+      RUNFORFAN_AUTO_CREATE_SCHEMA: ${RUNFORFAN_AUTO_CREATE_SCHEMA:-true}
+      RUNFORFAN_DEMO_SEED: ${RUNFORFAN_DEMO_SEED:-false}
+      RUNFORFAN_UPLOAD_DIR: /app/storage/uploads
+      RUNFORFAN_SECRET_KEY: ${RUNFORFAN_SECRET_KEY}
+      RUNFORFAN_TELEGRAM_BOT_TOKEN: ${RUNFORFAN_TELEGRAM_BOT_TOKEN:-}
+      RUNFORFAN_LLM_TIMEOUT: ${RUNFORFAN_LLM_TIMEOUT:-45}
+      RUNFORFAN_DERIVED_METRICS_BACKFILL_ON_STARTUP: ${RUNFORFAN_DERIVED_METRICS_BACKFILL_ON_STARTUP:-true}
+      RUNFORFAN_DERIVED_METRICS_BACKFILL_STARTUP_LIMIT: ${RUNFORFAN_DERIVED_METRICS_BACKFILL_STARTUP_LIMIT:-500}
+      RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_ON_STARTUP: ${RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_ON_STARTUP:-true}
+      RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_DAYS: ${RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_DAYS:-28}
+      RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_USER_LIMIT: ${RUNFORFAN_DAILY_TRAINING_LOAD_BACKFILL_USER_LIMIT:-100}
+    volumes:
+      - backend_uploads:/app/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5).read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - runforfan_net
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: runforfan
+      POSTGRES_USER: runforfan
+      POSTGRES_PASSWORD: ${RUNFORFAN_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runforfan -d runforfan"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - runforfan_net
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  caddy_data:
+  caddy_config:
+
+networks:
+  runforfan_net:
+    driver: bridge

@@ -1,0 +1,19 @@
+{$RUNFORFAN_DOMAIN} {
+  encode zstd gzip
+
+  handle /api/* {
+    reverse_proxy backend:8080
+  }
+
+  handle /health {
+    reverse_proxy backend:8080
+  }
+
+  handle /admin* {
+    reverse_proxy frontend:80
+  }
+
+  handle {
+    redir /admin/ 302
+  }
+}
