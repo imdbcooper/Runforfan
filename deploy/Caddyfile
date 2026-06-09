@@ -10,7 +10,7 @@
 	}
 
 	handle /admin* {
-		redir /app/ 301
+		redir * /app/ 301
 	}
 
 	handle /app* {
@@ -18,6 +18,6 @@
 	}
 
 	handle {
-		redir /app/ 302
+		redir * /app/ 302
 	}
 }

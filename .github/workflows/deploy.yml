@@ -149,3 +149,6 @@ jobs:
         run: |
           ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose ps"
           curl -fsS --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/health"
+          test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/")" = "302:https://$RUNFORFAN_DOMAIN/app/"
+          test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"
+          curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/"
