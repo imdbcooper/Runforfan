@@ -360,6 +360,14 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_telegram_login_codes_expires_at ON telegram_login_codes (expires_at)",
         ),
     ),
+    (
+        "20260702_0017_screenshot_content_hash",
+        (
+            "ALTER TABLE screenshot_sources ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)",
+            "CREATE INDEX IF NOT EXISTS ix_screenshot_sources_content_hash ON screenshot_sources (content_hash)",
+            "CREATE INDEX IF NOT EXISTS ix_screenshot_sources_user_content_hash ON screenshot_sources (user_id, content_hash)",
+        ),
+    ),
 )
 
 

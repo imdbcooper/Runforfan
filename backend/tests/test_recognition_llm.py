@@ -11,9 +11,15 @@ DEPENDENCY_SKIP_REASON = None
 
 try:
     import httpx
+    from sqlalchemy import create_engine, func, select
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
 
     from app.api.routes import imports as imports_routes
-    from app.models import ImportRecognitionAttempt, LlmProviderSetting, User
+    from app.db.base import Base
+    from app.models import Activity, ActivityScreenshot, ActivitySegment, ActivitySplitBlock, ActivityWorkoutBlock, AthleteProfile, DerivedActivityMetric, ImportRecognitionAttempt, LlmProviderSetting, ScreenshotSource, User
     from app.services.recognition import RECOGNITION_PROMPT, RecognitionValidationError, _recognize_openai, llm_or_template_recognize, parse_llm_recognition_payload
 except ModuleNotFoundError as exc:
     if exc.name in {"fastapi", "httpx", "pydantic", "pydantic_core", "sqlalchemy", "starlette", "multipart"}:
@@ -25,6 +31,12 @@ except RuntimeError as exc:
         DEPENDENCY_SKIP_REASON = "python-multipart is required for import route tests"
     else:
         raise
+
+
+if DEPENDENCY_SKIP_REASON is None:
+    @compiles(JSONB, "sqlite")
+    def compile_jsonb_sqlite(element, compiler, **kw):
+        return "JSON"
 
 
 class FakeDb:
@@ -380,6 +392,47 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(batch.created_activity_id, 55)
         self.assertEqual(result["created_activity_id"], 55)
         self.assertEqual(result["candidate"]["confidence"], "medium")
+
+    def test_activity_creation_dedupes_same_screenshot_hash_without_started_at(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine, tables=[
+            User.__table__,
+            AthleteProfile.__table__,
+            ScreenshotSource.__table__,
+            Activity.__table__,
+            ActivityScreenshot.__table__,
+            ActivitySegment.__table__,
+            ActivitySplitBlock.__table__,
+            ActivityWorkoutBlock.__table__,
+            DerivedActivityMetric.__table__,
+        ])
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+        with SessionLocal() as db:
+            user = User(id=1, display_name="Runner", is_demo=False)
+            first_source = ScreenshotSource(user_id=1, file_path="/tmp/first.jpg", content_hash="hash-a", screen_type="uploaded_screenshot")
+            db.add_all([user, first_source])
+            db.flush()
+            payload = valid_llm_payload()
+            payload["activity"]["started_at"] = None
+
+            first_activity = imports_routes.create_activity_from_payload(db, user, payload, [first_source.id])
+            db.flush()
+            second_source = ScreenshotSource(user_id=1, file_path="/tmp/second.jpg", content_hash="hash-a", screen_type="uploaded_screenshot")
+            db.add(second_source)
+            db.flush()
+            changed_date_payload = json.loads(json.dumps(payload))
+            changed_date_payload["activity"]["started_at"] = "2026-07-01T12:00:00+00:00"
+
+            second_activity = imports_routes.create_activity_from_payload(db, user, changed_date_payload, [second_source.id])
+
+            self.assertEqual(second_activity.id, first_activity.id)
+            self.assertEqual(db.scalar(select(func.count()).select_from(Activity)), 1)
+            linked_source_ids = list(db.scalars(select(ActivityScreenshot.source_id).where(ActivityScreenshot.activity_id == first_activity.id)))
+            self.assertEqual(linked_source_ids, [first_source.id])
 
     def test_candidate_patch_updates_safe_fields_and_clears_estimated_flags(self):
         payload = valid_llm_payload()

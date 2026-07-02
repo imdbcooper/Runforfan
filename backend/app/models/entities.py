@@ -136,6 +136,7 @@ class ScreenshotSource(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     file_path: Mapped[str] = mapped_column(String(1000))
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     screen_type: Mapped[str] = mapped_column(String(100), default="uploaded_screenshot")
     source_app: Mapped[str | None] = mapped_column(String(100))
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

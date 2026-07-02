@@ -1,11 +1,11 @@
 from copy import deepcopy
-import shutil
+import hashlib
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -30,12 +30,115 @@ def safe_filename(filename: str) -> str:
     return Path(filename or "screenshot.jpg").name.replace("/", "_").replace("\\", "_")[:120]
 
 
+def save_upload_with_hash(upload: UploadFile, target: Path) -> str:
+    digest = hashlib.sha256()
+    with target.open("wb") as output:
+        while chunk := upload.file.read(1024 * 1024):
+            digest.update(chunk)
+            output.write(chunk)
+    return digest.hexdigest()
+
+
+def file_content_hash(path: str | Path) -> str | None:
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def backfill_user_screenshot_hashes(db: Session, user_id: int, limit: int = 500) -> int:
+    sources = list(db.scalars(
+        select(ScreenshotSource)
+        .where(ScreenshotSource.user_id == user_id, ScreenshotSource.content_hash.is_(None))
+        .order_by(ScreenshotSource.id.desc())
+        .limit(limit)
+    ))
+    updated = 0
+    for source in sources:
+        content_hash = file_content_hash(source.file_path)
+        if not content_hash:
+            continue
+        source.content_hash = content_hash
+        updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
+def existing_activity_for_source_hashes(db: Session, user: User, content_hashes: list[str]) -> Activity | None:
+    unique_hashes = {content_hash for content_hash in content_hashes if content_hash}
+    if not unique_hashes:
+        return None
+    ordered_hashes = sorted(unique_hashes)
+    candidate_ids = list(db.scalars(
+        select(Activity.id)
+        .join(ActivityScreenshot, ActivityScreenshot.activity_id == Activity.id)
+        .join(ScreenshotSource, ScreenshotSource.id == ActivityScreenshot.source_id)
+        .where(
+            Activity.user_id == user.id,
+            ScreenshotSource.content_hash.in_(ordered_hashes),
+        )
+        .group_by(Activity.id)
+        .having(func.count(func.distinct(ScreenshotSource.content_hash)) == len(unique_hashes))
+        .order_by(Activity.id.asc())
+    ))
+    for activity_id in candidate_ids:
+        existing_hashes = set(db.scalars(
+            select(ScreenshotSource.content_hash)
+            .join(ActivityScreenshot, ActivityScreenshot.source_id == ScreenshotSource.id)
+            .where(
+                ActivityScreenshot.activity_id == activity_id,
+                ScreenshotSource.content_hash.is_not(None),
+            )
+        ))
+        if unique_hashes.issubset(existing_hashes):
+            return db.get(Activity, activity_id)
+    return None
+
+
+def link_sources_to_activity(db: Session, activity: Activity, source_ids: list[int]) -> None:
+    if not source_ids:
+        return
+    source_hashes = dict(db.execute(
+        select(ScreenshotSource.id, ScreenshotSource.content_hash).where(ScreenshotSource.id.in_(source_ids))
+    ).all())
+    linked_hashes = set(db.scalars(
+        select(ScreenshotSource.content_hash)
+        .join(ActivityScreenshot, ActivityScreenshot.source_id == ScreenshotSource.id)
+        .where(
+            ActivityScreenshot.activity_id == activity.id,
+            ScreenshotSource.content_hash.is_not(None),
+        )
+    ))
+    linked_source_ids = set(db.scalars(
+        select(ActivityScreenshot.source_id).where(
+            ActivityScreenshot.activity_id == activity.id,
+            ActivityScreenshot.source_id.in_(source_ids),
+        )
+    ))
+    for source_id in source_ids:
+        content_hash = source_hashes.get(source_id)
+        if content_hash and content_hash in linked_hashes:
+            continue
+        if source_id not in linked_source_ids:
+            db.add(ActivityScreenshot(activity_id=activity.id, source_id=source_id))
+            if content_hash:
+                linked_hashes.add(content_hash)
+
+
 def create_activity_from_payload(db: Session, user: User, payload: dict, source_ids: list[int]) -> Activity | None:
     activity_payload = payload.get("activity") or {}
     if not activity_payload:
         return None
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     started_at = datetime.fromisoformat(activity_payload["started_at"]) if activity_payload.get("started_at") else None
+    source_hashes = [content_hash for content_hash in db.scalars(select(ScreenshotSource.content_hash).where(ScreenshotSource.id.in_(source_ids))) if content_hash]
+    existing = existing_activity_for_source_hashes(db, user, source_hashes)
+    if existing:
+        link_sources_to_activity(db, existing, source_ids)
+        sync_derived_activity_metrics(db, existing, profile)
+        db.flush()
+        return existing
     existing = None
     if started_at and activity_payload.get("distance_km") and activity_payload.get("duration_seconds"):
         existing = db.scalar(select(Activity).where(
@@ -45,8 +148,7 @@ def create_activity_from_payload(db: Session, user: User, payload: dict, source_
             Activity.duration_seconds == activity_payload.get("duration_seconds"),
         ))
     if existing:
-        for source_id in source_ids:
-            db.add(ActivityScreenshot(activity_id=existing.id, source_id=source_id))
+        link_sources_to_activity(db, existing, source_ids)
         sync_derived_activity_metrics(db, existing, profile)
         db.flush()
         return existing
@@ -311,16 +413,17 @@ def upload_screenshots(
 
     files: list[Path] = []
     source_ids: list[int] = []
+    content_hashes: list[str] = []
     for screenshot in screenshots[:6]:
         filename = safe_filename(screenshot.filename or "screenshot.jpg")
         if Path(filename).suffix.lower() not in ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename}")
         target = target_dir / f"{uuid.uuid4().hex[:10]}-{filename}"
-        with target.open("wb") as output:
-            shutil.copyfileobj(screenshot.file, output)
+        content_hash = save_upload_with_hash(screenshot, target)
         source = ScreenshotSource(
             user_id=user.id,
             file_path=str(target),
+            content_hash=content_hash,
             screen_type="uploaded_screenshot",
             notes=f"Uploaded screenshot {filename}",
         )
@@ -329,6 +432,24 @@ def upload_screenshots(
         db.add(ImportBatchSource(batch_id=batch.id, source_id=source.id))
         files.append(target)
         source_ids.append(source.id)
+        content_hashes.append(content_hash)
+
+    backfill_user_screenshot_hashes(db, user.id)
+    duplicate_activity = existing_activity_for_source_hashes(db, user, content_hashes)
+    if duplicate_activity:
+        profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+        link_sources_to_activity(db, duplicate_activity, source_ids)
+        sync_derived_activity_metrics(db, duplicate_activity, profile)
+        batch.status = "duplicate"
+        batch.recognition_engine = "duplicate:screenshot-hash"
+        batch.recognition_message = f"Эти скриншоты уже импортированы как activity #{duplicate_activity.id}; новая тренировка не создана."
+        batch.created_activity_id = duplicate_activity.id
+        log_audit_event(db, user.id, "import.screenshots.duplicate", "import_batch", batch.id, {
+            "created_activity_id": batch.created_activity_id,
+            "hash_count": len(set(content_hashes)),
+        })
+        db.commit()
+        return import_result(db, user, batch, include_candidate=True)
 
     matched_workout = None
     try:

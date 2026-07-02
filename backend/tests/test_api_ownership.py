@@ -120,6 +120,9 @@ class ImportUploadDb(CommitDb):
             item.id = 101
         self.added.append(item)
 
+    def scalars(self, query):
+        return []
+
     def commit(self):
         self.committed = True
 
