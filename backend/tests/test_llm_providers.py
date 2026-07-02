@@ -50,8 +50,17 @@ class FakeDb:
 
 
 class FakeResponse:
+    def __init__(self, payload=None, json_error: Exception | None = None):
+        self.payload = payload or {"choices": [{"message": {"content": "ok"}}]}
+        self.json_error = json_error
+
     def raise_for_status(self):
         return None
+
+    def json(self):
+        if self.json_error:
+            raise self.json_error
+        return self.payload
 
 
 def make_provider(**kwargs) -> LlmProviderSetting:
@@ -136,6 +145,50 @@ class LlmProviderTests(unittest.TestCase):
         self.assertEqual(captured["json"]["messages"][0]["role"], "user")
         self.assertIn("Reply with exactly: ok", captured["json"]["messages"][0]["content"])
         self.assertEqual(result.message, "Safe prompt completed successfully.")
+
+    def test_openai_provider_endpoint_normalizes_base_urls(self):
+        settings = type("Settings", (), {"allow_private_llm_base_urls": True})()
+
+        self.assertEqual(
+            provider_endpoint_url(make_provider(base_url="https://byesu.com"), settings),
+            "https://byesu.com/v1/chat/completions",
+        )
+        self.assertEqual(
+            provider_endpoint_url(make_provider(base_url="https://byesu.com/v1"), settings),
+            "https://byesu.com/v1/chat/completions",
+        )
+        self.assertEqual(
+            provider_endpoint_url(make_provider(base_url="https://byesu.com/v1/chat/completions"), settings),
+            "https://byesu.com/v1/chat/completions",
+        )
+        self.assertEqual(
+            provider_endpoint_url(make_provider(base_url="https://gateway.example/openai"), settings),
+            "https://gateway.example/openai/chat/completions",
+        )
+
+    def test_connection_test_rejects_non_json_openai_response(self):
+        provider = make_provider(base_url=None, encrypted_api_key=None)
+
+        def fake_post(*args, **kwargs):
+            return FakeResponse(json_error=ValueError("html"))
+
+        with patch("app.api.routes.settings.httpx.post", side_effect=fake_post):
+            result = test_provider_connection(provider)
+
+        self.assertFalse(result.ok)
+        self.assertIn("non-JSON", result.message)
+
+    def test_connection_test_rejects_non_chat_completion_json(self):
+        provider = make_provider(base_url=None, encrypted_api_key=None)
+
+        def fake_post(*args, **kwargs):
+            return FakeResponse({"ok": True})
+
+        with patch("app.api.routes.settings.httpx.post", side_effect=fake_post):
+            result = test_provider_connection(provider)
+
+        self.assertFalse(result.ok)
+        self.assertIn("chat completions", result.message)
 
     def test_custom_provider_endpoint_rejects_private_http_urls(self):
         provider = make_provider(base_url="http://127.0.0.1:8080/api/not-a-llm")

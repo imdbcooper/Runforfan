@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
 from app.models import ImportRecognitionAttempt, LlmProviderSetting, User
-from app.services.llm_providers import provider_endpoint_url
+from app.services.llm_providers import anthropic_message_text, openai_chat_completion_text, provider_endpoint_url
 from app.services.secrets import decrypt_secret
 
 
@@ -272,9 +272,14 @@ def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings:
         timeout=settings.llm_timeout,
         json={"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0},
     )
-    response.raise_for_status()
-    raw = response.json()
-    return raw, raw["choices"][0]["message"]["content"]
+    try:
+        response.raise_for_status()
+        raw = response.json()
+        return raw, openai_chat_completion_text(raw)
+    except httpx.HTTPStatusError as exc:
+        raise RecognitionValidationError([f"OpenAI-compatible provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
+    except ValueError as exc:
+        raise RecognitionValidationError([str(exc)]) from exc
 
 
 def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
@@ -302,10 +307,14 @@ def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settin
         timeout=settings.llm_timeout,
         json={"model": provider.model, "max_tokens": 4096, "temperature": 0, "messages": [{"role": "user", "content": content}]},
     )
-    response.raise_for_status()
-    raw = response.json()
-    text = "\n".join(part.get("text", "") for part in raw.get("content", []) if part.get("type") == "text")
-    return raw, text
+    try:
+        response.raise_for_status()
+        raw = response.json()
+        return raw, anthropic_message_text(raw)
+    except httpx.HTTPStatusError as exc:
+        raise RecognitionValidationError([f"Anthropic provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
+    except ValueError as exc:
+        raise RecognitionValidationError([str(exc)]) from exc
 
 
 def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], settings: Settings, user: User) -> dict:

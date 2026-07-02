@@ -4137,7 +4137,8 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
     <CollapsibleSection title="Add LLM provider" summary={<Badge>6.17</Badge>}><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
       <Field label="Provider"><Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select></Field>
       <Field label="Display name"><Input name="display_name" placeholder="Display name" required /></Field>
-      <Field label="Base URL"><Input name="base_url" placeholder="Full endpoint URL optional" /></Field>
+      <Field label="Base URL"><Input name="base_url" placeholder="Gateway root or /v1 URL optional" /></Field>
+      <p className="text-[11px] text-zinc-500">For OpenAI-compatible gateways, enter root or /v1 URL. Runforfan calls /chat/completions automatically.</p>
       <Field label="Model"><Input name="model" placeholder="gpt-4o-mini, claude-3-5-sonnet..." required /></Field>
       <Field label="API key"><Input name="api_key" placeholder="API key" type="password" /></Field>
       <label className="flex items-center gap-2 text-xs text-zinc-400"><input name="is_default" type="checkbox" /> default provider</label>
@@ -4155,7 +4156,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         <CollapsibleSection title="Edit provider" className="mt-2">
         <form onSubmit={(event) => updateExisting(event, provider)} className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Name"><Input name="display_name" defaultValue={provider.display_name} /></Field>
-          <Field label="Base URL"><Input name="base_url" defaultValue={provider.base_url || ""} placeholder="default endpoint" /></Field>
+          <Field label="Base URL"><Input name="base_url" defaultValue={provider.base_url || ""} placeholder="gateway root or /v1 URL" /></Field>
           <Field label="Model"><Input name="model" defaultValue={provider.model} /></Field>
           <Field label="New API key"><Input name="api_key" type="password" placeholder={provider.has_api_key ? "leave blank to keep" : "optional"} /></Field>
           <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="clear_api_key" type="checkbox" /> clear key</label>

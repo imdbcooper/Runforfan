@@ -11,7 +11,7 @@ from app.models import LlmProviderSetting, User
 from app.schemas.common import IntegrationOut, LlmProviderCreate, LlmProviderOut, LlmProviderTestOut, LlmProviderUpdate
 from app.services.audit import log_audit_event
 from app.services.auth import get_current_user
-from app.services.llm_providers import provider_endpoint_url, provider_supports_vision, validate_provider_base_url
+from app.services.llm_providers import anthropic_message_text, openai_chat_completion_text, provider_endpoint_url, provider_supports_vision, validate_provider_base_url
 from app.services.secrets import decrypt_secret, encrypt_secret
 
 
@@ -81,6 +81,11 @@ def test_openai_provider(provider: LlmProviderSetting, endpoint: str, timeout: i
         },
     )
     response.raise_for_status()
+    try:
+        raw = response.json()
+    except ValueError as exc:
+        raise ValueError("Provider returned non-JSON response; check Base URL points to an OpenAI-compatible chat/completions endpoint") from exc
+    openai_chat_completion_text(raw)
 
 
 def test_anthropic_provider(provider: LlmProviderSetting, endpoint: str, timeout: int) -> None:
@@ -100,6 +105,11 @@ def test_anthropic_provider(provider: LlmProviderSetting, endpoint: str, timeout
         },
     )
     response.raise_for_status()
+    try:
+        raw = response.json()
+    except ValueError as exc:
+        raise ValueError("Provider returned non-JSON response; check Base URL points to an Anthropic messages endpoint") from exc
+    anthropic_message_text(raw)
 
 
 def test_provider_connection(provider: LlmProviderSetting) -> LlmProviderTestOut:

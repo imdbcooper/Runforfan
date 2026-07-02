@@ -1,6 +1,7 @@
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from app.core.settings import Settings
 from app.models import LlmProviderSetting
@@ -61,9 +62,60 @@ def validate_provider_base_url(raw_url: str, allow_private: bool = False) -> str
     return raw_url
 
 
+def _append_endpoint_path(raw_url: str, default_versioned_path: str, endpoint_suffix: str) -> str:
+    parsed = urlparse(raw_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith(endpoint_suffix):
+        return raw_url
+    if not path:
+        path = default_versioned_path
+    else:
+        path = f"{path}{endpoint_suffix}"
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", parsed.query, parsed.fragment))
+
+
+def openai_chat_endpoint_url(raw_url: str) -> str:
+    return _append_endpoint_path(raw_url, "/v1/chat/completions", "/chat/completions")
+
+
+def anthropic_messages_endpoint_url(raw_url: str) -> str:
+    return _append_endpoint_path(raw_url, "/v1/messages", "/messages")
+
+
 def provider_endpoint_url(provider: LlmProviderSetting, settings: Settings) -> str:
     if provider.base_url:
-        return validate_provider_base_url(provider.base_url, allow_private=settings.allow_private_llm_base_urls)
+        base_url = validate_provider_base_url(provider.base_url, allow_private=settings.allow_private_llm_base_urls)
+        if provider.provider == "anthropic":
+            return anthropic_messages_endpoint_url(base_url)
+        return openai_chat_endpoint_url(base_url)
     if provider.provider == "anthropic":
         return ANTHROPIC_MESSAGES_URL
     return OPENAI_CHAT_COMPLETIONS_URL
+
+
+def openai_chat_completion_text(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        raise ValueError("Provider returned non-object JSON; check Base URL points to a chat/completions endpoint")
+    choices = raw.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("Provider response is not OpenAI chat completions JSON; check Base URL, model and provider type")
+    first = choices[0]
+    if not isinstance(first, dict):
+        raise ValueError("Provider response choice is malformed; check provider compatibility")
+    message = first.get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise ValueError("Provider response is missing choices[0].message.content; check provider compatibility")
+    return message["content"]
+
+
+def anthropic_message_text(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        raise ValueError("Provider returned non-object JSON; check Base URL points to a messages endpoint")
+    content = raw.get("content")
+    if not isinstance(content, list) or not content:
+        raise ValueError("Provider response is not Anthropic messages JSON; check Base URL, model and provider type")
+    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+    text = "\n".join(part for part in text_parts if part)
+    if not text:
+        raise ValueError("Provider response is missing text content; check provider compatibility")
+    return text
