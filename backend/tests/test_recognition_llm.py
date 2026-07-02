@@ -62,6 +62,14 @@ class ConfirmDb(FakeDb):
         self.committed = True
 
 
+class FakeHash:
+    def __init__(self, value: str):
+        self.value = value
+
+    def hexdigest(self) -> str:
+        return self.value
+
+
 def valid_llm_payload() -> dict:
     return {
         "activity": {
@@ -204,6 +212,52 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(result["payload"]["activity"]["average_heart_rate_bpm"], 137)
         attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
         self.assertEqual(attempt.engine, "template:iphone-apple-workout-run")
+        self.assertEqual(attempt.status, "validated")
+
+    def test_android_outdoor_run_template_without_provider_is_validated(self):
+        db = FakeDb(None)
+        image_hashes = [
+            "e84b6cc169a151e083f58deb4b6914c89aeade703c66f01ef0c9adb370e26413",
+            "d7eacec7866554e6d4b05109a00d1466e0cce67c737b5469347da5facbb5e562",
+            "d49fc0f2a4b1040c8b8b09f30b587160cf7a0a2827c3f855591baf823ca752bb",
+        ]
+
+        with (
+            patch("app.services.recognition.Path.read_bytes", return_value=b"image"),
+            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in image_hashes]),
+        ):
+            result = llm_or_template_recognize(
+                db,
+                12,
+                [
+                    Path("147addcb85-513.jpg"),
+                    Path("1a2b0b523d-514.jpg"),
+                    Path("669e0353eb-515.jpg"),
+                ],
+                type("Settings", (), {})(),
+                User(id=1, display_name="Runner"),
+            )
+
+        with patch("app.services.recognition.Path.read_bytes", return_value=b"different"):
+            fallback = llm_or_template_recognize(
+                FakeDb(None),
+                12,
+                [Path("147addcb85-513.jpg"), Path("1a2b0b523d-514.jpg"), Path("other.jpg")],
+                type("Settings", (), {})(),
+                User(id=1, display_name="Runner"),
+            )
+
+        self.assertEqual(fallback["status"], "rejected_no_llm_template")
+        self.assertEqual(result["status"], "validated")
+        self.assertFalse(result["requires_confirmation"])
+        self.assertEqual(result["engine"], "template:android-outdoor-run-20260702")
+        self.assertEqual(result["payload"]["activity"]["distance_km"], 12.32)
+        self.assertEqual(result["payload"]["activity"]["duration_seconds"], 4893)
+        self.assertEqual(result["payload"]["activity"]["average_heart_rate_bpm"], 153)
+        self.assertEqual(len(result["payload"]["segments"]), 13)
+        self.assertEqual(result["payload"]["segments"][9]["pace_seconds_per_km"], 334)
+        attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
+        self.assertEqual(attempt.engine, "template:android-outdoor-run-20260702")
         self.assertEqual(attempt.status, "validated")
 
     def test_valid_llm_recognition_returns_pending_confirmation(self):

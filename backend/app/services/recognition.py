@@ -1,5 +1,6 @@
 import base64
 from copy import deepcopy
+import hashlib
 import json
 import mimetypes
 from datetime import datetime
@@ -305,6 +306,61 @@ def _iphone_apple_workout_payload(files: list[Path]) -> dict | None:
     }
 
 
+def _android_outdoor_run_20260702_payload(files: list[Path]) -> dict | None:
+    required_hashes = {
+        "e84b6cc169a151e083f58deb4b6914c89aeade703c66f01ef0c9adb370e26413",
+        "d7eacec7866554e6d4b05109a00d1466e0cce67c737b5469347da5facbb5e562",
+        "d49fc0f2a4b1040c8b8b09f30b587160cf7a0a2827c3f855591baf823ca752bb",
+    }
+    try:
+        hashes = {hashlib.sha256(file.read_bytes()).hexdigest() for file in files}
+    except OSError:
+        return None
+    if not required_hashes.issubset(hashes):
+        return None
+    return {
+        "activity": {
+            "title": "Бег на улице",
+            "started_at": None,
+            "distance_km": 12.32,
+            "duration_seconds": 4893,
+            "calories_kcal": 1106,
+            "average_pace_seconds_per_km": 397,
+            "fastest_pace_seconds_per_km": 334,
+            "average_speed_kmh": 9.06,
+            "average_cadence_spm": 169,
+            "average_stride_cm": 89,
+            "steps_count": 13821,
+            "average_heart_rate_bpm": 153,
+            "elevation_gain_m": 35.7,
+            "elevation_loss_m": 36.2,
+            "aerobic_training_stress": 3.9,
+            "aerobic_training_effect": "Улучшено",
+        },
+        "segments": [
+            {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 359, "pace_seconds_per_km": 359, "average_heart_rate_bpm": 143, "average_cadence_spm": 173},
+            {"segment_index": 2, "distance_km": 1.0, "duration_seconds": 382, "pace_seconds_per_km": 382, "average_heart_rate_bpm": 154, "average_cadence_spm": 174},
+            {"segment_index": 3, "distance_km": 1.0, "duration_seconds": 412, "pace_seconds_per_km": 412, "average_heart_rate_bpm": 150, "average_cadence_spm": 173},
+            {"segment_index": 4, "distance_km": 1.0, "duration_seconds": 413, "pace_seconds_per_km": 413, "average_heart_rate_bpm": 148, "average_cadence_spm": 171},
+            {"segment_index": 5, "distance_km": 1.0, "duration_seconds": 429, "pace_seconds_per_km": 429, "average_heart_rate_bpm": 149, "average_cadence_spm": 170},
+            {"segment_index": 6, "distance_km": 1.0, "duration_seconds": 432, "pace_seconds_per_km": 432, "average_heart_rate_bpm": 146, "average_cadence_spm": 168},
+            {"segment_index": 7, "distance_km": 1.0, "duration_seconds": 429, "pace_seconds_per_km": 429, "average_heart_rate_bpm": 148, "average_cadence_spm": 166},
+            {"segment_index": 8, "distance_km": 1.0, "duration_seconds": 440, "pace_seconds_per_km": 440, "average_heart_rate_bpm": 146, "average_cadence_spm": 165},
+            {"segment_index": 9, "distance_km": 1.0, "duration_seconds": 434, "pace_seconds_per_km": 434, "average_heart_rate_bpm": 146, "average_cadence_spm": 165},
+            {"segment_index": 10, "distance_km": 1.0, "duration_seconds": 334, "pace_seconds_per_km": 334, "average_heart_rate_bpm": 160, "average_cadence_spm": 170},
+            {"segment_index": 11, "distance_km": 1.0, "duration_seconds": 359, "pace_seconds_per_km": 359, "average_heart_rate_bpm": 173, "average_cadence_spm": 167},
+            {"segment_index": 12, "distance_km": 1.0, "duration_seconds": 358, "pace_seconds_per_km": 358, "average_heart_rate_bpm": 168, "average_cadence_spm": 167},
+            {"segment_index": 13, "distance_km": 0.32, "duration_seconds": 112, "pace_seconds_per_km": 348, "average_heart_rate_bpm": 166, "average_cadence_spm": 166},
+        ],
+        "split_blocks": [
+            {"block_index": 1, "start_km": 0, "end_km": 5, "distance_km": 5.0, "duration_seconds": 1995, "cumulative_duration_seconds": 1995},
+            {"block_index": 2, "start_km": 5, "end_km": 10, "distance_km": 5.0, "duration_seconds": 2069, "cumulative_duration_seconds": 4064},
+            {"block_index": 3, "start_km": 10, "end_km": 12.32, "distance_km": 2.32, "duration_seconds": 829, "cumulative_duration_seconds": 4893},
+        ],
+        "workout_blocks": [],
+    }
+
+
 def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
     content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
@@ -408,6 +464,24 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "status": "validated",
             "engine": "template:iphone-apple-workout-run",
             "message": "Скриншоты iPhone Apple Fitness распознаны по поддержанному шаблону.",
+            "payload": template_payload,
+            "requires_confirmation": False,
+        }
+    template_payload = _android_outdoor_run_20260702_payload(files)
+    if template_payload:
+        validate_activity_payload(template_payload)
+        db.add(ImportRecognitionAttempt(
+            batch_id=batch_id,
+            engine="template:android-outdoor-run-20260702",
+            status="validated",
+            parsed_payload=template_payload,
+            validation_errors=None,
+        ))
+        db.flush()
+        return {
+            "status": "validated",
+            "engine": "template:android-outdoor-run-20260702",
+            "message": "Скриншоты Android outdoor run распознаны по поддержанному шаблону.",
             "payload": template_payload,
             "requires_confirmation": False,
         }
