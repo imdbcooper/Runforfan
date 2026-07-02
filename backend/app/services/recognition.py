@@ -1,4 +1,5 @@
 import base64
+from copy import deepcopy
 import json
 import mimetypes
 from datetime import datetime
@@ -30,6 +31,7 @@ Include confidence as one of: low, medium, high.
 Include uncertainty_notes as an array of short strings for unclear or partially visible data.
 Do not infer invisible fields. If a value is estimated from visible data, include its dotted path in estimated_fields.
 For intervals, populate workout_blocks with warmup, work, recovery, cooldown when visible.
+Do not add extra fields or synonyms such as activity.type, segment, block, steps, cumulative_distance_km, or *_meters.
 """.strip()
 
 
@@ -140,9 +142,56 @@ def _json_from_text(text: str) -> dict:
     return json.loads(stripped)
 
 
+def _move_alias(data: dict, canonical: str, aliases: tuple[str, ...]) -> None:
+    for alias in aliases:
+        if alias not in data:
+            continue
+        if canonical not in data or data.get(canonical) is None:
+            data[canonical] = data.pop(alias)
+        elif data.get(canonical) == data.get(alias):
+            data.pop(alias)
+
+
+def _normalize_llm_recognition_payload(parsed: dict) -> dict:
+    payload = deepcopy(parsed)
+    activity = payload.get("activity")
+    if isinstance(activity, dict):
+        _move_alias(activity, "steps_count", ("steps",))
+        _move_alias(activity, "average_stride_cm", ("average_stride_length_centimeters", "stride_length_cm"))
+        _move_alias(activity, "elevation_gain_m", ("elevation_gain_meters",))
+        _move_alias(activity, "elevation_loss_m", ("elevation_loss_meters",))
+        _move_alias(activity, "calories_kcal", ("calories",))
+        if "type" in activity and activity.get("type") in {"run", "running", "outdoor_run", "indoor_run", "walk"}:
+            activity.pop("type")
+        if "anaerobic_training_effect" in activity:
+            activity.pop("anaerobic_training_effect")
+        if activity.get("aerobic_training_effect") is not None and not isinstance(activity.get("aerobic_training_effect"), str):
+            activity["aerobic_training_effect"] = str(activity["aerobic_training_effect"])
+
+    for segment in payload.get("segments") or []:
+        if isinstance(segment, dict):
+            _move_alias(segment, "segment_index", ("segment", "lap"))
+
+    for block in payload.get("split_blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        _move_alias(block, "block_index", ("block",))
+        cumulative_distance = block.pop("cumulative_distance_km", None)
+        if block.get("end_km") is None and cumulative_distance is not None:
+            block["end_km"] = cumulative_distance
+        if block.get("start_km") is None and block.get("end_km") is not None and block.get("distance_km") is not None:
+            block["start_km"] = max(0, round(float(block["end_km"]) - float(block["distance_km"]), 3))
+
+    for block in payload.get("workout_blocks") or []:
+        if isinstance(block, dict):
+            _move_alias(block, "block_index", ("block",))
+    return payload
+
+
 def parse_llm_recognition_payload(text: str) -> dict:
     try:
         parsed = _json_from_text(text)
+        parsed = _normalize_llm_recognition_payload(parsed)
         payload = LlmRecognitionPayload.model_validate(parsed).model_dump(mode="json")
     except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
         if isinstance(exc, RecognitionValidationError):
@@ -266,16 +315,20 @@ def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings:
     api_key = decrypt_secret(provider.encrypted_api_key)
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    response = httpx.post(
-        provider_endpoint_url(provider, settings),
-        headers=headers,
-        timeout=settings.llm_timeout,
-        json={"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0},
-    )
     try:
+        response = httpx.post(
+            provider_endpoint_url(provider, settings),
+            headers=headers,
+            timeout=settings.llm_timeout,
+            json={"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0},
+        )
         response.raise_for_status()
         raw = response.json()
         return raw, openai_chat_completion_text(raw)
+    except httpx.TimeoutException as exc:
+        raise RecognitionValidationError([f"OpenAI-compatible provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."]) from exc
+    except httpx.RequestError as exc:
+        raise RecognitionValidationError([f"OpenAI-compatible provider request failed: {exc}. Check network, Base URL and provider availability."]) from exc
     except httpx.HTTPStatusError as exc:
         raise RecognitionValidationError([f"OpenAI-compatible provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
     except ValueError as exc:
@@ -301,16 +354,20 @@ def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settin
     }
     if api_key:
         headers["x-api-key"] = api_key
-    response = httpx.post(
-        provider_endpoint_url(provider, settings),
-        headers=headers,
-        timeout=settings.llm_timeout,
-        json={"model": provider.model, "max_tokens": 4096, "temperature": 0, "messages": [{"role": "user", "content": content}]},
-    )
     try:
+        response = httpx.post(
+            provider_endpoint_url(provider, settings),
+            headers=headers,
+            timeout=settings.llm_timeout,
+            json={"model": provider.model, "max_tokens": 4096, "temperature": 0, "messages": [{"role": "user", "content": content}]},
+        )
         response.raise_for_status()
         raw = response.json()
         return raw, anthropic_message_text(raw)
+    except httpx.TimeoutException as exc:
+        raise RecognitionValidationError([f"Anthropic provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."]) from exc
+    except httpx.RequestError as exc:
+        raise RecognitionValidationError([f"Anthropic provider request failed: {exc}. Check network, Base URL and provider availability."]) from exc
     except httpx.HTTPStatusError as exc:
         raise RecognitionValidationError([f"Anthropic provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
     except ValueError as exc:
@@ -371,12 +428,24 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "payload": None,
             "requires_confirmation": False,
         }
-    if provider.provider == "openai":
-        raw, text = _recognize_openai(provider, files, settings)
-    elif provider.provider == "anthropic":
-        raw, text = _recognize_anthropic(provider, files, settings)
-    else:
-        raise RecognitionValidationError([f"Unsupported provider: {provider.provider}"])
+    try:
+        if provider.provider == "openai":
+            raw, text = _recognize_openai(provider, files, settings)
+        elif provider.provider == "anthropic":
+            raw, text = _recognize_anthropic(provider, files, settings)
+        else:
+            raise RecognitionValidationError([f"Unsupported provider: {provider.provider}"])
+    except RecognitionValidationError as exc:
+        db.add(ImportRecognitionAttempt(
+            batch_id=batch_id,
+            engine=f"{provider.provider}:{provider.model}",
+            status="validation_failed",
+            raw_response=None,
+            parsed_payload=None,
+            validation_errors=exc.errors,
+        ))
+        db.flush()
+        raise
     raw_payload = None
     try:
         payload = parse_llm_recognition_payload(text)

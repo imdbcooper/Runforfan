@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     telegram_polling_error_delay_seconds: int = 5
     frontend_url: str = "http://127.0.0.1:5173/app/"
     telegram_login_code_ttl_seconds: int = 300
-    llm_timeout: int = 45
+    llm_timeout: int = 120
     allow_private_llm_base_urls: bool = False
     derived_metrics_backfill_on_startup: bool = True
     derived_metrics_backfill_startup_limit: int = 500

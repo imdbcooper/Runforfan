@@ -3,15 +3,18 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from types import SimpleNamespace
 from unittest.mock import patch
 
 DEPENDENCY_SKIP_REASON = None
 
 try:
+    import httpx
+
     from app.api.routes import imports as imports_routes
     from app.models import ImportRecognitionAttempt, LlmProviderSetting, User
-    from app.services.recognition import RECOGNITION_PROMPT, RecognitionValidationError, llm_or_template_recognize, parse_llm_recognition_payload
+    from app.services.recognition import RECOGNITION_PROMPT, RecognitionValidationError, _recognize_openai, llm_or_template_recognize, parse_llm_recognition_payload
 except ModuleNotFoundError as exc:
     if exc.name in {"fastapi", "httpx", "pydantic", "pydantic_core", "sqlalchemy", "starlette", "multipart"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for recognition LLM tests"
@@ -122,6 +125,30 @@ class RecognitionLlmTests(unittest.TestCase):
         with self.assertRaises(RecognitionValidationError):
             parse_llm_recognition_payload(json.dumps(payload))
 
+    def test_llm_output_normalizes_common_provider_synonyms(self):
+        payload = valid_llm_payload()
+        payload["activity"]["type"] = "outdoor_run"
+        payload["activity"]["steps"] = 4200
+        payload["activity"]["average_stride_length_centimeters"] = 88
+        payload["activity"]["elevation_gain_meters"] = 12.5
+        payload["activity"]["elevation_loss_meters"] = 11.5
+        payload["activity"]["aerobic_training_effect"] = 3.9
+        payload["activity"]["anaerobic_training_effect"] = 2.4
+        payload["segments"] = [{"segment": 1, "distance_km": 5.0, "duration_seconds": 1500, "pace_seconds_per_km": 300}]
+        payload["split_blocks"] = [{"block": 1, "distance_km": 5.0, "duration_seconds": 1500, "cumulative_distance_km": 5.0, "cumulative_duration_seconds": 1500}]
+
+        parsed = parse_llm_recognition_payload(json.dumps(payload))
+
+        self.assertEqual(parsed["activity"]["steps_count"], 4200)
+        self.assertEqual(parsed["activity"]["average_stride_cm"], 88)
+        self.assertEqual(parsed["activity"]["elevation_gain_m"], 12.5)
+        self.assertEqual(parsed["activity"]["elevation_loss_m"], 11.5)
+        self.assertEqual(parsed["activity"]["aerobic_training_effect"], "3.9")
+        self.assertEqual(parsed["segments"][0]["segment_index"], 1)
+        self.assertEqual(parsed["split_blocks"][0]["block_index"], 1)
+        self.assertEqual(parsed["split_blocks"][0]["start_km"], 0)
+        self.assertEqual(parsed["split_blocks"][0]["end_km"], 5.0)
+
     def test_llm_output_rejects_inconsistent_distance_duration_and_pace(self):
         payload = valid_llm_payload()
         payload["activity"]["average_pace_seconds_per_km"] = 420
@@ -192,6 +219,32 @@ class RecognitionLlmTests(unittest.TestCase):
         attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
         self.assertEqual(attempt.status, "validated_pending_confirmation")
         self.assertEqual(attempt.parsed_payload["uncertainty_notes"], ["pace visible, calories hidden"])
+
+    def test_llm_provider_validation_error_is_recorded_as_attempt(self):
+        provider = LlmProviderSetting(id=1, user_id=1, provider="openai", display_name="Vision", model="gpt-4o-mini", is_active=True, is_default=True)
+        db = FakeDb(provider)
+
+        with patch("app.services.recognition._recognize_openai", side_effect=RecognitionValidationError(["Provider timed out"])):
+            with self.assertRaises(RecognitionValidationError):
+                llm_or_template_recognize(db, 12, [Path("unknown.png")], type("Settings", (), {"llm_timeout": 120})(), User(id=1, display_name="Runner"))
+
+        attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
+        self.assertEqual(attempt.engine, "openai:gpt-4o-mini")
+        self.assertEqual(attempt.status, "validation_failed")
+        self.assertEqual(attempt.validation_errors, ["Provider timed out"])
+
+    def test_openai_recognition_timeout_is_validation_error(self):
+        provider = LlmProviderSetting(id=1, user_id=1, provider="openai", display_name="Vision", model="gpt-4o-mini", is_active=True, is_default=True)
+        settings = type("Settings", (), {"llm_timeout": 120, "allow_private_llm_base_urls": True})()
+
+        with NamedTemporaryFile(suffix=".jpg") as file:
+            file.write(b"fake image")
+            file.flush()
+            with patch("app.services.recognition.httpx.post", side_effect=httpx.ReadTimeout("timed out")):
+                with self.assertRaises(RecognitionValidationError) as ctx:
+                    _recognize_openai(provider, [Path(file.name)], settings)
+
+        self.assertIn("timed out after 120s", ctx.exception.errors[0])
 
     def test_candidate_preview_exposes_only_safe_llm_candidate_fields(self):
         payload = valid_llm_payload()
