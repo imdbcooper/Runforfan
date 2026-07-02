@@ -776,6 +776,7 @@
         <div class="rules">
           <div class="rule"><strong>Устройство и браузер.</strong><p>Основная проверка: смартфон vertical/portrait шириной 360-430px. Desktop responsive mode допустим, но баги по клавиатуре и file picker лучше проверять на реальном телефоне.</p></div>
           <div class="rule"><strong>Адрес приложения.</strong><p>Production: <code>https://run.slavx.ru/app/</code>. Старый адрес <code>/admin/</code> должен перенаправлять на <code>/app/</code>. Health check <code>/health</code> - технический smoke-check, не обязательный для обычного тестера.</p></div>
+          <div class="rule"><strong>online-first PWA установка.</strong><p>На телефоне попробуйте Add to Home Screen / Install app. Ожидаемо: Runforfan открывается как standalone app, стартует с <code>/app/</code>, а service worker не кеширует пользовательские/API-данные. Без интернета приложение показывает понятное сообщение, что для данных нужен backend.</p></div>
           <div class="rule"><strong>Telegram login.</strong><p>На production используйте кнопку/ссылку Telegram: откройте бота, нажмите <code>Start</code> и вернитесь по одноразовой ссылке. Если бот не отвечает или ссылка не открывает приложение, оформите auth-баг и не продолжайте основной сценарий.</p></div>
           <div class="rule"><strong>Язык и локализация.</strong><p>Основной проход делайте на русском. Отдельно переключите <code>ru</code> -> <code>en</code> -> <code>ru</code>, обновите страницу и проверьте, что язык, даты, километры, pace и единицы не ломаются.</p></div>
           <div class="rule"><strong>Заметки по шагам.</strong><p>Фиксируйте номер шага, экран, время, фактическое поведение, ожидаемое поведение и данные, которые ввели. Один баг-репорт должен описывать одну проблему.</p></div>
@@ -838,7 +839,7 @@
               <h3>Откройте dashboard и оцените готовность недели</h3>
               <p>Начните с главного экрана. Он должен быстро объяснить, готов ли профиль, есть ли активный план, что запланировано на текущую неделю и где следующий полезный action.</p>
               <ol class="action-list">
-                <li>Откройте админку и убедитесь, что попали на dashboard.</li>
+                <li>Откройте приложение и убедитесь, что попали на dashboard.</li>
                 <li>Посмотрите readiness/completeness, текущую неделю и ближайшие тренировки.</li>
                 <li>Проверьте, что карточки читаются без приближения и не создают горизонтальный скролл.</li>
               </ol>
@@ -1541,6 +1542,7 @@
   Устройство:
   OS:
   Browser/webview:
+  Display mode: browser / installed PWA / webview
   Viewport width:
   Orientation:
   Язык UI:

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Runforfan maskable icon</title>
+  <desc id="desc">Full-canvas dark icon with a centered orange running route mark.</desc>
+  <rect width="512" height="512" fill="#09090b" />
+  <circle cx="356" cy="158" r="32" fill="#f97316" />
+  <path d="M148 348c56-94 116-148 178-164" fill="none" stroke="#f97316" stroke-width="40" stroke-linecap="round" />
+  <path d="M326 184l-52 104 106 66" fill="none" stroke="#fb923c" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M224 282l-74 66" fill="none" stroke="#ffedd5" stroke-width="28" stroke-linecap="round" />
+  <path d="M278 292l-48 94" fill="none" stroke="#ffedd5" stroke-width="28" stroke-linecap="round" />
+  <circle cx="148" cy="348" r="14" fill="#ffedd5" />
+  <circle cx="380" cy="354" r="14" fill="#ffedd5" />
+</svg>

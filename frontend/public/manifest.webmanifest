@@ -1,0 +1,56 @@
+{
+  "name": "Runforfan",
+  "short_name": "Runforfan",
+  "description": "Runforfan - беговые тренировки, планы, импорт активностей и аналитика нагрузки.",
+  "lang": "ru",
+  "dir": "ltr",
+  "id": "/app/",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#f97316",
+  "categories": ["health", "sports", "fitness"],
+  "icons": [
+    {
+      "src": "icons/runforfan-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/runforfan-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/runforfan-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/runforfan-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "assets/alpha-guide/dashboard.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Runforfan dashboard on mobile"
+    },
+    {
+      "src": "assets/alpha-guide/states/g0-auth-login.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Runforfan login screen"
+    }
+  ]
+}

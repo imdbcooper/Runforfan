@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Runforfan icon</title>
+  <desc id="desc">Dark rounded square with an orange running route mark.</desc>
+  <rect width="512" height="512" rx="112" fill="#09090b" />
+  <circle cx="374" cy="136" r="36" fill="#f97316" />
+  <path d="M132 360c62-104 126-164 194-180" fill="none" stroke="#f97316" stroke-width="44" stroke-linecap="round" />
+  <path d="M326 180l-58 116 122 76" fill="none" stroke="#fb923c" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M218 286l-86 74" fill="none" stroke="#ffedd5" stroke-width="30" stroke-linecap="round" />
+  <path d="M278 296l-54 110" fill="none" stroke="#ffedd5" stroke-width="30" stroke-linecap="round" />
+  <circle cx="132" cy="360" r="16" fill="#ffedd5" />
+  <circle cx="390" cy="372" r="16" fill="#ffedd5" />
+</svg>

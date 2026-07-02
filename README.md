@@ -234,6 +234,14 @@ cd frontend
 npm run build
 ```
 
+PWA-режим frontend:
+
+- Runforfan собирается как online-first installable PWA под `/app/`.
+- Manifest доступен как `/app/manifest.webmanifest`, service worker — `/app/sw.js`, scope и `start_url` строго `/app/`.
+- Service worker кеширует только статические frontend assets/icons/offline fallback и намеренно не кеширует `/api/*`.
+- Без сети приложение показывает понятное offline-сообщение; Telegram login, профиль, планы, импорт, расчеты, LLM providers и export требуют backend-соединения.
+- Для проверки после production deploy: открыть `https://run.slavx.ru/app/`, установить через браузер/Add to Home Screen, убедиться, что standalone-окно запускается и что offline mode не обещает работу с данными.
+
 Страницы нового frontend:
 
 - Панель: today/next workout, current week, readiness alerts и recent activities.

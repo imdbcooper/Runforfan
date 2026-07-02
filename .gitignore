@@ -58,6 +58,7 @@ scrins/
 playwright-report/
 test-results/
 runforfan-*.png
+!frontend/public/icons/runforfan-*.png
 *.screenshot.png
 
 # Logs and temporary files

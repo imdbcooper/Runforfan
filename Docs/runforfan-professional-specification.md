@@ -24,6 +24,7 @@ Runforfan должен стать персональной системой дл
 - User confirmation first: любые данные, распознанные LLM, должны попадать в analytics только после validation pass и подтверждения пользователя либо явного auto-accept для известных шаблонов.
 - Multi-user isolation: все пользовательские данные строго фильтруются по `user_id`.
 - Dark compact admin UI: текущий black/orange shadcn-style интерфейс сохранить как основную визуальную систему.
+- Online-first PWA: приложение можно установить на телефон, но пользовательские данные остаются backend-owned; offline mode не должен обещать редактирование или синхронизацию без сети.
 - No medical diagnosis: приложение может показывать спортивную аналитику и предупреждения, но не ставит диагнозы и не заменяет врача или тренера.
 
 ## 3. Границы безопасности
@@ -92,6 +93,13 @@ Runforfan не является медицинским устройством и
 ## 5. Навигация frontend
 
 Базовый путь Vite: `/app/`.
+
+PWA boundaries:
+
+- Manifest `id`, `scope` и `start_url` должны быть `/app/`.
+- Service worker обслуживает только `/app/` shell/static assets и не кеширует `/api/*`.
+- Offline fallback должен объяснять, что Telegram login, profile, plans, imports, calculations и exports требуют интернет и backend.
+- `/admin/` остается compatibility redirect на `/app/`, но PWA не использует `/admin/` как start URL.
 
 Целевые routes:
 
@@ -1379,6 +1387,8 @@ Add unit tests for:
 - Analytics uses weighted averages for pace and HR where appropriate.
 - User can override estimated zones.
 - All user data is isolated by token user.
+- App is installable as an online-first PWA under `/app/` with maskable icons, manifest and service worker.
+- PWA cache never stores authenticated `/api/*` responses, exports, screenshot uploads or LLM provider settings.
 
 ## 15. Implementation roadmap
 
@@ -1430,6 +1440,7 @@ Add unit tests for:
 - Add Telegram bot `/start` registration production mode.
 - Add provider test endpoint.
 - Add audit log.
+- Add online-first PWA installability without offline user-data synchronization.
 - Add documentation for formulas and source references.
 
 ## 16. Source references
@@ -1459,6 +1470,7 @@ Primary sources to cite in implementation docs and calculation metadata:
 - LLM provider settings with encrypted keys.
 - MVP planning generator.
 - React/Vite/Tailwind compact admin UI.
+- Online-first PWA shell scoped to `/app/`.
 
 Главные недостающие части:
 

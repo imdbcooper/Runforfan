@@ -186,4 +186,23 @@ jobs:
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"
           curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/"
           curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/alpha-tester-guide.html"
+          curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/manifest.webmanifest"
+          curl -fsSI --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/app/sw.js"
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base = f"https://{os.environ['RUNFORFAN_DOMAIN']}"
+          with urllib.request.urlopen(f"{base}/app/manifest.webmanifest", timeout=20) as response:
+              manifest = json.load(response)
+          assert manifest["start_url"] == "/app/"
+          assert manifest["scope"] == "/app/"
+          assert any(icon.get("purpose") == "maskable" for icon in manifest.get("icons", []))
+
+          with urllib.request.urlopen(f"{base}/app/sw.js", timeout=20) as response:
+              sw_head = response.read(512).decode("utf-8", errors="replace")
+          assert "runforfan-pwa" in sw_head
+          assert "</html" not in sw_head.lower()
+          PY
           curl -fsS --retry 6 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/api/auth/telegram/bot-link"
