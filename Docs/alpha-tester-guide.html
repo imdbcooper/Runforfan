@@ -152,6 +152,53 @@
         outline-offset: 3px;
       }
 
+      .nav-scroll .app-link {
+        border-color: var(--line-hot);
+        background: var(--orange-2);
+        color: #2a1200;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        margin-top: 1.1rem;
+      }
+
+      .primary-action,
+      .secondary-action {
+        align-items: center;
+        border-radius: 999px;
+        display: inline-flex;
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        font-weight: 900;
+        letter-spacing: 0.05em;
+        padding: 0.62rem 0.9rem;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .primary-action {
+        border: 1px solid var(--line-hot);
+        background: var(--orange-2);
+        color: #2a1200;
+      }
+
+      .secondary-action {
+        border: 1px solid var(--line);
+        color: #f4e8dc;
+      }
+
+      .primary-action:focus-visible,
+      .primary-action:hover,
+      .secondary-action:focus-visible,
+      .secondary-action:hover {
+        border-color: var(--line-hot);
+        outline: 2px solid var(--orange-2);
+        outline-offset: 3px;
+      }
+
       .wrap {
         margin: 0 auto;
         max-width: 1180px;
@@ -530,6 +577,10 @@
         font-size: 0.9rem;
       }
 
+      .formula-card li strong {
+        color: #f8ddc6;
+      }
+
       .formula-card ul {
         margin: 0.45rem 0 0;
         padding-left: 1rem;
@@ -596,9 +647,16 @@
       .mt-sm { margin-top: 0.8rem; }
       .mb-sm { margin-bottom: 0.8rem; }
 
-      .back-top {
-        display: inline-flex;
+      .guide-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
         margin-top: 0.9rem;
+      }
+
+      .back-top,
+      .app-return {
+        display: inline-flex;
         border: 1px solid var(--line);
         border-radius: 999px;
         color: var(--orange-2);
@@ -610,8 +668,16 @@
         text-transform: uppercase;
       }
 
+      .app-return {
+        border-color: var(--line-hot);
+        background: var(--orange-2);
+        color: #2a1200;
+      }
+
       .back-top:focus-visible,
-      .back-top:hover {
+      .back-top:hover,
+      .app-return:focus-visible,
+      .app-return:hover {
         border-color: var(--line-hot);
         outline: 2px solid var(--orange-2);
         outline-offset: 3px;
@@ -707,8 +773,10 @@
     <a class="skip-link" href="#start">К основному содержимому</a>
     <nav class="topbar" aria-label="Быстрая навигация по шагам">
       <div class="nav-scroll">
+        <a class="app-link" href="/app/">Вернуться в приложение</a>
         <a href="#start">Старт</a>
         <a href="#scenario">Сценарий</a>
+        <a href="#onboarding">Онбординг</a>
         <a href="#rules">Доступ</a>
         <a href="#test-data">Данные</a>
         <a href="#terms">Словарь</a>
@@ -745,6 +813,10 @@
           <div class="hero-note"><strong>Мобильность.</strong><p>Нет горизонтального скролла, кнопки нажимаются пальцем, клавиатура не закрывает критичные поля.</p></div>
           <div class="hero-note"><strong>Данные.</strong><p>Импорт, план, календарь, аналитика и экспорт согласованы между экранами.</p></div>
         </div>
+        <div class="hero-actions" aria-label="Основные действия">
+          <a class="primary-action" href="/app/">Вернуться в приложение</a>
+          <a class="secondary-action" href="#onboarding">Как заполнить онбординг</a>
+        </div>
       </header>
 
       <section class="section" id="scenario">
@@ -766,6 +838,46 @@
           <div class="rule"><strong>Проверить настройки и экспорт.</strong><p>Ожидаемо: API keys не возвращаются в UI/export, опасные действия требуют явного подтверждения, audit log фиксирует действия.</p></div>
           <div class="rule"><strong>Оформить баг-репорт.</strong><p>Ожидаемо: один report описывает одну проблему, содержит шаг, устройство, данные, expected/actual, важность и вложение без секретов.</p></div>
         </div>
+      </section>
+
+      <section class="section" id="onboarding">
+        <div class="section-head">
+          <h2>Первичный онбординг: что заполнять и зачем</h2>
+          <span class="tag">по полям</span>
+        </div>
+        <div class="bug-card mb-sm">
+          <strong>Где это находится</strong>
+          <p>Откройте приложение, войдите через Telegram и перейдите в <code>Profile &amp; zones</code>. На телефоне это может быть пункт в меню приложения. Заполняйте поля сверху вниз: Personal, Body, Physiology, Preferences, Safety. Если значение неизвестно, не придумывайте его: оставьте поле пустым и проверьте, что Runforfan понятно объясняет, каких данных не хватает.</p>
+        </div>
+        <div class="rules route-list mb-sm">
+          <div class="rule"><strong>Сначала заполните минимум.</strong><p>Дата рождения или HRmax, пульс покоя, пороговый темп, тренировочные дни и максимальная длительность дают приложению достаточно данных для первых зон и планирования.</p></div>
+          <div class="rule"><strong>Сохраните профиль.</strong><p>Нажмите <code>Save profile</code>. Ожидаемо: completeness обновился, missing-поля стали понятнее, HR/HRR/Pace zones появились или показали, каких данных не хватает.</p></div>
+          <div class="rule"><strong>Проверьте dashboard после сохранения.</strong><p>Вернитесь на Dashboard и обновите страницу. Ожидаемо: readiness и подсказки учитывают новый профиль, а не старое пустое состояние.</p></div>
+        </div>
+        <div class="formula-grid">
+          <div class="formula-card"><h4>Дата рождения</h4><ul><li><strong>Что вводить:</strong> фактическую дату рождения.</li><li><strong>Где взять:</strong> у самого тестера; точность до дня достаточна.</li><li><strong>Зачем:</strong> если HRmax не указан, Runforfan оценивает максимальный пульс по возрасту и строит базовые HR zones.</li><li><strong>Если не хотите указывать:</strong> оставьте пустым, но тогда лучше вручную заполнить HRmax.</li></ul></div>
+          <div class="formula-card"><h4>Пол</h4><ul><li><strong>Что вводить:</strong> male, female, other или unspecified.</li><li><strong>Где взять:</strong> выбрать вариант, который тестеру комфортен; можно оставить unspecified.</li><li><strong>Зачем:</strong> сейчас это справочное поле профиля и задел для будущих физиологических эвристик.</li><li><strong>Важно:</strong> поле не должно блокировать старт и не должно звучать как медицинская оценка.</li></ul></div>
+          <div class="formula-card"><h4>Timezone</h4><ul><li><strong>Что вводить:</strong> часовой пояс в формате вроде <code>Europe/Moscow</code>.</li><li><strong>Где взять:</strong> город/часовой пояс телефона или браузера.</li><li><strong>Зачем:</strong> тренировки попадают в правильный день, неделю, календарь и analytics periods.</li><li><strong>Проверка:</strong> после импорта дата тренировки не должна съехать на соседний день.</li></ul></div>
+          <div class="formula-card"><h4>Locale</h4><ul><li><strong>Что вводить:</strong> <code>ru-RU</code> для русского сценария или locale телефона.</li><li><strong>Где взять:</strong> настройки языка устройства/браузера.</li><li><strong>Зачем:</strong> формат дат, чисел, единиц и текста должен быть понятен тестеру.</li><li><strong>Проверка:</strong> после refresh язык и формат не должны сбрасываться.</li></ul></div>
+          <div class="formula-card"><h4>Вес, кг</h4><ul><li><strong>Что вводить:</strong> вес в килограммах, например <code>74.5</code>.</li><li><strong>Где взять:</strong> последние весы или среднее за неделю; не обязательно измерять прямо перед тестом.</li><li><strong>Зачем:</strong> помогает оценивать calories/energy, если импорт не принес эти данные, и повышает completeness.</li><li><strong>Если неизвестно:</strong> оставьте пустым; не вводите случайное число.</li></ul></div>
+          <div class="formula-card"><h4>Рост, см</h4><ul><li><strong>Что вводить:</strong> рост в сантиметрах, например <code>178</code>.</li><li><strong>Где взять:</strong> обычный фактический рост.</li><li><strong>Зачем:</strong> базовая характеристика спортсмена, completeness и будущие проверки body/stride metrics.</li><li><strong>Проверка:</strong> значение должно сохраняться как сантиметры, без перевода в метры.</li></ul></div>
+          <div class="formula-card"><h4>Unit system</h4><ul><li><strong>Что вводить:</strong> <code>metric</code> для километров, килограммов, сантиметров и сек/км.</li><li><strong>Где взять:</strong> обычные единицы пользователя.</li><li><strong>Зачем:</strong> приложение показывает расстояние, вес, рост и pace в привычном формате.</li><li><strong>Для alpha:</strong> основной проход делайте в metric.</li></ul></div>
+          <div class="formula-card"><h4>Пульс покоя</h4><ul><li><strong>Что вводить:</strong> bpm утром в покое, например <code>52</code>.</li><li><strong>Где взять:</strong> Apple Health, Garmin, Huawei Health, часы или спокойное измерение 3-5 минут утром.</li><li><strong>Зачем:</strong> вместе с HRmax нужен для HRR/Karvonen zones и safety context.</li><li><strong>Лучший вариант:</strong> среднее за 7 дней, а не одно случайное измерение после кофе.</li></ul></div>
+          <div class="formula-card"><h4>HRmax</h4><ul><li><strong>Что вводить:</strong> максимальный пульс в bpm, который реально видели на тесте, гонке или надежных часах.</li><li><strong>Где взять:</strong> lab test, тяжелый финиш гонки, Garmin/Apple/Huawei history.</li><li><strong>Зачем:</strong> HR zones, HRR zones и intensity/load calculations.</li><li><strong>Если неизвестно:</strong> оставьте пустым; при наличии даты рождения Runforfan оценит HRmax по возрасту.</li></ul></div>
+          <div class="formula-card"><h4>Источник HRmax</h4><ul><li><strong>Что вводить:</strong> <code>measured</code>, <code>manual</code> или <code>tanaka_estimated</code>.</li><li><strong>Где взять:</strong> measured - тест/гонка/часы; manual - уверенное ручное значение; tanaka_estimated - формула по возрасту.</li><li><strong>Зачем:</strong> показывает доверие к зонам и объясняет, откуда взялась цифра.</li><li><strong>Проверка:</strong> UI не должен скрывать, что оценка по формуле менее точная.</li></ul></div>
+          <div class="formula-card"><h4>Пороговый пульс</h4><ul><li><strong>Что вводить:</strong> bpm на уровне, который можно держать примерно 40-60 минут тяжелого контролируемого бега.</li><li><strong>Где взять:</strong> lab test, Garmin/Apple threshold estimate, 30-минутный тест со средним HR последних 20 минут.</li><li><strong>Зачем:</strong> дает более точные HR zones, чем зоны только от HRmax.</li><li><strong>Если неизвестно:</strong> оставьте пустым; HR zones должны строиться другим методом или показать missing state.</li></ul></div>
+          <div class="formula-card"><h4>Пороговый темп, сек/км</h4><ul><li><strong>Что вводить:</strong> секунды на километр, не формат <code>мм:сс</code>. Пример: 5:00/км = <code>300</code>, 4:30/км = <code>270</code>.</li><li><strong>Где взять:</strong> race/time trial, lactate threshold workout, часы, тренер или недавний темповый тест.</li><li><strong>Зачем:</strong> Pace zones, план интенсивности, Zones Analytics и performance trend.</li><li><strong>Проверка:</strong> если ввести 5 вместо 300, UI должен не молча принять абсурдный темп, а показать ошибку или странность.</li></ul></div>
+          <div class="formula-card"><h4>VO2max</h4><ul><li><strong>Что вводить:</strong> оценку VO2max, например <code>45</code>.</li><li><strong>Где взять:</strong> Apple Health, Garmin, Huawei, лаборатория или спортивный тест.</li><li><strong>Зачем:</strong> справочная оценка формы рядом с Performance/VDOT; для первичного старта не обязательна.</li><li><strong>Если не знаете:</strong> оставьте пустым, это нормально.</li></ul></div>
+          <div class="formula-card"><h4>Training days</h4><ul><li><strong>Что вводить:</strong> дни недели цифрами через запятую: <code>1</code> понедельник, <code>2</code> вторник, <code>3</code> среда, <code>4</code> четверг, <code>5</code> пятница, <code>6</code> суббота, <code>7</code> воскресенье.</li><li><strong>Где взять:</strong> реальные дни, когда тестеру удобно тренироваться.</li><li><strong>Зачем:</strong> планировщик не должен ставить тренировки в неудобные дни.</li><li><strong>Пример:</strong> <code>1,3,6</code> значит понедельник, среда, суббота.</li></ul></div>
+          <div class="formula-card"><h4>Long run day</h4><ul><li><strong>Что вводить:</strong> день длинной пробежки, обычно <code>6</code> суббота или <code>7</code> воскресенье.</li><li><strong>Где взять:</strong> день, когда у тестера больше всего времени.</li><li><strong>Зачем:</strong> планировщик ставит long run в предсказуемое место недели.</li><li><strong>Важно:</strong> long run day должен входить в Training days; иначе приложение должно объяснить конфликт или сбросить значение.</li></ul></div>
+          <div class="formula-card"><h4>Max duration, мин</h4><ul><li><strong>Что вводить:</strong> максимум минут за одну тренировку, например <code>75</code>.</li><li><strong>Где взять:</strong> реальное ограничение по времени, опыту, здоровью или расписанию.</li><li><strong>Зачем:</strong> планировщик не должен назначать слишком длинные пробежки.</li><li><strong>Проверка:</strong> long run в плане не должен явно превышать этот лимит без предупреждения.</li></ul></div>
+          <div class="formula-card"><h4>Травмы / ограничения</h4><ul><li><strong>Что вводить:</strong> коротко и по делу: колено, ахилл, спина, нельзя горки, нельзя интервалы.</li><li><strong>Где взять:</strong> самочувствие тестера и известные ограничения.</li><li><strong>Зачем:</strong> safety warnings, conservative planning и осторожные рекомендации.</li><li><strong>Privacy:</strong> не пишите диагнозы и подробности, которые не хотите раскрывать в баг-репортах.</li></ul></div>
+          <div class="formula-card"><h4>Conditions</h4><ul><li><strong>Что вводить:</strong> состояния, важные для тренировок: астма, давление, восстановление после болезни, врачебные ограничения.</li><li><strong>Где взять:</strong> только то, что тестер сам считает нужным указать.</li><li><strong>Зачем:</strong> safety warnings и более осторожный план.</li><li><strong>Важно:</strong> Runforfan не ставит диагнозы и не заменяет врача.</li></ul></div>
+          <div class="formula-card"><h4>Recovery status</h4><ul><li><strong>Что вводить:</strong> текущее состояние: fresh, normal, tired, strained, injured или unknown.</li><li><strong>Где взять:</strong> субъективная оценка сегодня.</li><li><strong>Зачем:</strong> readiness, safety warnings и снижение риска в планировании.</li><li><strong>Для теста:</strong> попробуйте normal, затем tired или injured и проверьте, что предупреждения стали осторожнее.</li></ul></div>
+          <div class="formula-card"><h4>Conservative mode</h4><ul><li><strong>Что вводить:</strong> включить или выключить осторожный режим.</li><li><strong>Где взять:</strong> решение тестера: новичок, возвращение после перерыва, усталость, травма или желание мягкого плана.</li><li><strong>Зачем:</strong> planning safety gates, Dashboard alerts и снижение агрессивности нагрузки.</li><li><strong>Проверка:</strong> включение режима должно быть заметно в warnings/plan explanation.</li></ul></div>
+          <div class="formula-card"><h4>Measurements</h4><ul><li><strong>Что вводить:</strong> отдельные измерения: вес, resting HR, HRmax, lactate threshold, VO2max, дата, source и заметка.</li><li><strong>Где взять:</strong> часы, приложение здоровья, лаборатория, ручной тест или измерение дома.</li><li><strong>Зачем:</strong> история изменений, источники зон и обновление профильных значений.</li><li><strong>Для первого прохода:</strong> можно не заполнять, если основные поля профиля уже введены.</li></ul></div>
+        </div>
+        <div class="check"><strong>Что должно быть понятно после онбординга</strong><ul><li>Какие поля обязательны для зон, а какие можно оставить пустыми.</li><li>Почему Runforfan просит пульс, темп, дни недели и ограничения.</li><li>Где пользователь может взять каждое значение без тренера и лаборатории.</li><li>Что изменилось после <code>Save profile</code>: completeness, zones, warnings, dashboard readiness.</li></ul></div>
       </section>
 
       <section class="section" id="rules">
@@ -1141,7 +1253,7 @@
               <div class="formula-card"><h4>Auth gate</h4><ul><li>Production: Telegram Login Widget отображается и не перекрывается на 360-430px.</li><li>Dev/local: dev login работает, статус показывает <code>DEMO USER</code>.</li><li>Если нет <code>VITE_TELEGRAM_BOT_USERNAME</code>, текст ошибки понятен.</li><li>Auth error показывает сообщение, но не ломает layout.</li></ul></div>
               <div class="formula-card"><h4>Session states</h4><ul><li><code>LOADING</code>: виден skeleton/loading, нет прыжков layout.</li><li><code>LOGIN REQUIRED</code>: пользователь понимает, как войти.</li><li><code>API ERROR</code>: есть понятное объяснение, а не пустая страница.</li><li>Expired token очищает сессию и возвращает к login без бесконечного цикла.</li></ul></div>
               <div class="formula-card"><h4>Navigation</h4><ul><li>Desktop sidebar и mobile drawer ведут на все 12 разделов приложения.</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активный раздел подсвечивается.</li><li>Переходы Dashboard -> Imports/Plans работают одним tap.</li></ul></div>
-              <div class="formula-card"><h4>Topbar</h4><ul><li>RU/EN переключатель меняет язык и сохраняется.</li><li>Status badge не обрезается на узкой ширине.</li><li><code>LEGACY</code> action виден, но не мешает основному проходу.</li><li>Theme icon не должен обещать рабочий dark/light toggle, если он декоративный.</li></ul></div>
+              <div class="formula-card"><h4>Topbar</h4><ul><li>RU/EN переключатель меняет язык и сохраняется.</li><li>Status badge не обрезается на узкой ширине.</li><li>Telegram имя пользователя отображается аккуратно и не ломает header.</li><li>Theme icon переключает dark/light режим и сохраняет выбор.</li></ul></div>
               <div class="formula-card"><h4>Shared components</h4><ul><li>Collapsible sections раскрываются/закрываются без reset состояния.</li><li>DataTable mobile cards имеют search, sort и pagination.</li><li>Responsive detail panel закрывается и не оставляет scroll lock.</li><li>Calculation explainers раскрываются пальцем и читаются без horizontal scroll.</li></ul></div>
               <div class="formula-card"><h4>Глобальные баги</h4><ul><li>Любой горизонтальный скролл body на 360-430px.</li><li>Tap targets меньше удобного пальцем размера.</li><li>Metadata с ID/source/hash переводится или переносится нечитаемо.</li><li>Ошибка API выглядит как успешный ноль.</li></ul></div>
               <div class="state-shot"><a href="assets/alpha-guide/states/g0-auth-login.png"><img src="assets/alpha-guide/states/g0-auth-login.png" alt="Mobile auth gate and login state" width="390" height="844" loading="lazy" decoding="async" /></a><strong>Auth gate</strong><p>Проверка login-required состояния, Telegram/dev login copy и отсутствия layout overflow.</p></div>
@@ -1573,7 +1685,10 @@ Console/network errors, если есть:
 
 Воспроизводимость: always / sometimes / once / unknown</pre>
         </div>
-        <a class="back-top" href="#start">Наверх</a>
+        <div class="guide-actions">
+          <a class="app-return" href="/app/">Вернуться в приложение</a>
+          <a class="back-top" href="#start">Наверх</a>
+        </div>
       </section>
 
       <p class="footer">Runforfan alpha tester guide. Все скриншоты подключены локально из <code>assets/alpha-guide/</code>.</p>

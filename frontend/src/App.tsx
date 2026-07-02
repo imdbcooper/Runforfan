@@ -819,7 +819,7 @@ function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Pag
     <div className="mt-4 border-t border-zinc-800 p-2">
       <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Shield className="h-4 w-4" /> Telegram auth</div>
       <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Bot className="h-4 w-4" /> User LLM keys</div>
-      <a href={guideHref()} target="_blank" rel="noreferrer" className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100"><BookOpen className="h-4 w-4" /> Alpha guide</a>
+      <a href={guideHref()} className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100"><BookOpen className="h-4 w-4" /> Alpha guide</a>
     </div>
   </div>
 }
