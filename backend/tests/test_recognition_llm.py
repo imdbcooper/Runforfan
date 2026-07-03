@@ -272,6 +272,44 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(attempt.engine, "template:android-outdoor-run-20260702")
         self.assertEqual(attempt.status, "validated")
 
+    def test_android_outdoor_run_20260701_template_without_provider_is_validated(self):
+        db = FakeDb(None)
+        old_template_miss_hashes = ["miss-a", "miss-b", "miss-c"]
+        image_hashes = [
+            "570b6e6b27db86f04435e82f69a1a982e13afbffefc43769b01430b9936d1a42",
+            "7835416912ca921ad73283c0379ca8dcc490da8401ae60b0583d8ecc466052e4",
+            "8b9f020ff19b298f79a5168ffd45a0463a0b2bc891fe65cf3314712f97a28d19",
+        ]
+
+        with (
+            patch("app.services.recognition.Path.read_bytes", return_value=b"image"),
+            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in [*old_template_miss_hashes, *image_hashes]]),
+        ):
+            result = llm_or_template_recognize(
+                db,
+                12,
+                [
+                    Path("6b3ca4417b-524.jpg"),
+                    Path("8d7b389bc5-523.jpg"),
+                    Path("41f9f8fbae-522.jpg"),
+                ],
+                type("Settings", (), {})(),
+                User(id=1, display_name="Runner"),
+            )
+
+        self.assertEqual(result["status"], "validated")
+        self.assertFalse(result["requires_confirmation"])
+        self.assertEqual(result["engine"], "template:android-outdoor-run-20260701")
+        self.assertEqual(result["payload"]["activity"]["started_at"], "2026-07-01T19:30:00+03:00")
+        self.assertEqual(result["payload"]["activity"]["distance_km"], 10.29)
+        self.assertEqual(result["payload"]["activity"]["duration_seconds"], 4238)
+        self.assertEqual(result["payload"]["activity"]["average_heart_rate_bpm"], 147)
+        self.assertEqual(len(result["payload"]["segments"]), 11)
+        self.assertEqual(result["payload"]["segments"][9]["pace_seconds_per_km"], 363)
+        attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
+        self.assertEqual(attempt.engine, "template:android-outdoor-run-20260701")
+        self.assertEqual(attempt.status, "validated")
+
     def test_valid_llm_recognition_returns_pending_confirmation(self):
         provider = LlmProviderSetting(id=1, user_id=1, provider="openai", display_name="Vision", model="gpt-4o-mini", is_active=True, is_default=True)
         db = FakeDb(provider)

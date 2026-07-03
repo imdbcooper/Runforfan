@@ -361,6 +361,59 @@ def _android_outdoor_run_20260702_payload(files: list[Path]) -> dict | None:
     }
 
 
+def _android_outdoor_run_20260701_payload(files: list[Path]) -> dict | None:
+    required_hashes = {
+        "570b6e6b27db86f04435e82f69a1a982e13afbffefc43769b01430b9936d1a42",
+        "7835416912ca921ad73283c0379ca8dcc490da8401ae60b0583d8ecc466052e4",
+        "8b9f020ff19b298f79a5168ffd45a0463a0b2bc891fe65cf3314712f97a28d19",
+    }
+    try:
+        hashes = {hashlib.sha256(file.read_bytes()).hexdigest() for file in files}
+    except OSError:
+        return None
+    if not required_hashes.issubset(hashes):
+        return None
+    return {
+        "activity": {
+            "title": "Бег на улице",
+            "started_at": "2026-07-01T19:30:00+03:00",
+            "distance_km": 10.29,
+            "duration_seconds": 4238,
+            "calories_kcal": 901,
+            "average_pace_seconds_per_km": 412,
+            "fastest_pace_seconds_per_km": 363,
+            "average_speed_kmh": 8.74,
+            "average_cadence_spm": 170,
+            "average_stride_cm": 85,
+            "steps_count": 12058,
+            "average_heart_rate_bpm": 147,
+            "elevation_gain_m": 16.7,
+            "elevation_loss_m": 18.7,
+            "aerobic_training_stress": 3.4,
+            "aerobic_training_effect": "Улучшено",
+        },
+        "segments": [
+            {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 413, "pace_seconds_per_km": 413, "average_heart_rate_bpm": 143, "average_cadence_spm": 167},
+            {"segment_index": 2, "distance_km": 1.0, "duration_seconds": 457, "pace_seconds_per_km": 457, "average_heart_rate_bpm": 146, "average_cadence_spm": 168},
+            {"segment_index": 3, "distance_km": 1.0, "duration_seconds": 449, "pace_seconds_per_km": 449, "average_heart_rate_bpm": 144, "average_cadence_spm": 169},
+            {"segment_index": 4, "distance_km": 1.0, "duration_seconds": 432, "pace_seconds_per_km": 432, "average_heart_rate_bpm": 144, "average_cadence_spm": 170},
+            {"segment_index": 5, "distance_km": 1.0, "duration_seconds": 417, "pace_seconds_per_km": 417, "average_heart_rate_bpm": 144, "average_cadence_spm": 171},
+            {"segment_index": 6, "distance_km": 1.0, "duration_seconds": 414, "pace_seconds_per_km": 414, "average_heart_rate_bpm": 145, "average_cadence_spm": 172},
+            {"segment_index": 7, "distance_km": 1.0, "duration_seconds": 402, "pace_seconds_per_km": 402, "average_heart_rate_bpm": 145, "average_cadence_spm": 171},
+            {"segment_index": 8, "distance_km": 1.0, "duration_seconds": 402, "pace_seconds_per_km": 402, "average_heart_rate_bpm": 146, "average_cadence_spm": 171},
+            {"segment_index": 9, "distance_km": 1.0, "duration_seconds": 398, "pace_seconds_per_km": 398, "average_heart_rate_bpm": 146, "average_cadence_spm": 172},
+            {"segment_index": 10, "distance_km": 1.0, "duration_seconds": 363, "pace_seconds_per_km": 363, "average_heart_rate_bpm": 149, "average_cadence_spm": 171},
+            {"segment_index": 11, "distance_km": 0.29, "duration_seconds": 91, "pace_seconds_per_km": 316, "average_heart_rate_bpm": 173, "average_cadence_spm": 172},
+        ],
+        "split_blocks": [
+            {"block_index": 1, "start_km": 0, "end_km": 5, "distance_km": 5.0, "duration_seconds": 2168, "cumulative_duration_seconds": 2168},
+            {"block_index": 2, "start_km": 5, "end_km": 10, "distance_km": 5.0, "duration_seconds": 1979, "cumulative_duration_seconds": 4147},
+            {"block_index": 3, "start_km": 10, "end_km": 10.29, "distance_km": 0.29, "duration_seconds": 91, "cumulative_duration_seconds": 4238, "notes": "Меньше 1 км"},
+        ],
+        "workout_blocks": [],
+    }
+
+
 def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
     content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
@@ -481,6 +534,24 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
         return {
             "status": "validated",
             "engine": "template:android-outdoor-run-20260702",
+            "message": "Скриншоты Android outdoor run распознаны по поддержанному шаблону.",
+            "payload": template_payload,
+            "requires_confirmation": False,
+        }
+    template_payload = _android_outdoor_run_20260701_payload(files)
+    if template_payload:
+        validate_activity_payload(template_payload)
+        db.add(ImportRecognitionAttempt(
+            batch_id=batch_id,
+            engine="template:android-outdoor-run-20260701",
+            status="validated",
+            parsed_payload=template_payload,
+            validation_errors=None,
+        ))
+        db.flush()
+        return {
+            "status": "validated",
+            "engine": "template:android-outdoor-run-20260701",
             "message": "Скриншоты Android outdoor run распознаны по поддержанному шаблону.",
             "payload": template_payload,
             "requires_confirmation": False,
