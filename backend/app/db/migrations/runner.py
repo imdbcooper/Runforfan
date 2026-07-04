@@ -368,6 +368,30 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_screenshot_sources_user_content_hash ON screenshot_sources (user_id, content_hash)",
         ),
     ),
+    (
+        "20260703_0018_import_recognition_queue",
+        (
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_started_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_finished_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_retry_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_attempt_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_max_attempts INTEGER NOT NULL DEFAULT 3",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_locked_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_locked_by VARCHAR(100)",
+            "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS recognition_last_error TEXT",
+            "CREATE INDEX IF NOT EXISTS ix_import_batches_queued_at ON import_batches (queued_at)",
+            "CREATE INDEX IF NOT EXISTS ix_import_batches_recognition_retry_at ON import_batches (recognition_retry_at)",
+            "CREATE INDEX IF NOT EXISTS ix_import_batches_recognition_locked_at ON import_batches (recognition_locked_at)",
+            "CREATE INDEX IF NOT EXISTS ix_import_batches_recognition_queue ON import_batches (status, recognition_retry_at, queued_at)",
+            "ALTER TABLE import_recognition_attempts ADD COLUMN IF NOT EXISTS provider_id INTEGER",
+            "ALTER TABLE import_recognition_attempts ADD COLUMN IF NOT EXISTS model VARCHAR(255)",
+            "ALTER TABLE import_recognition_attempts ADD COLUMN IF NOT EXISTS attempt_number INTEGER",
+            "ALTER TABLE import_recognition_attempts ADD COLUMN IF NOT EXISTS duration_ms INTEGER",
+            "ALTER TABLE import_recognition_attempts ADD COLUMN IF NOT EXISTS failure_class VARCHAR(64)",
+            "CREATE INDEX IF NOT EXISTS ix_import_recognition_attempts_provider_id ON import_recognition_attempts (provider_id)",
+        ),
+    ),
 )
 
 

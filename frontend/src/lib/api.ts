@@ -169,6 +169,13 @@ export type ImportBatch = {
   requires_confirmation: boolean
   candidate: ImportCandidate | null
   created_at: string
+  queued_at: string | null
+  recognition_started_at: string | null
+  recognition_finished_at: string | null
+  recognition_retry_at: string | null
+  recognition_attempt_count: number
+  recognition_max_attempts: number
+  recognition_last_error: string | null
 }
 
 export type ImportCandidate = {
@@ -184,6 +191,7 @@ export type ImportCandidate = {
   uncertainty_notes: string[]
   estimated_fields: string[]
   segments_count: number
+  split_blocks_count: number
   workout_blocks_count: number
 }
 

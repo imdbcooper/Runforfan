@@ -11,7 +11,9 @@ from app.services.profile import get_or_create_profile, profile_completeness, sa
 
 PENDING_IMPORT_STATUSES = (
     "uploaded",
+    "queued",
     "recognizing",
+    "retry_scheduled",
     "recognized_candidate",
     "pending_confirmation",
     "validation_failed",

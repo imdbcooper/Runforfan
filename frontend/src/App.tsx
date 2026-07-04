@@ -38,6 +38,37 @@ type CalendarDayProps = {
   onUpdate: (event: CalendarEvent, status: string) => Promise<void>
 }
 
+const ACTIVE_IMPORT_STATUSES = new Set(["queued", "retry_scheduled", "recognizing", "uploaded", "processing", "confirming"])
+
+function importStatusLabel(status: string) {
+  switch (status) {
+    case "queued":
+      return "Queued"
+    case "retry_scheduled":
+      return "Retry scheduled"
+    case "recognizing":
+      return "Recognizing"
+    case "pending_confirmation":
+      return "Review needed"
+    case "recognized":
+      return "Recognized"
+    case "validation_failed":
+      return "Validation failed"
+    case "recognition_failed":
+      return "Recognition failed"
+    default:
+      return status
+  }
+}
+
+function importStatusClass(batch: Pick<ImportBatch, "status" | "requires_confirmation">) {
+  if (batch.requires_confirmation) return "border-orange-400/40 bg-orange-400/15 text-orange-100"
+  if (ACTIVE_IMPORT_STATUSES.has(batch.status)) return "border-sky-400/40 bg-sky-400/15 text-sky-100"
+  if (["validation_failed", "recognition_failed"].includes(batch.status)) return "border-red-400/40 bg-red-400/15 text-red-100"
+  if (["recognized", "duplicate"].includes(batch.status)) return "border-emerald-400/40 bg-emerald-400/15 text-emerald-100"
+  return "border-zinc-700 bg-zinc-900 text-zinc-300"
+}
+
 type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" | "maxLoad"> & {
   event: CalendarEvent
 }
@@ -1364,15 +1395,24 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   const [importHistoryError, setImportHistoryError] = useState("")
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("Upload screenshots from the same workout. Up to 6 files per batch.")
+  const activeImportCount = imports.filter((batch) => ACTIVE_IMPORT_STATUSES.has(batch.status)).length
 
   async function loadImports() {
     setImportHistoryError("")
     try {
       await devLogin()
-      setImports(await api.imports())
+      const nextImports = await api.imports()
+      setImports(nextImports)
+      setUploadResult((current) => {
+        if (!current) return current
+        const updated = nextImports.find((batch) => batch.id === current.id)
+        return updated ? { ...updated } : current
+      })
+      return nextImports
     } catch (error) {
       console.error(error)
       setImportHistoryError("Не удалось загрузить историю импортов")
+      return []
     }
   }
 
@@ -1404,7 +1444,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       return
     }
     setBusy(true)
-    setMessage("Recognition is running...")
+    setMessage("Uploading screenshots...")
     setMatchCandidates([])
     setCandidateError("")
     setLinkError("")
@@ -1412,7 +1452,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       await devLogin()
       const result = await api.uploadScreenshots(files)
       setUploadResult(result)
-      setMessage(result.recognition_message || "Import completed")
+      setMessage(result.recognition_message || "Import queued")
       await loadCandidatesForResult(result)
       await loadImports()
       await onChanged()
@@ -1524,6 +1564,21 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   }
 
   useEffect(() => { void loadImports() }, [])
+  useEffect(() => {
+    if (!uploadResult?.created_activity_id || uploadResult.matched_workout_id) return
+    void loadCandidatesForResult(uploadResult)
+  }, [uploadResult?.created_activity_id, uploadResult?.matched_workout_id])
+  useEffect(() => {
+    if (!activeImportCount) return
+    const interval = window.setInterval(() => {
+      void loadImports().then((nextImports) => {
+        if (!nextImports.some((batch) => ACTIVE_IMPORT_STATUSES.has(batch.status))) {
+          void onChanged()
+        }
+      })
+    }, 3500)
+    return () => window.clearInterval(interval)
+  }, [activeImportCount])
 
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <div className="grid gap-4">
@@ -1531,11 +1586,11 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
         <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">Huawei and iPhone templates or vision LLM recognition.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
         <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
           <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
-          <Button type="submit" disabled={busy}>{busy ? "Processing..." : "Upload and recognize"}</Button>
+          <Button type="submit" disabled={busy}>{busy ? "Uploading..." : "Upload and recognize"}</Button>
         </form>
         <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
           <p className="leading-5" translate="no">{message}</p>
-          <p className="mt-2 text-zinc-600">Supported templates: Huawei interval 3 x 2 km and iPhone Apple Fitness run. Unknown screenshots require a configured vision LLM.</p>
+          <p className="mt-2 text-zinc-600">Recognition runs in the background with retries and provider fallback. Unknown screenshots require a configured vision LLM.</p>
         </div>
       </Card>
       <CollapsibleSection title="CSV import" summary={<Badge>6.18</Badge>}>
@@ -1556,7 +1611,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
 
     <div className="grid gap-4">
       <Card>
-        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge translate="no">{uploadResult.status}</Badge>}</CardHeader>
+        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge className={importStatusClass(uploadResult)} translate="no">{importStatusLabel(uploadResult.status)}</Badge>}</CardHeader>
         {uploadResult ? <div className="grid gap-3 p-4 text-xs">
           <div className="grid gap-2 md:grid-cols-4">
             <Stat label="batch" value={`#${uploadResult.id}`} />
@@ -1565,6 +1620,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
           </div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400" translate="no">{uploadResult.recognition_message || "No recognition message"}</div>
+          {ACTIVE_IMPORT_STATUSES.has(uploadResult.status) ? <div className="rounded-md border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-sky-100" translate="no">Background recognition is active. Attempt {uploadResult.recognition_attempt_count || 0}/{uploadResult.recognition_max_attempts || "?"}{uploadResult.recognition_retry_at ? ` · retry at ${formatLocalDateTime(uploadResult.recognition_retry_at)}` : ""}</div> : null}
           {uploadResult.requires_confirmation && uploadResult.candidate ? <CollapsibleSection title="Technical candidate review" summary={<Badge>confirm needed</Badge>} defaultOpen><ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /></CollapsibleSection> : null}
           {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
           {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
@@ -1572,13 +1628,14 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       </Card>
 
       <CollapsibleSection title="Import history" summary={<Badge>{imports.length} batches</Badge>}>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><p className="text-zinc-500">Recent recognition batches and confirmation queue.</p><Button type="button" size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><p className="text-zinc-500">Recent recognition batches and confirmation queue.{activeImportCount ? ` ${activeImportCount} active.` : ""}</p><Button type="button" size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></div>
         {importHistoryError ? <p className="pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
         <div className="grid gap-2 md:hidden">
           {imports.map((batch) => <div key={`import-mobile-${batch.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no">
-            <div className="flex items-start justify-between gap-2"><div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Batch #{batch.id}</p><p className="mt-1 text-zinc-500">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</p></div><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{batch.status}</Badge></div>
+            <div className="flex items-start justify-between gap-2"><div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Batch #{batch.id}</p><p className="mt-1 text-zinc-500">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</p></div><Badge className={importStatusClass(batch)}>{importStatusLabel(batch.status)}</Badge></div>
             <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500"><span>Activity {batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</span><span>Match {batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</span><span className="col-span-full">Engine {batch.recognition_engine || "--"}</span></div>
             <p className="mt-2 break-words text-zinc-500">{batch.recognition_message || "--"}</p>
+            {ACTIVE_IMPORT_STATUSES.has(batch.status) ? <p className="mt-1 text-sky-200">Attempt {batch.recognition_attempt_count || 0}/{batch.recognition_max_attempts || "?"}{batch.recognition_retry_at ? ` · retry ${formatLocalDateTime(batch.recognition_retry_at)}` : ""}</p> : null}
             {batch.requires_confirmation ? <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : null}
           </div>)}
           {!imports.length && <p className="text-xs text-zinc-500">История импортов пока пуста.</p>}
@@ -1586,7 +1643,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Action</th><th>Date</th></tr></thead>
-            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500" translate="no">#{batch.id}</td><td><Badge className={batch.requires_confirmation ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"} translate="no">{batch.status}</Badge></td><td translate="no">{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td translate="no">{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td translate="no">{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] break-words text-zinc-500" translate="no">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500" translate="no">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500" translate="no">#{batch.id}</td><td><Badge className={importStatusClass(batch)} translate="no">{importStatusLabel(batch.status)}</Badge>{ACTIVE_IMPORT_STATUSES.has(batch.status) ? <p className="mt-1 text-[10px] text-sky-200" translate="no">{batch.recognition_attempt_count || 0}/{batch.recognition_max_attempts || "?"}</p> : null}</td><td translate="no">{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td translate="no">{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td translate="no">{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] break-words text-zinc-500" translate="no">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500" translate="no">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
           </table>
           {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
         </div>

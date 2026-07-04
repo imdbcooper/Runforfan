@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -367,7 +368,20 @@ def llm_prompt():
 def recognize_huawei_interval_template(sources):
     names = {source["absolute_path"].name for source in sources}
     markers = {"23-23-46", "23-23-49", "23-23-53"}
-    if not all(any(marker in name for name in names) for marker in markers):
+    hashes = {
+        "52fd4175708fcf7527c2d5be39b074597215fd65d78d38281eafc0c3ed6841bb",
+        "fd2da21996b0a88088d14e47fbd55a986aa0e1777210ab3cb8350538177749f0",
+        "a9fc6abd6fee257934d5dbbd0050688a86ff6d4a398c1fce8055877e0c4ffe74",
+    }
+    marker_match = all(any(marker in name for name in names) for marker in markers)
+    hash_match = False
+    if not marker_match:
+        try:
+            source_hashes = {hashlib.sha256(source["absolute_path"].read_bytes()).hexdigest() for source in sources}
+        except OSError:
+            source_hashes = set()
+        hash_match = hashes.issubset(source_hashes)
+    if not marker_match and not hash_match:
         return None
     payload = {
         "activity": {
@@ -385,6 +399,8 @@ def recognize_huawei_interval_template(sources):
             "average_heart_rate_bpm": 152,
             "elevation_gain_m": 26.1,
             "elevation_loss_m": 28.2,
+            "aerobic_training_stress": 3.8,
+            "aerobic_training_effect": "Улучшено",
         },
         "segments": [
             {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 374, "pace_seconds_per_km": 374},

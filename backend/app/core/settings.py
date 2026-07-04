@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     frontend_url: str = "http://127.0.0.1:5173/app/"
     telegram_login_code_ttl_seconds: int = 300
     llm_timeout: int = 120
+    llm_openai_max_tokens: int = 2400
+    llm_image_preprocess_enabled: bool = True
+    llm_image_jpeg_quality: int = 88
+    llm_image_max_width: int = 1280
+    import_recognition_worker_enabled: bool = True
+    import_recognition_worker_poll_seconds: float = 5.0
+    import_recognition_max_attempts: int = 3
+    import_recognition_retry_delay_seconds: int = 45
     allow_private_llm_base_urls: bool = False
     derived_metrics_backfill_on_startup: bool = True
     derived_metrics_backfill_startup_limit: int = 500

@@ -169,6 +169,23 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(parsed["split_blocks"][0]["start_km"], 0)
         self.assertEqual(parsed["split_blocks"][0]["end_km"], 5.0)
 
+    def test_llm_output_moves_split_like_workout_blocks_to_split_blocks(self):
+        payload = valid_llm_payload()
+        payload["workout_blocks"] = [{
+            "block_index": 1,
+            "start_km": 0,
+            "end_km": 5,
+            "distance_km": 5.0,
+            "duration_seconds": 1500,
+            "cumulative_duration_seconds": 1500,
+            "notes": "Byesu returned a split as a workout block",
+        }]
+
+        parsed = parse_llm_recognition_payload(json.dumps(payload))
+
+        self.assertEqual(parsed["workout_blocks"], [])
+        self.assertEqual(parsed["split_blocks"][0]["end_km"], 5.0)
+
     def test_llm_output_rejects_inconsistent_distance_duration_and_pace(self):
         payload = valid_llm_payload()
         payload["activity"]["average_pace_seconds_per_km"] = 420
@@ -228,6 +245,7 @@ class RecognitionLlmTests(unittest.TestCase):
 
     def test_android_outdoor_run_template_without_provider_is_validated(self):
         db = FakeDb(None)
+        huawei_interval_miss_hashes = ["huawei-miss-a", "huawei-miss-b", "huawei-miss-c"]
         image_hashes = [
             "e84b6cc169a151e083f58deb4b6914c89aeade703c66f01ef0c9adb370e26413",
             "d7eacec7866554e6d4b05109a00d1466e0cce67c737b5469347da5facbb5e562",
@@ -236,7 +254,7 @@ class RecognitionLlmTests(unittest.TestCase):
 
         with (
             patch("app.services.recognition.Path.read_bytes", return_value=b"image"),
-            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in image_hashes]),
+            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in [*huawei_interval_miss_hashes, *image_hashes]]),
         ):
             result = llm_or_template_recognize(
                 db,
@@ -272,9 +290,50 @@ class RecognitionLlmTests(unittest.TestCase):
         self.assertEqual(attempt.engine, "template:android-outdoor-run-20260702")
         self.assertEqual(attempt.status, "validated")
 
+    def test_huawei_interval_template_matches_uploaded_file_hashes(self):
+        db = FakeDb(None)
+        image_hashes = [
+            "52fd4175708fcf7527c2d5be39b074597215fd65d78d38281eafc0c3ed6841bb",
+            "fd2da21996b0a88088d14e47fbd55a986aa0e1777210ab3cb8350538177749f0",
+            "a9fc6abd6fee257934d5dbbd0050688a86ff6d4a398c1fce8055877e0c4ffe74",
+        ]
+
+        with (
+            patch("app.services.recognition.Path.read_bytes", return_value=b"image"),
+            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in image_hashes]),
+        ):
+            result = llm_or_template_recognize(
+                db,
+                12,
+                [
+                    Path("photo_1_2026-07-03_20-54-54.jpg"),
+                    Path("photo_2_2026-07-03_20-54-54.jpg"),
+                    Path("photo_3_2026-07-03_20-54-54.jpg"),
+                ],
+                type("Settings", (), {})(),
+                User(id=1, display_name="Runner"),
+            )
+
+        self.assertEqual(result["status"], "validated")
+        self.assertFalse(result["requires_confirmation"])
+        self.assertEqual(result["engine"], "template:huawei-interval-training3")
+        self.assertEqual(result["payload"]["activity"]["distance_km"], 11.74)
+        self.assertEqual(result["payload"]["activity"]["duration_seconds"], 4442)
+        self.assertEqual(result["payload"]["activity"]["average_heart_rate_bpm"], 152)
+        self.assertEqual(result["payload"]["activity"]["aerobic_training_stress"], 3.8)
+        self.assertEqual(len(result["payload"]["segments"]), 12)
+        self.assertEqual(len(result["payload"]["split_blocks"]), 3)
+        self.assertEqual(len(result["payload"]["workout_blocks"]), 8)
+        self.assertEqual(result["payload"]["workout_blocks"][1]["block_type"], "work")
+        self.assertEqual(result["payload"]["workout_blocks"][2]["block_type"], "recovery")
+        attempt = next(item for item in db.added if isinstance(item, ImportRecognitionAttempt))
+        self.assertEqual(attempt.engine, "template:huawei-interval-training3")
+        self.assertEqual(attempt.status, "validated")
+
     def test_android_outdoor_run_20260701_template_without_provider_is_validated(self):
         db = FakeDb(None)
-        old_template_miss_hashes = ["miss-a", "miss-b", "miss-c"]
+        huawei_interval_miss_hashes = ["huawei-miss-a", "huawei-miss-b", "huawei-miss-c"]
+        android_20260702_miss_hashes = ["android-20260702-miss-a", "android-20260702-miss-b", "android-20260702-miss-c"]
         image_hashes = [
             "570b6e6b27db86f04435e82f69a1a982e13afbffefc43769b01430b9936d1a42",
             "7835416912ca921ad73283c0379ca8dcc490da8401ae60b0583d8ecc466052e4",
@@ -283,7 +342,7 @@ class RecognitionLlmTests(unittest.TestCase):
 
         with (
             patch("app.services.recognition.Path.read_bytes", return_value=b"image"),
-            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in [*old_template_miss_hashes, *image_hashes]]),
+            patch("app.services.recognition.hashlib.sha256", side_effect=[FakeHash(value) for value in [*huawei_interval_miss_hashes, *android_20260702_miss_hashes, *image_hashes]]),
         ):
             result = llm_or_template_recognize(
                 db,
@@ -471,6 +530,48 @@ class RecognitionLlmTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(Activity)), 1)
             linked_source_ids = list(db.scalars(select(ActivityScreenshot.source_id).where(ActivityScreenshot.activity_id == first_activity.id)))
             self.assertEqual(linked_source_ids, [first_source.id])
+
+    def test_activity_creation_persists_interval_workout_blocks(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine, tables=[
+            User.__table__,
+            AthleteProfile.__table__,
+            ScreenshotSource.__table__,
+            Activity.__table__,
+            ActivityScreenshot.__table__,
+            ActivitySegment.__table__,
+            ActivitySplitBlock.__table__,
+            ActivityWorkoutBlock.__table__,
+            DerivedActivityMetric.__table__,
+        ])
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+        with SessionLocal() as db:
+            user = User(id=1, display_name="Runner", is_demo=False)
+            source = ScreenshotSource(user_id=1, file_path="/tmp/interval.jpg", content_hash="interval-hash", screen_type="uploaded_screenshot")
+            db.add_all([user, source])
+            db.flush()
+            payload = valid_llm_payload()
+            payload["activity"]["distance_km"] = 6.0
+            payload["activity"]["duration_seconds"] = 2400
+            payload["activity"]["average_pace_seconds_per_km"] = 400
+            payload["workout_blocks"] = [
+                {"block_index": 1, "block_type": "warmup", "title": "Warmup", "distance_km": 2.0, "duration_seconds": 900, "pace_seconds_per_km": 450},
+                {"block_index": 2, "block_type": "work", "title": "Work", "distance_km": 3.0, "duration_seconds": 900, "pace_seconds_per_km": 300, "average_heart_rate_bpm": 165},
+                {"block_index": 3, "block_type": "cooldown", "title": "Cooldown", "distance_km": 1.0, "duration_seconds": 600, "pace_seconds_per_km": 600},
+            ]
+
+            activity = imports_routes.create_activity_from_payload(db, user, payload, [source.id])
+
+            self.assertIsNotNone(activity)
+            self.assertEqual(db.scalar(select(func.count()).select_from(ActivityWorkoutBlock)), 3)
+            work_block = db.scalar(select(ActivityWorkoutBlock).where(ActivityWorkoutBlock.block_type == "work"))
+            self.assertEqual(work_block.title, "Work")
+            self.assertEqual(work_block.distance_km, 3.0)
+            self.assertEqual(work_block.pace_seconds_per_km, 300)
 
     def test_candidate_patch_updates_safe_fields_and_clears_estimated_flags(self):
         payload = valid_llm_payload()

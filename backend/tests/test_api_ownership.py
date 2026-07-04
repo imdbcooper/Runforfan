@@ -469,26 +469,14 @@ class ApiOwnershipTests(unittest.TestCase):
         self.assertFalse(db.committed)
         audit.assert_not_called()
 
-    def test_llm_upload_pending_confirmation_does_not_create_activity(self):
+    def test_screenshot_upload_queues_recognition_without_creating_activity(self):
         db = ImportUploadDb()
         app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
-        payload = valid_import_candidate_payload()
-        attempt = SimpleNamespace(parsed_payload=payload)
-        recognition = {
-            "status": "pending_confirmation",
-            "engine": "llm:gpt-4o-mini",
-            "message": "Подтвердите импорт",
-            "payload": payload,
-            "requires_confirmation": True,
-        }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             settings = SimpleNamespace(upload_dir=Path(tmp_dir), llm_timeout=10)
             with (
                 patch.object(imports_routes, "get_settings", return_value=settings),
-                patch.object(imports_routes, "llm_or_template_recognize", return_value=recognition) as recognize,
-                patch.object(imports_routes, "create_activity_from_payload") as create_activity,
-                patch.object(imports_routes, "latest_recognition_attempt", return_value=attempt),
                 patch.object(imports_routes, "log_audit_event") as audit,
             ):
                 response = TestClient(app).post(
@@ -498,13 +486,12 @@ class ApiOwnershipTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["status"], "pending_confirmation")
+        self.assertEqual(body["status"], "queued")
         self.assertIsNone(body["created_activity_id"])
-        self.assertTrue(body["requires_confirmation"])
-        self.assertEqual(body["candidate"]["confidence"], "medium")
+        self.assertFalse(body["requires_confirmation"])
+        self.assertIsNone(body["candidate"])
+        self.assertEqual(body["recognition_engine"], "queued")
         self.assertTrue(db.committed)
-        recognize.assert_called_once()
-        create_activity.assert_not_called()
         audit.assert_called_once()
 
     def test_account_delete_passes_current_user_to_deletion_service(self):

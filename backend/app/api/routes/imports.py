@@ -16,8 +16,9 @@ from app.services.audit import log_audit_event
 from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.auth import get_current_user
 from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
+from app.services.import_recognition_worker import enqueue_recognition_batch
 from app.services.planning import auto_match_activity_to_plan
-from app.services.recognition import RecognitionValidationError, llm_or_template_recognize, validate_activity_payload
+from app.services.recognition import RecognitionValidationError, validate_activity_payload
 from app.services.training_load import sync_daily_training_loads_for_activities, sync_daily_training_loads_for_activity
 
 
@@ -246,6 +247,7 @@ def candidate_from_payload(payload: dict | None) -> dict[str, object] | None:
         "uncertainty_notes": payload.get("uncertainty_notes") or [],
         "estimated_fields": payload.get("estimated_fields") or [],
         "segments_count": len(payload.get("segments") or []),
+        "split_blocks_count": len(payload.get("split_blocks") or []),
         "workout_blocks_count": len(payload.get("workout_blocks") or []),
     }
 
@@ -268,6 +270,13 @@ def import_result(db: Session, user: User, batch: ImportBatch, matched_workout=N
         "requires_confirmation": batch.status == "pending_confirmation",
         "candidate": candidate,
         "created_at": batch.created_at,
+        "queued_at": getattr(batch, "queued_at", None),
+        "recognition_started_at": getattr(batch, "recognition_started_at", None),
+        "recognition_finished_at": getattr(batch, "recognition_finished_at", None),
+        "recognition_retry_at": getattr(batch, "recognition_retry_at", None),
+        "recognition_attempt_count": getattr(batch, "recognition_attempt_count", 0),
+        "recognition_max_attempts": getattr(batch, "recognition_max_attempts", 0),
+        "recognition_last_error": getattr(batch, "recognition_last_error", None),
     }
 
 
@@ -411,7 +420,6 @@ def upload_screenshots(
     db.add(batch)
     db.flush()
 
-    files: list[Path] = []
     source_ids: list[int] = []
     content_hashes: list[str] = []
     for screenshot in screenshots[:6]:
@@ -430,7 +438,6 @@ def upload_screenshots(
         db.add(source)
         db.flush()
         db.add(ImportBatchSource(batch_id=batch.id, source_id=source.id))
-        files.append(target)
         source_ids.append(source.id)
         content_hashes.append(content_hash)
 
@@ -449,29 +456,9 @@ def upload_screenshots(
             "hash_count": len(set(content_hashes)),
         })
         db.commit()
-        return import_result(db, user, batch, include_candidate=True)
+        return import_result(db, user, batch)
 
-    matched_workout = None
-    try:
-        recognition = llm_or_template_recognize(db, batch.id, files, settings, user)
-        activity = None
-        if recognition.get("payload") and not recognition.get("requires_confirmation"):
-            activity = create_activity_from_payload(db, user, recognition["payload"], source_ids)
-        if activity:
-            matched_workout = auto_match_activity_to_plan(db, user, activity)
-            sync_daily_training_loads_for_activity(db, user, activity)
-        batch.status = "recognized" if activity else recognition["status"]
-        batch.recognition_engine = recognition["engine"]
-        batch.recognition_message = recognition["message"]
-        batch.created_activity_id = activity.id if activity else None
-    except RecognitionValidationError as exc:
-        batch.status = "validation_failed"
-        batch.recognition_engine = "llm"
-        batch.recognition_message = "; ".join(exc.errors)
-    except Exception:
-        batch.status = "recognition_failed"
-        batch.recognition_engine = "unknown"
-        batch.recognition_message = "Recognition failed unexpectedly. Check provider settings or uploaded screenshots."
+    enqueue_recognition_batch(db, batch, settings)
 
     log_audit_event(db, user.id, "import.screenshots", "import_batch", batch.id, {
         "status": batch.status,
@@ -479,7 +466,7 @@ def upload_screenshots(
         "recognition_engine": batch.recognition_engine,
     })
     db.commit()
-    return import_result(db, user, batch, matched_workout, include_candidate=True)
+    return import_result(db, user, batch)
 
 
 @router.post("/{batch_id}/confirm")

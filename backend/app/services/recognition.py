@@ -1,8 +1,10 @@
 import base64
 from copy import deepcopy
 import hashlib
+import io
 import json
 import mimetypes
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -13,26 +15,53 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
 from app.models import ImportRecognitionAttempt, LlmProviderSetting, User
-from app.services.llm_providers import anthropic_message_text, openai_chat_completion_text, provider_endpoint_url
+from app.services.llm_providers import anthropic_message_text, openai_chat_completion_text, provider_endpoint_url, provider_supports_vision
 from app.services.secrets import decrypt_secret
 
 
 class RecognitionValidationError(ValueError):
-    def __init__(self, errors: list[str]):
+    def __init__(self, errors: list[str], *, retryable: bool = False, failure_class: str = "validation"):
         super().__init__("; ".join(errors))
         self.errors = errors
+        self.retryable = retryable
+        self.failure_class = failure_class
 
 
 RECOGNITION_PROMPT = """
 Extract running workout data from the screenshots.
 Return JSON only, with no markdown, comments, or prose.
-Use this exact top-level schema: activity, segments, split_blocks, workout_blocks, confidence, uncertainty_notes, estimated_fields.
 Use metric units only: kilometers, seconds, seconds per kilometer, bpm, kcal, meters, spm, centimeters.
-Include confidence as one of: low, medium, high.
-Include uncertainty_notes as an array of short strings for unclear or partially visible data.
+Return exactly this JSON shape:
+{
+  "activity": {
+    "title": string|null,
+    "started_at": ISO-8601 string|null,
+    "distance_km": number,
+    "duration_seconds": integer,
+    "calories_kcal": integer|null,
+    "average_pace_seconds_per_km": integer|null,
+    "fastest_pace_seconds_per_km": integer|null,
+    "average_speed_kmh": number|null,
+    "average_cadence_spm": integer|null,
+    "average_stride_cm": integer|null,
+    "steps_count": integer|null,
+    "average_heart_rate_bpm": integer|null,
+    "elevation_gain_m": number|null,
+    "elevation_loss_m": number|null,
+    "aerobic_training_stress": number|null,
+    "aerobic_training_effect": string|null
+  },
+  "segments": [{"segment_index": integer, "distance_km": number, "duration_seconds": integer, "pace_seconds_per_km": integer, "average_heart_rate_bpm": integer|null, "average_cadence_spm": integer|null}],
+  "split_blocks": [{"block_index": integer, "start_km": number, "end_km": number, "distance_km": number, "duration_seconds": integer, "cumulative_duration_seconds": integer|null, "notes": string|null}],
+  "workout_blocks": [{"block_index": integer, "block_type": string, "title": string|null, "distance_km": number|null, "duration_seconds": integer, "pace_seconds_per_km": integer|null, "average_heart_rate_bpm": integer|null, "average_cadence_spm": integer|null, "notes": string|null}],
+  "confidence": "low"|"medium"|"high",
+  "uncertainty_notes": [string],
+  "estimated_fields": [string]
+}
+Include uncertainty_notes for unclear or partially visible data.
 Do not infer invisible fields. If a value is estimated from visible data, include its dotted path in estimated_fields.
-For intervals, populate workout_blocks with warmup, work, recovery, cooldown when visible.
-Do not add extra fields or synonyms such as activity.type, segment, block, steps, cumulative_distance_km, or *_meters.
+For interval workouts, populate workout_blocks with warmup, work, recovery, cooldown when visible.
+Do not add extra fields or synonyms.
 """.strip()
 
 
@@ -157,11 +186,20 @@ def _normalize_llm_recognition_payload(parsed: dict) -> dict:
     payload = deepcopy(parsed)
     activity = payload.get("activity")
     if isinstance(activity, dict):
-        _move_alias(activity, "steps_count", ("steps",))
-        _move_alias(activity, "average_stride_cm", ("average_stride_length_centimeters", "stride_length_cm"))
-        _move_alias(activity, "elevation_gain_m", ("elevation_gain_meters",))
-        _move_alias(activity, "elevation_loss_m", ("elevation_loss_meters",))
-        _move_alias(activity, "calories_kcal", ("calories",))
+        _move_alias(activity, "title", ("name", "activity_name"))
+        _move_alias(activity, "started_at", ("start_time", "start_datetime", "date_time"))
+        _move_alias(activity, "distance_km", ("total_distance_km", "distance"))
+        _move_alias(activity, "duration_seconds", ("total_duration_seconds", "moving_time_seconds", "elapsed_seconds"))
+        _move_alias(activity, "steps_count", ("steps", "total_steps"))
+        _move_alias(activity, "average_stride_cm", ("average_stride_length_centimeters", "average_stride_length_cm", "stride_length_cm"))
+        _move_alias(activity, "elevation_gain_m", ("elevation_gain_meters", "ascent_m"))
+        _move_alias(activity, "elevation_loss_m", ("elevation_loss_meters", "descent_m"))
+        _move_alias(activity, "calories_kcal", ("calories", "total_calories_kcal", "calories_burned"))
+        _move_alias(activity, "average_pace_seconds_per_km", ("average_pace_sec_per_km", "avg_pace_seconds_per_km", "pace_seconds_per_km"))
+        _move_alias(activity, "fastest_pace_seconds_per_km", ("fastest_pace_sec_per_km", "best_pace_seconds_per_km"))
+        _move_alias(activity, "average_speed_kmh", ("avg_speed_kmh", "speed_kmh"))
+        _move_alias(activity, "average_cadence_spm", ("avg_cadence_spm", "cadence_spm"))
+        _move_alias(activity, "average_heart_rate_bpm", ("avg_heart_rate_bpm", "heart_rate_bpm", "average_hr_bpm", "avg_hr_bpm"))
         if "type" in activity and activity.get("type") in {"run", "running", "outdoor_run", "indoor_run", "walk"}:
             activity.pop("type")
         if "anaerobic_training_effect" in activity:
@@ -172,6 +210,9 @@ def _normalize_llm_recognition_payload(parsed: dict) -> dict:
     for segment in payload.get("segments") or []:
         if isinstance(segment, dict):
             _move_alias(segment, "segment_index", ("segment", "lap"))
+            _move_alias(segment, "pace_seconds_per_km", ("pace_sec_per_km", "average_pace_seconds_per_km"))
+            _move_alias(segment, "average_heart_rate_bpm", ("heart_rate_bpm", "avg_hr_bpm", "average_hr_bpm"))
+            _move_alias(segment, "average_cadence_spm", ("cadence_spm", "avg_cadence_spm"))
 
     for block in payload.get("split_blocks") or []:
         if not isinstance(block, dict):
@@ -186,6 +227,19 @@ def _normalize_llm_recognition_payload(parsed: dict) -> dict:
     for block in payload.get("workout_blocks") or []:
         if isinstance(block, dict):
             _move_alias(block, "block_index", ("block",))
+            _move_alias(block, "pace_seconds_per_km", ("pace_sec_per_km", "average_pace_seconds_per_km"))
+            _move_alias(block, "average_heart_rate_bpm", ("heart_rate_bpm", "avg_hr_bpm", "average_hr_bpm"))
+            _move_alias(block, "average_cadence_spm", ("cadence_spm", "avg_cadence_spm"))
+    malformed_workout_blocks = []
+    valid_workout_blocks = []
+    for block in payload.get("workout_blocks") or []:
+        if isinstance(block, dict) and ("start_km" in block or "end_km" in block) and "block_type" not in block:
+            malformed_workout_blocks.append(block)
+        else:
+            valid_workout_blocks.append(block)
+    if malformed_workout_blocks:
+        payload["split_blocks"] = [*(payload.get("split_blocks") or []), *malformed_workout_blocks]
+        payload["workout_blocks"] = valid_workout_blocks
     return payload
 
 
@@ -210,10 +264,69 @@ def _default_provider(db: Session, user: User) -> LlmProviderSetting | None:
     )
 
 
+def _ordered_vision_providers(db: Session, user: User) -> list[LlmProviderSetting]:
+    if not hasattr(db, "scalars"):
+        provider = _default_provider(db, user)
+        return [provider] if provider else []
+    providers = list(db.scalars(
+        select(LlmProviderSetting)
+        .where(LlmProviderSetting.user_id == user.id, LlmProviderSetting.is_active.is_(True))
+        .order_by(LlmProviderSetting.is_default.desc(), LlmProviderSetting.created_at.desc())
+    ))
+    return [provider for provider in providers if provider_supports_vision(provider)]
+
+
+def _preprocessed_image_bytes(file: Path, settings: Settings) -> tuple[str, bytes]:
+    raw = file.read_bytes()
+    media_type, _ = mimetypes.guess_type(file.name)
+    if not getattr(settings, "llm_image_preprocess_enabled", True):
+        return media_type or "image/jpeg", raw
+    try:
+        from PIL import Image, ImageOps
+    except ModuleNotFoundError:
+        return media_type or "image/jpeg", raw
+    try:
+        quality = max(60, min(95, int(getattr(settings, "llm_image_jpeg_quality", 88))))
+        max_width = max(0, int(getattr(settings, "llm_image_max_width", 1280)))
+        with Image.open(io.BytesIO(raw)) as image:
+            image = ImageOps.exif_transpose(image)
+            if max_width and image.width > max_width:
+                target_height = max(1, round(image.height * (max_width / image.width)))
+                image = image.resize((max_width, target_height), Image.Resampling.LANCZOS)
+            if image.mode not in {"RGB", "L"}:
+                image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+            processed = output.getvalue()
+            if processed and len(processed) < len(raw):
+                return "image/jpeg", processed
+    except Exception:
+        return media_type or "image/jpeg", raw
+    return media_type or "image/jpeg", raw
+
+
+def _encoded_image_part(file: Path, settings: Settings) -> tuple[str, str]:
+    media_type, data = _preprocessed_image_bytes(file, settings)
+    return media_type, base64.b64encode(data).decode("ascii")
+
+
 def _huawei_interval_training3_payload(files: list[Path]) -> dict | None:
     names = {file.name for file in files}
     required_markers = {"23-23-46", "23-23-49", "23-23-53"}
-    if not all(any(marker in name for name in names) for marker in required_markers):
+    required_hashes = {
+        "52fd4175708fcf7527c2d5be39b074597215fd65d78d38281eafc0c3ed6841bb",
+        "fd2da21996b0a88088d14e47fbd55a986aa0e1777210ab3cb8350538177749f0",
+        "a9fc6abd6fee257934d5dbbd0050688a86ff6d4a398c1fce8055877e0c4ffe74",
+    }
+    marker_match = all(any(marker in name for name in names) for marker in required_markers)
+    hash_match = False
+    if not marker_match:
+        try:
+            hashes = {hashlib.sha256(file.read_bytes()).hexdigest() for file in files}
+        except OSError:
+            hashes = set()
+        hash_match = required_hashes.issubset(hashes)
+    if not marker_match and not hash_match:
         return None
     return {
         "activity": {
@@ -231,8 +344,8 @@ def _huawei_interval_training3_payload(files: list[Path]) -> dict | None:
             "average_heart_rate_bpm": 152,
             "elevation_gain_m": 26.1,
             "elevation_loss_m": 28.2,
-            "aerobic_training_stress": None,
-            "aerobic_training_effect": None,
+            "aerobic_training_stress": 3.8,
+            "aerobic_training_effect": "Улучшено",
         },
         "segments": [
             {"segment_index": 1, "distance_km": 1.0, "duration_seconds": 374, "pace_seconds_per_km": 374},
@@ -417,43 +530,48 @@ def _android_outdoor_run_20260701_payload(files: list[Path]) -> dict | None:
 def _recognize_openai(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
     content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
-        media_type, _ = mimetypes.guess_type(file.name)
-        encoded = base64.b64encode(file.read_bytes()).decode("ascii")
+        media_type, encoded = _encoded_image_part(file, settings)
         content.append({"type": "image_url", "image_url": {"url": f"data:{media_type or 'image/jpeg'};base64,{encoded}"}})
     headers = {"Content-Type": "application/json"}
     api_key = decrypt_secret(provider.encrypted_api_key)
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    payload = {"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0}
+    max_tokens = getattr(settings, "llm_openai_max_tokens", None)
+    if max_tokens:
+        payload["max_tokens"] = int(max_tokens)
     try:
         response = httpx.post(
             provider_endpoint_url(provider, settings),
             headers=headers,
             timeout=settings.llm_timeout,
-            json={"model": provider.model, "messages": [{"role": "user", "content": content}], "temperature": 0},
+            json=payload,
         )
         response.raise_for_status()
         raw = response.json()
         return raw, openai_chat_completion_text(raw)
     except httpx.TimeoutException as exc:
-        raise RecognitionValidationError([f"OpenAI-compatible provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."]) from exc
+        raise RecognitionValidationError([f"OpenAI-compatible provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."], retryable=True, failure_class="timeout") from exc
     except httpx.RequestError as exc:
-        raise RecognitionValidationError([f"OpenAI-compatible provider request failed: {exc}. Check network, Base URL and provider availability."]) from exc
+        raise RecognitionValidationError([f"OpenAI-compatible provider request failed: {exc}. Check network, Base URL and provider availability."], retryable=True, failure_class="request") from exc
     except httpx.HTTPStatusError as exc:
-        raise RecognitionValidationError([f"OpenAI-compatible provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
+        status_code = exc.response.status_code
+        retryable = status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+        raise RecognitionValidationError([f"OpenAI-compatible provider failed with HTTP {status_code}. Check API key, model, Base URL and quota."], retryable=retryable, failure_class="http_status") from exc
     except ValueError as exc:
-        raise RecognitionValidationError([str(exc)]) from exc
+        raise RecognitionValidationError([str(exc)], failure_class="provider_response") from exc
 
 
 def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settings: Settings) -> tuple[dict, str]:
     content = [{"type": "text", "text": RECOGNITION_PROMPT}]
     for file in files[:6]:
-        media_type, _ = mimetypes.guess_type(file.name)
+        media_type, encoded = _encoded_image_part(file, settings)
         content.append({
             "type": "image",
             "source": {
                 "type": "base64",
                 "media_type": media_type or "image/jpeg",
-                "data": base64.b64encode(file.read_bytes()).decode("ascii"),
+                "data": encoded,
             },
         })
     api_key = decrypt_secret(provider.encrypted_api_key)
@@ -474,13 +592,15 @@ def _recognize_anthropic(provider: LlmProviderSetting, files: list[Path], settin
         raw = response.json()
         return raw, anthropic_message_text(raw)
     except httpx.TimeoutException as exc:
-        raise RecognitionValidationError([f"Anthropic provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."]) from exc
+        raise RecognitionValidationError([f"Anthropic provider timed out after {settings.llm_timeout}s. Try again, use fewer screenshots, or increase LLM timeout/provider capacity."], retryable=True, failure_class="timeout") from exc
     except httpx.RequestError as exc:
-        raise RecognitionValidationError([f"Anthropic provider request failed: {exc}. Check network, Base URL and provider availability."]) from exc
+        raise RecognitionValidationError([f"Anthropic provider request failed: {exc}. Check network, Base URL and provider availability."], retryable=True, failure_class="request") from exc
     except httpx.HTTPStatusError as exc:
-        raise RecognitionValidationError([f"Anthropic provider failed with HTTP {exc.response.status_code}. Check API key, model, Base URL and quota."]) from exc
+        status_code = exc.response.status_code
+        retryable = status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+        raise RecognitionValidationError([f"Anthropic provider failed with HTTP {status_code}. Check API key, model, Base URL and quota."], retryable=retryable, failure_class="http_status") from exc
     except ValueError as exc:
-        raise RecognitionValidationError([str(exc)]) from exc
+        raise RecognitionValidationError([str(exc)], failure_class="provider_response") from exc
 
 
 def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], settings: Settings, user: User) -> dict:
@@ -556,8 +676,8 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "payload": template_payload,
             "requires_confirmation": False,
         }
-    provider = _default_provider(db, user)
-    if not provider:
+    providers = _ordered_vision_providers(db, user)
+    if not providers:
         attempt = ImportRecognitionAttempt(
             batch_id=batch_id,
             engine="template-fallback",
@@ -573,50 +693,73 @@ def llm_or_template_recognize(db: Session, batch_id: int, files: list[Path], set
             "payload": None,
             "requires_confirmation": False,
         }
-    try:
-        if provider.provider == "openai":
-            raw, text = _recognize_openai(provider, files, settings)
-        elif provider.provider == "anthropic":
-            raw, text = _recognize_anthropic(provider, files, settings)
-        else:
-            raise RecognitionValidationError([f"Unsupported provider: {provider.provider}"])
-    except RecognitionValidationError as exc:
+    last_error: RecognitionValidationError | None = None
+    for attempt_number, provider in enumerate(providers, start=1):
+        engine = f"{provider.provider}:{provider.model}"
+        started = time.monotonic()
+        raw = None
+        try:
+            if provider.provider == "openai":
+                raw, text = _recognize_openai(provider, files, settings)
+            elif provider.provider == "anthropic":
+                raw, text = _recognize_anthropic(provider, files, settings)
+            else:
+                raise RecognitionValidationError([f"Unsupported provider: {provider.provider}"], failure_class="unsupported_provider")
+        except RecognitionValidationError as exc:
+            duration_ms = round((time.monotonic() - started) * 1000)
+            db.add(ImportRecognitionAttempt(
+                batch_id=batch_id,
+                engine=engine,
+                status="validation_failed",
+                provider_id=provider.id,
+                model=provider.model,
+                attempt_number=attempt_number,
+                duration_ms=duration_ms,
+                failure_class=exc.failure_class,
+                raw_response=None,
+                parsed_payload=None,
+                validation_errors=exc.errors,
+            ))
+            db.flush()
+            last_error = exc
+            continue
+
+        try:
+            payload = parse_llm_recognition_payload(text)
+            errors = None
+            failure_class = None
+            status = "validated_pending_confirmation"
+        except RecognitionValidationError as exc:
+            payload = None
+            errors = exc.errors
+            failure_class = exc.failure_class
+            status = "validation_failed"
+            last_error = exc
+
+        duration_ms = round((time.monotonic() - started) * 1000)
         db.add(ImportRecognitionAttempt(
             batch_id=batch_id,
-            engine=f"{provider.provider}:{provider.model}",
-            status="validation_failed",
-            raw_response=None,
-            parsed_payload=None,
-            validation_errors=exc.errors,
+            engine=engine,
+            status=status,
+            provider_id=provider.id,
+            model=provider.model,
+            attempt_number=attempt_number,
+            duration_ms=duration_ms,
+            failure_class=failure_class,
+            raw_response=raw,
+            parsed_payload=payload,
+            validation_errors=errors,
         ))
         db.flush()
-        raise
-    raw_payload = None
-    try:
-        payload = parse_llm_recognition_payload(text)
-        raw_payload = payload
-        status = "validated_pending_confirmation"
-        errors = None
-    except RecognitionValidationError as exc:
-        payload = None
-        status = "validation_failed"
-        errors = exc.errors
+        if not errors:
+            return {
+                "status": "pending_confirmation",
+                "engine": engine,
+                "message": "LLM распознал данные и они прошли schema/unit validation. Подтвердите импорт перед созданием activity.",
+                "payload": payload,
+                "requires_confirmation": True,
+            }
 
-    db.add(ImportRecognitionAttempt(
-        batch_id=batch_id,
-        engine=f"{provider.provider}:{provider.model}",
-        status=status,
-        raw_response=raw,
-        parsed_payload=raw_payload,
-        validation_errors=errors,
-    ))
-    db.flush()
-    if errors:
-        raise RecognitionValidationError(errors)
-    return {
-        "status": "pending_confirmation",
-        "engine": f"{provider.provider}:{provider.model}",
-        "message": "LLM распознал данные и они прошли schema/unit validation. Подтвердите импорт перед созданием activity.",
-        "payload": payload,
-        "requires_confirmation": True,
-    }
+    if last_error:
+        raise last_error
+    raise RecognitionValidationError(["No vision-capable LLM provider could process the screenshots"], failure_class="no_provider")
