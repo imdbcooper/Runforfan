@@ -828,6 +828,8 @@ class PlanBuilderBaselineOut(BaseModel):
     current_weekly_volume_km: float
     current_weekly_volume_source: str
     recent_long_run_km: float | None = None
+    recent_run_distance_median_km: float | None = None
+    recent_run_count_4w: int = 0
     history_span_days: int
     consistent_weeks: int = 0
     activity_count: int
@@ -921,6 +923,12 @@ class PlanWorkoutUpdate(BaseModel):
     scheduled_date: date | None = None
     status: str | None = Field(default=None, pattern="^(planned|done|missed|skipped|rescheduled)$")
     completed_activity_id: int | None = None
+    workout_type: str | None = Field(default=None, min_length=1, max_length=64)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    distance_km: float | None = Field(default=None, ge=0, le=250)
+    duration_seconds: StrictInt | None = Field(default=None, ge=1, le=86400)
+    intensity: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=4000)
 
 
 class PlanWorkoutFeedbackIn(BaseModel):

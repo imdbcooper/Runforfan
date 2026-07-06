@@ -156,6 +156,19 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertIsNone(workout.feedback.activity_id)
         self.assertEqual(workout.feedback.completion_status, "planned")
 
+    def test_update_workout_can_edit_target_and_regenerate_blocks(self):
+        workout = make_workout()
+        db = FakeDb()
+
+        updated = update_workout(db, make_user(), workout, PlanWorkoutUpdate(workout_type="interval", title="Интервалы", distance_km=8.0, duration_seconds=3000, intensity="interval", description="4 x work"))
+
+        self.assertEqual(updated.workout_type, "interval")
+        self.assertEqual(updated.title, "Интервалы")
+        self.assertEqual(updated.distance_km, 8.0)
+        self.assertEqual(updated.duration_seconds, 3000)
+        self.assertTrue(updated.blocks)
+        self.assertTrue(db.committed)
+
     def test_execution_score_marks_overdone_volume(self):
         workout = make_workout(status="planned", distance_km=10.0, workout_type="interval")
         complete_workout(FakeDb(), make_user(), workout, PlanWorkoutCompleteIn(actual_distance_km=13.0, actual_duration_seconds=4200, rpe=9))

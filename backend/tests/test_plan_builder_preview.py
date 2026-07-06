@@ -6,7 +6,7 @@ try:
 
     from app.models import Activity, ActivityWorkoutBlock, AthleteProfile, TrainingPlan, User
     from app.schemas.common import PlanGenerateRequest
-    from app.services.planning import activity_is_quality_session, apply_generated_plan_status, build_plan_preview_blueprint, classify_training_age_level
+    from app.services.planning import activity_is_quality_session, apply_generated_plan_status, build_plan_preview_blueprint, classify_training_age_level, estimated_volume_from_sparse_history
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
@@ -143,6 +143,31 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertFalse(activity_is_quality_session(imported_easy))
         self.assertTrue(activity_is_quality_session(tempo))
         self.assertTrue(activity_is_quality_session(intervals))
+
+    def test_sparse_history_estimates_volume_from_real_runs(self):
+        volume, source = estimated_volume_from_sparse_history([10.2, 11.0, 9.8], [], requested_days=4)
+
+        self.assertEqual(source, "estimated_from_recent_runs")
+        self.assertGreaterEqual(volume, 29.0)
+
+    def test_recent_quality_history_can_schedule_first_week_interval(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, plan_length_weeks=8, available_days_per_week=4)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=30.0, recent_weekly_distance_km=30.0, recent_long_run_km=11.0, quality_sessions_8w=1, recent_run_count_4w=3, recent_run_distance_median_km=10.0),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1]
+        self.assertIn("interval", {workout["workout_type"] for workout in first_week})
+        self.assertGreaterEqual(max(float(workout["distance_km"] or 0) for workout in first_week), 9.0)
 
     def test_aggressiveness_override_only_lowers_detected_level(self):
         start_date = date(2026, 6, 8)

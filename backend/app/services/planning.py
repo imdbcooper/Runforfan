@@ -23,6 +23,8 @@ CANDIDATE_DATE_WINDOW_DAYS = 7
 AUTO_MATCH_MIN_SCORE = 0.78
 AUTO_MATCH_DATE_WINDOW_DAYS = 3
 DEFAULT_WEEKLY_VOLUME_KM = 15.0
+RECENT_CONTEXT_WINDOW_DAYS = 28
+RECENT_LONG_RUN_WINDOW_DAYS = 56
 TRAINING_LEVEL_RANK = {"beginner": 0, "intermediate": 1, "advanced": 2}
 TRAINING_LEVEL_MAX_WEEKLY_GROWTH = {"beginner": 0.05, "intermediate": 0.08, "advanced": 0.10}
 TRAINING_LEVEL_LONG_RUN_SHARE = {"beginner": 0.30, "intermediate": 0.33, "advanced": 0.35}
@@ -469,6 +471,18 @@ def activity_started_date(activity: Activity, profile: AthleteProfile) -> date |
     return started_at.astimezone(timezone).date()
 
 
+def estimated_volume_from_sparse_history(recent_run_distances: list[float], active_recent_weeks: list[float], requested_days: int | None = None) -> tuple[float, str]:
+    if active_recent_weeks:
+        return max(DEFAULT_WEEKLY_VOLUME_KM, float(median(active_recent_weeks))), "observed_active_week"
+    if not recent_run_distances:
+        return DEFAULT_WEEKLY_VOLUME_KM, "fallback"
+    typical_run = float(median(recent_run_distances))
+    recent_long = max(recent_run_distances)
+    frequency_floor = 2 if len(recent_run_distances) == 1 else min(requested_days or 3, max(2, len(recent_run_distances)))
+    estimated_volume = max(DEFAULT_WEEKLY_VOLUME_KM, typical_run * frequency_floor, recent_long * 1.6)
+    return estimated_volume, "estimated_from_recent_runs"
+
+
 def plan_builder_training_context(db: Session, user: User, profile: AthleteProfile, today: date) -> dict[str, object]:
     activities = list(db.scalars(
         select(Activity)
@@ -487,12 +501,16 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
     observed_start = today - timedelta(days=41)
     recent_long_run = 0.0
     quality_sessions_8w = 0
-    recent_long_start = today - timedelta(days=55)
+    recent_long_start = today - timedelta(days=RECENT_LONG_RUN_WINDOW_DAYS - 1)
+    recent_context_start = today - timedelta(days=RECENT_CONTEXT_WINDOW_DAYS - 1)
+    recent_run_distances: list[float] = []
     for activity, started_date in dated:
         distance = float(activity.distance_km or 0)
         if observed_start <= started_date <= today:
             bucket = min(5, max(0, (started_date - observed_start).days // 7))
             observed_weekly_volume[bucket] += distance
+        if distance > 0 and recent_context_start <= started_date <= today:
+            recent_run_distances.append(distance)
         if recent_long_start <= started_date <= today:
             recent_long_run = max(recent_long_run, distance)
             if activity_is_quality_session(activity):
@@ -503,8 +521,7 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
         current_volume = float(median(active_recent_weeks))
         source = "observed_median_4w"
     else:
-        current_volume = DEFAULT_WEEKLY_VOLUME_KM
-        source = "fallback"
+        current_volume, source = estimated_volume_from_sparse_history(recent_run_distances, active_recent_weeks)
 
     running_dates = [started_date for activity, started_date in dated if float(activity.distance_km or 0) > 0]
     consistent_weeks = consecutive_active_weeks(running_dates, today)
@@ -512,10 +529,11 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
 
     if source == "observed_median_4w" and history_span_days >= 42:
         confidence = "high"
-    elif source == "observed_median_4w" or history_span_days >= 14:
+    elif source in {"observed_median_4w", "observed_active_week"} or history_span_days >= 14:
         confidence = "medium"
     else:
         confidence = "low"
+    recent_run_distance_median = float(median(recent_run_distances)) if recent_run_distances else None
 
     return {
         "activity_count": len(dated),
@@ -525,6 +543,8 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
         "current_weekly_volume_source": source,
         "recent_weekly_distance_km": round(current_volume, 1),
         "recent_long_run_km": round(recent_long_run, 1) if recent_long_run else None,
+        "recent_run_distance_median_km": round(recent_run_distance_median, 1) if recent_run_distance_median else None,
+        "recent_run_count_4w": len(recent_run_distances),
         "consistent_weeks": consistent_weeks,
         "quality_sessions_8w": quality_sessions_8w,
         "training_age_level": training_age_level,
@@ -534,6 +554,8 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
 
 def build_safety_context(profile, completeness: dict, context: dict[str, object], goal_distance: float, request: PlanGenerateRequest | None = None) -> dict[str, object]:
     reasons = []
+    activity_count = int(context.get("activity_count") or 0)
+    quality_sessions = int(context.get("quality_sessions_8w") or 0)
     if profile.conservative_mode:
         reasons.append("profile conservative mode")
     if profile.injury_notes:
@@ -546,14 +568,16 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
         reasons.append("wizard injury constraint")
     if request and request.no_hard_workouts:
         reasons.append("wizard no hard workouts constraint")
-    if int(context["history_span_days"] or 0) < 14:
+    if int(context["history_span_days"] or 0) < 14 and activity_count < 2:
         reasons.append("training history shorter than 14 days")
     intensity_mode = request.intensity_mode if request else "mixed"
-    if intensity_mode in {"pace", "mixed"} and not completeness["can_calculate_pace_zones"]:
+    if intensity_mode == "pace" and not completeness["can_calculate_pace_zones"]:
+        reasons.append("no threshold pace zones")
+    if intensity_mode == "mixed" and not completeness["can_calculate_pace_zones"] and quality_sessions == 0:
         reasons.append("no threshold pace zones")
     if intensity_mode == "hr" and not (completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"]):
         reasons.append("no HR zones")
-    if goal_distance >= 21 and (context["recent_weekly_distance_km"] or 0) < 25:
+    if goal_distance >= 21 and (context["recent_weekly_distance_km"] or 0) < 25 and not (quality_sessions > 0 and (context["recent_weekly_distance_km"] or 0) >= 15):
         reasons.append("low current volume for long-distance goal")
     return {
         "conservative": bool(reasons),
@@ -561,13 +585,15 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
     }
 
 
-def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True) -> list[tuple[int, str, str, str]]:
+def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0) -> list[tuple[int, str, str, str]]:
     hard_allowed = (not conservative) and can_prescribe_hard
     quality_lite = (not conservative)
     specific_phase = phase in {"specific", "taper"} and has_race_goal and has_target_time
 
     def primary_quality() -> tuple[str, str, str]:
         if phase == "base":
+            if hard_allowed and recent_quality_sessions > 0 and week_index == 1:
+                return "interval", "Контролируемые интервалы", "interval"
             return "strides" if quality_lite else "easy", "Страйды" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"
         if not hard_allowed:
             return "steady", "Аэробная работа", "steady-rpe"
@@ -616,8 +642,8 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
     return template[:days]
 
 
-def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True) -> list[tuple[int, str, str, str]]:
-    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time, phase, has_race_goal)
+def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0) -> list[tuple[int, str, str, str]]:
+    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time, phase, has_race_goal, recent_quality_sessions)
     if not long_run_day_index or long_run_day_index >= days:
         return template
     long_item = next((item for item in template if item[1] == "long"), None)
@@ -2550,6 +2576,7 @@ def build_plan_preview_blueprint(
     else:
         consistent_weeks = observed_consistent_weeks(observed_weekly_volume, int(context.get("history_span_days") or 0))
     quality_sessions_8w = int(context.get("quality_sessions_8w") or 0)
+    recent_run_distance_median = context.get("recent_run_distance_median_km")
     detected_training_age_level = classify_training_age_level(current_volume, float(recent_long_run) if recent_long_run is not None else None, consistent_weeks, quality_sessions_8w)
     training_age_level = apply_aggressiveness_override(detected_training_age_level, request.aggressiveness)
     requested_days = request.available_days_per_week
@@ -2560,6 +2587,8 @@ def build_plan_preview_blueprint(
         "current_weekly_volume_km": current_volume,
         "current_weekly_volume_source": volume_source,
         "recent_long_run_km": recent_long_run,
+        "recent_run_distance_median_km": recent_run_distance_median,
+        "recent_run_count_4w": int(context.get("recent_run_count_4w") or 0),
         "history_span_days": context["history_span_days"],
         "consistent_weeks": consistent_weeks,
         "activity_count": context["activity_count"],
@@ -2579,7 +2608,8 @@ def build_plan_preview_blueprint(
         or any(str(zone.get("method") or "") in {"threshold_hr", "threshold_pace"} for zone in (zones.get("hr") or []) + (zones.get("pace") or []))
     )
     has_precise_zones = bool(has_pace_zones or has_hr_zones or request.intensity_mode == "rpe")
-    can_prescribe_hard = bool(has_precise_zones and (training_age_level != "beginner" or has_threshold_zones))
+    has_quality_history = quality_sessions_8w > 0
+    can_prescribe_hard = bool((has_precise_zones or has_quality_history) and (training_age_level != "beginner" or has_threshold_zones or has_quality_history))
     easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
     support_settings = support_session_settings(request, str(baseline["training_age_level"]), conservative)
     support_settings, support_limited_by_budget = fit_support_settings_to_time_budget(support_settings, request.time_budget_minutes_per_week, easy_pace_seconds_per_km)
@@ -2632,12 +2662,21 @@ def build_plan_preview_blueprint(
             budget_distance = running_budget_seconds / easy_pace_seconds_per_km
             week_volume = min(week_volume, max(1.0, budget_distance))
         goal_long_cap = default_max_long_run_km if default_max_long_run_km is not None else goal_distance * (0.62 if conservative else 0.75)
+        if default_max_long_run_km is None and recent_long_run and volume_source != "manual_override":
+            goal_long_cap = max(goal_long_cap, min(goal_distance * 1.2, float(recent_long_run) * 1.05))
         long_run = min(goal_long_cap, week_volume * long_run_share)
         if max_long_run_km:
             long_run = min(long_run, max_long_run_km)
         if max_run_duration_minutes:
             long_run = min(long_run, max_run_duration_minutes * 60 / easy_pace_seconds_per_km)
         long_run = min(long_run, week_volume)
+        if week == 1 and recent_long_run and volume_source != "manual_override":
+            recent_long_floor = min(float(recent_long_run) * 0.85, week_volume, goal_long_cap)
+            if max_long_run_km:
+                recent_long_floor = min(recent_long_floor, max_long_run_km)
+            if max_run_duration_minutes:
+                recent_long_floor = min(recent_long_floor, max_run_duration_minutes * 60 / easy_pace_seconds_per_km)
+            long_run = max(long_run, recent_long_floor)
         easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
         week_start = start_date + timedelta(days=(week - 1) * 7)
         week_workouts = workout_template_for_schedule(
@@ -2652,10 +2691,15 @@ def build_plan_preview_blueprint(
             has_target_time=bool(request.target_time_seconds),
             phase=phase,
             has_race_goal=has_race_goal,
+            recent_quality_sessions=quality_sessions_8w if int(context.get("recent_run_count_4w") or 0) > 0 else 0,
         )
         week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
             distance = round(long_run if workout_type == "long" else easy_distance, 1)
+            if week == 1 and recent_run_distance_median and workout_type not in {"long", "recovery"}:
+                distance = max(distance, round(min(float(recent_run_distance_median) * 0.65, week_volume * 0.34), 1))
+            elif week == 1 and recent_run_distance_median and workout_type == "recovery":
+                distance = max(distance, round(min(float(recent_run_distance_median) * 0.45, week_volume * 0.22), 1))
             workout = {
                 "week_index": week,
                 "day_index": day_index,
@@ -2979,6 +3023,8 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
     updates = payload.model_dump(exclude_unset=True)
     version_summary = None
     next_completed_activity_id = workout.completed_activity_id
+    target_fields = {"workout_type", "title", "distance_km", "duration_seconds", "intensity", "description"}
+    target_updates = {field: updates[field] for field in target_fields if field in updates}
     if "completed_activity_id" in updates:
         activity_id = updates["completed_activity_id"]
         if activity_id is None:
@@ -3018,6 +3064,26 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         if updates["status"] != "done" and next_completed_activity_id is not None:
             raise ValueError("Linked workout status must be done")
         workout.status = updates["status"]
+    if target_updates:
+        if next_completed_activity_id is not None or workout.status == "done":
+            raise ValueError("Linked or completed workout must be unlinked before editing targets")
+        for field, value in target_updates.items():
+            if field in {"workout_type", "title"} and value is None:
+                continue
+            setattr(workout, field, value)
+        profile = profile_for_plan_builder(db, user, persist=False)
+        zones = zones_for_plan_builder(db, user, profile)
+        preview_workout = {
+            "workout_type": workout.workout_type,
+            "distance_km": workout.distance_km,
+            "duration_seconds": workout.duration_seconds,
+            "training_age_level": "intermediate",
+            "target_race_pace_seconds_per_km": None,
+        }
+        workout.blocks.clear()
+        for block in planned_workout_blocks_for_preview(preview_workout, zones):
+            workout.blocks.append(create_workout_block_from_dict(block))
+        version_summary = f"Edited workout #{workout.id} target"
     if workout.feedback:
         sync_feedback_context(workout.feedback, workout)
     if version_summary and workout.plan is not None:

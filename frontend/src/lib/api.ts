@@ -601,6 +601,8 @@ export type PlanBuilderBaseline = {
   current_weekly_volume_km: number
   current_weekly_volume_source: string
   recent_long_run_km: number | null
+  recent_run_distance_median_km: number | null
+  recent_run_count_4w: number
   history_span_days: number
   consistent_weeks: number
   activity_count: number
