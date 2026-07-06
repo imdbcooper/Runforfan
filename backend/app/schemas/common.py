@@ -882,6 +882,7 @@ class PlanBuilderPreviewWorkoutOut(BaseModel):
     day_index: int
     scheduled_date: Date
     phase: str = "build"
+    slot_role: str | None = None
     workout_type: str
     title: str
     distance_km: float | None = None

@@ -556,6 +556,10 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
     reasons = []
     activity_count = int(context.get("activity_count") or 0)
     quality_sessions = int(context.get("quality_sessions_8w") or 0)
+    current_weekly_volume = float(context.get("recent_weekly_distance_km") or context.get("current_weekly_volume_km") or 0)
+    recent_long_run = float(context.get("recent_long_run_km") or 0)
+    recent_median = float(context.get("recent_run_distance_median_km") or 0)
+    rpe_quality_ready = activity_count >= 3 and current_weekly_volume >= 20 and (recent_long_run >= 8 or recent_median >= 8)
     if profile.conservative_mode:
         reasons.append("profile conservative mode")
     if profile.injury_notes:
@@ -573,16 +577,38 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
     intensity_mode = request.intensity_mode if request else "mixed"
     if intensity_mode == "pace" and not completeness["can_calculate_pace_zones"]:
         reasons.append("no threshold pace zones")
-    if intensity_mode == "mixed" and not completeness["can_calculate_pace_zones"] and quality_sessions == 0:
+    if intensity_mode == "mixed" and not (completeness["can_calculate_pace_zones"] or completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"]) and quality_sessions == 0 and not rpe_quality_ready:
         reasons.append("no threshold pace zones")
     if intensity_mode == "hr" and not (completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"]):
         reasons.append("no HR zones")
-    if goal_distance >= 21 and (context["recent_weekly_distance_km"] or 0) < 25 and not (quality_sessions > 0 and (context["recent_weekly_distance_km"] or 0) >= 15):
+    if goal_distance >= 21 and current_weekly_volume < 25 and not (quality_sessions > 0 and current_weekly_volume >= 15):
         reasons.append("low current volume for long-distance goal")
     return {
         "conservative": bool(reasons),
         "reasons": reasons,
     }
+
+
+def ready_for_controlled_rpe_quality(context: dict[str, object], current_volume: float) -> bool:
+    recent_median = float(context.get("recent_run_distance_median_km") or 0)
+    recent_long = float(context.get("recent_long_run_km") or 0)
+    recent_runs = int(context.get("recent_run_count_4w") or 0)
+    activity_count = int(context.get("activity_count") or 0)
+    return activity_count >= 3 and recent_runs >= 2 and current_volume >= 20 and (recent_median >= 8 or recent_long >= 8)
+
+
+def effective_running_days_for_pattern(requested_days: int, max_days: int, current_volume: float, recent_run_median: float | None, goal_distance: float) -> tuple[int, bool]:
+    days = min(requested_days, max_days)
+    if not recent_run_median or recent_run_median < 8 or current_volume <= 0:
+        return days, False
+    primary_floor = float(recent_run_median) * 0.65
+    if days <= 2 or current_volume / days >= primary_floor:
+        return days, False
+    feasible_days = max(2, int(current_volume // primary_floor))
+    if goal_distance >= 21 and current_volume >= float(recent_run_median) * 2.2:
+        feasible_days = max(3, feasible_days)
+    effective_days = max(2, min(days, feasible_days))
+    return effective_days, effective_days < days
 
 
 def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0) -> list[tuple[int, str, str, str]]:
@@ -592,7 +618,7 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
 
     def primary_quality() -> tuple[str, str, str]:
         if phase == "base":
-            if hard_allowed and recent_quality_sessions > 0 and week_index == 1:
+            if hard_allowed and week_index == 1 and (recent_quality_sessions > 0 or training_age_level != "beginner"):
                 return "interval", "Контролируемые интервалы", "interval"
             return "strides" if quality_lite else "easy", "Страйды" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"
         if not hard_allowed:
@@ -603,7 +629,7 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
             return "tempo" if has_pace_zones else "hill", "Контролируемая интенсивность", "threshold" if has_pace_zones else "hill"
         if has_pace_zones:
             return "interval", "Длинные интервалы", "interval"
-        return "hill", "Силовая работа в горку", "hill"
+        return "interval", "Контролируемые интервалы по RPE", "interval-rpe"
 
     def secondary_quality() -> tuple[str, str, str]:
         if phase in {"base", "taper"}:
@@ -653,6 +679,76 @@ def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_h
     position = max(0, min(days - 1, long_run_day_index - 1))
     ordered = other_items[:position] + [long_item] + other_items[position:]
     return [(index, workout_type, title, intensity) for index, (_, workout_type, title, intensity) in enumerate(ordered[:days], start=1)]
+
+
+def workout_slot_role(workout_type: str) -> str:
+    if workout_type == "long":
+        return "long"
+    if workout_type == "recovery":
+        return "recovery"
+    if workout_type in HARD_PLAN_WORKOUT_TYPES or workout_type in {"steady", "strides"}:
+        return "quality"
+    return "easy"
+
+
+def slot_distance_weight(workout_type: str) -> float:
+    if workout_type == "recovery":
+        return 0.62
+    if workout_type in HARD_PLAN_WORKOUT_TYPES:
+        return 1.18
+    if workout_type in {"steady", "strides"}:
+        return 1.04
+    return 1.0
+
+
+def slot_floor_ratio(workout_type: str) -> float:
+    if workout_type == "recovery":
+        return 0.45
+    if workout_type in HARD_PLAN_WORKOUT_TYPES:
+        return 0.72
+    if workout_type == "strides":
+        return 0.65
+    return 0.70
+
+
+def allocate_week_distances(week_volume: float, long_run: float, week_workouts: list[tuple[int, str, str, str]], recent_run_median: float | None) -> dict[int, float]:
+    distances: dict[int, float] = {}
+    non_long = [item for item in week_workouts if item[1] != "long"]
+    for day_index, workout_type, _title, _intensity in week_workouts:
+        if workout_type == "long":
+            distances[day_index] = long_run
+    remaining = max(0.0, week_volume - long_run)
+    if not non_long:
+        return {day_index: round(distance, 1) for day_index, distance in distances.items()}
+
+    weights = {day_index: slot_distance_weight(workout_type) for day_index, workout_type, _title, _intensity in non_long}
+    total_weight = sum(weights.values()) or 1.0
+    allocations = {day_index: remaining * weight / total_weight for day_index, weight in weights.items()}
+
+    if recent_run_median and recent_run_median >= 6 and remaining > 0:
+        floors = {
+            day_index: float(recent_run_median) * slot_floor_ratio(workout_type)
+            for day_index, workout_type, _title, _intensity in non_long
+        }
+        floor_total = sum(floors.values())
+        if floor_total > 0:
+            if floor_total <= remaining:
+                surplus = remaining - floor_total
+                allocations = {day_index: floors[day_index] + surplus * weights[day_index] / total_weight for day_index in weights}
+            else:
+                scale = remaining / floor_total
+                allocations = {day_index: floors[day_index] * scale for day_index in weights}
+
+    distances.update(allocations)
+    rounded = {day_index: round(max(0.1, distance), 1) for day_index, distance in distances.items()}
+    delta = round(week_volume - sum(rounded.values()), 1)
+    if abs(delta) >= 0.1 and rounded:
+        adjustable = [item for item in week_workouts if item[0] in rounded and (delta > 0 or rounded[item[0]] > 0.2)]
+        if adjustable:
+            preferred = [item for item in adjustable if item[1] != "long"] or adjustable
+            target_day = max(preferred, key=lambda item: rounded[item[0]] * (1.0 if item[1] != "recovery" else 0.5))[0]
+            rounded[target_day] = round(max(0.1, rounded[target_day] + delta), 1)
+    return rounded
 
 
 def requested_support_sessions(requested: int | None, enabled: bool, default_value: int, maximum: int) -> int:
@@ -2541,6 +2637,22 @@ def builder_risk_flags(
             "message": "Нет исходных данных для темповых зон.",
             "reasons": ["lactate threshold pace is missing"],
         })
+    recent_median = float(baseline.get("recent_run_distance_median_km") or 0)
+    if recent_median >= 8:
+        short_primary = [
+            workout for workout in workouts
+            if workout.get("week_index") in {1, 2}
+            and workout_slot_role(str(workout.get("workout_type") or "")) in {"easy", "quality"}
+            and float(workout.get("distance_km") or 0) < recent_median * 0.58
+        ]
+        if short_primary:
+            shortest = min(float(workout.get("distance_km") or 0) for workout in short_primary)
+            flags.append({
+                "code": "short_runs_vs_recent_pattern",
+                "severity": "warning",
+                "message": "Некоторые primary runs заметно короче recent typical run.",
+                "reasons": [f"typical run: {recent_median:.1f} km", f"shortest primary run: {shortest:.1f} km"],
+            })
     if safety["reasons"]:
         flags.append({
             "code": "safety_gates",
@@ -2577,11 +2689,12 @@ def build_plan_preview_blueprint(
         consistent_weeks = observed_consistent_weeks(observed_weekly_volume, int(context.get("history_span_days") or 0))
     quality_sessions_8w = int(context.get("quality_sessions_8w") or 0)
     recent_run_distance_median = context.get("recent_run_distance_median_km")
+    recent_run_distance_median_float = float(recent_run_distance_median) if recent_run_distance_median is not None else None
     detected_training_age_level = classify_training_age_level(current_volume, float(recent_long_run) if recent_long_run is not None else None, consistent_weeks, quality_sessions_8w)
     training_age_level = apply_aggressiveness_override(detected_training_age_level, request.aggressiveness)
     requested_days = request.available_days_per_week
     max_running_days = max_running_days_for_level(training_age_level)
-    days = min(requested_days, max_running_days)
+    days, running_days_capped_by_pattern = effective_running_days_for_pattern(requested_days, max_running_days, current_volume, recent_run_distance_median_float, goal_distance)
     baseline = {
         "observed_weekly_volume_km": context["observed_weekly_volume_km"],
         "current_weekly_volume_km": current_volume,
@@ -2609,7 +2722,8 @@ def build_plan_preview_blueprint(
     )
     has_precise_zones = bool(has_pace_zones or has_hr_zones or request.intensity_mode == "rpe")
     has_quality_history = quality_sessions_8w > 0
-    can_prescribe_hard = bool((has_precise_zones or has_quality_history) and (training_age_level != "beginner" or has_threshold_zones or has_quality_history))
+    rpe_quality_ready = ready_for_controlled_rpe_quality(context, current_volume)
+    can_prescribe_hard = bool((has_precise_zones or has_quality_history or rpe_quality_ready) and (training_age_level != "beginner" or has_threshold_zones or has_quality_history or rpe_quality_ready))
     easy_pace_seconds_per_km = estimated_easy_pace_seconds_per_km(request, zones, goal_distance)
     support_settings = support_session_settings(request, str(baseline["training_age_level"]), conservative)
     support_settings, support_limited_by_budget = fit_support_settings_to_time_budget(support_settings, request.time_budget_minutes_per_week, easy_pace_seconds_per_km)
@@ -2677,7 +2791,6 @@ def build_plan_preview_blueprint(
             if max_run_duration_minutes:
                 recent_long_floor = min(recent_long_floor, max_run_duration_minutes * 60 / easy_pace_seconds_per_km)
             long_run = max(long_run, recent_long_floor)
-        easy_distance = max(0.0, (week_volume - long_run) / max(1, days - 1))
         week_start = start_date + timedelta(days=(week - 1) * 7)
         week_workouts = workout_template_for_schedule(
             days,
@@ -2693,17 +2806,16 @@ def build_plan_preview_blueprint(
             has_race_goal=has_race_goal,
             recent_quality_sessions=quality_sessions_8w if int(context.get("recent_run_count_4w") or 0) > 0 else 0,
         )
+        week_distances = allocate_week_distances(week_volume, long_run, week_workouts, recent_run_distance_median_float)
         week_preview_workouts: list[dict[str, object]] = []
         for day_index, workout_type, title, intensity in week_workouts:
-            distance = round(long_run if workout_type == "long" else easy_distance, 1)
-            if week == 1 and recent_run_distance_median and workout_type not in {"long", "recovery"}:
-                distance = max(distance, round(min(float(recent_run_distance_median) * 0.65, week_volume * 0.34), 1))
-            elif week == 1 and recent_run_distance_median and workout_type == "recovery":
-                distance = max(distance, round(min(float(recent_run_distance_median) * 0.45, week_volume * 0.22), 1))
+            distance = week_distances.get(day_index, 0.1)
+            slot_role = workout_slot_role(workout_type)
             workout = {
                 "week_index": week,
                 "day_index": day_index,
                 "scheduled_date": scheduled_workout_date(start_date, week, day_index, days, preferred_weekdays, long_run_weekday),
+                "slot_role": slot_role,
                 "workout_type": workout_type,
                 "title": title,
                 "distance_km": distance,
@@ -2775,6 +2887,18 @@ def build_plan_preview_blueprint(
         zone_text.append(f"HR zones: {len(zones['hr'])}")
     zone_summary = ", ".join(zone_text) if zone_text else "no precise zones, using RPE targets"
     risk_flags = builder_risk_flags(request, baseline, weekly_curve, workouts, safety, completeness, goal_distance, weeks, start_date)
+    if running_days_capped_by_pattern:
+        risk_flags.append({
+            "code": "running_days_capped_by_recent_pattern",
+            "severity": "warning",
+            "message": "Running frequency reduced to avoid unrealistically short runs.",
+            "reasons": [
+                f"requested days/week: {requested_days}",
+                f"effective running days/week: {days}",
+                f"typical run: {float(recent_run_distance_median_float or 0):.1f} km",
+                f"current volume: {current_volume:.1f} km/week",
+            ],
+        })
     if support_limited_by_budget:
         risk_flags.append({
             "code": "support_limited_by_time_budget",
@@ -2816,7 +2940,8 @@ def build_plan_preview_blueprint(
             "no_hard_workouts": request.no_hard_workouts,
             "requested_available_days_per_week": requested_days,
             "max_running_days_for_level": max_running_days,
-            "running_days_capped_by_experience": requested_days != days,
+            "running_days_capped_by_experience": requested_days > max_running_days,
+            "running_days_capped_by_recent_pattern": running_days_capped_by_pattern,
             "max_long_run_km": max_long_run_km,
             "requested_max_long_run_km": request.max_long_run_km,
             "default_max_long_run_km": default_max_long_run_km,

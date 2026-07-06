@@ -636,6 +636,7 @@ export type PlanBuilderPreviewWorkout = {
   day_index: number
   scheduled_date: string
   phase: string
+  slot_role?: string | null
   workout_type: string
   title: string
   distance_km: number | null

@@ -169,6 +169,70 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertIn("interval", {workout["workout_type"] for workout in first_week})
         self.assertGreaterEqual(max(float(workout["distance_km"] or 0) for workout in first_week), 9.0)
 
+    def test_recent_typical_run_protects_primary_workouts_from_tiny_distances(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, plan_length_weeks=8, available_days_per_week=4)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=30.0, recent_weekly_distance_km=30.0, recent_long_run_km=11.0, quality_sessions_8w=1, recent_run_count_4w=3, recent_run_distance_median_km=10.0),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1]
+        primary_runs = [workout for workout in first_week if workout["workout_type"] not in {"long", "recovery"}]
+        recovery = next(workout for workout in first_week if workout["workout_type"] == "recovery")
+        self.assertTrue(primary_runs)
+        self.assertTrue(all(float(workout["distance_km"] or 0) >= 7.0 for workout in primary_runs))
+        self.assertGreaterEqual(float(recovery["distance_km"] or 0), 4.5)
+        self.assertNotIn("short_runs_vs_recent_pattern", {flag["code"] for flag in preview["risk_flags"]})
+
+    def test_running_days_reduce_when_recent_pattern_would_create_tiny_runs(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, plan_length_weeks=8, available_days_per_week=4)
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=20.0, recent_weekly_distance_km=20.0, recent_long_run_km=10.0, quality_sessions_8w=1, recent_run_count_4w=2, recent_run_distance_median_km=10.0),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
+        primary_runs = [workout for workout in first_week if workout["workout_type"] not in {"long", "recovery"}]
+        self.assertEqual(preview["available_days_per_week"], 3)
+        self.assertTrue(preview["constraints"]["running_days_capped_by_recent_pattern"])
+        self.assertIn("running_days_capped_by_recent_pattern", {flag["code"] for flag in preview["risk_flags"]})
+        self.assertTrue(all(float(workout["distance_km"] or 0) >= 5.5 for workout in primary_runs))
+
+    def test_ready_mixed_mode_can_use_rpe_intervals_without_pace_zones(self):
+        start_date = date(2026, 6, 8)
+        profile = make_profile()
+        request = PlanGenerateRequest(goal_type="10k", race_distance_km=10.0, plan_length_weeks=8, available_days_per_week=3, intensity_mode="mixed")
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(current_weekly_volume_km=28.0, recent_weekly_distance_km=28.0, recent_long_run_km=10.0, quality_sessions_8w=0, recent_run_count_4w=3, recent_run_distance_median_km=9.0, consistent_weeks=6),
+            start_date,
+        )
+
+        first_week_types = {workout["workout_type"] for workout in preview["workouts"] if workout["week_index"] == 1}
+        self.assertIn("interval", first_week_types)
+        self.assertNotIn("safety_gates", {flag["code"] for flag in preview["risk_flags"]})
+
     def test_aggressiveness_override_only_lowers_detected_level(self):
         start_date = date(2026, 6, 8)
         profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
@@ -373,7 +437,7 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertIn("specific", phases)
         self.assertTrue(final_week["is_taper"])
         self.assertLess(final_week["planned_distance_km"], previous_week["planned_distance_km"])
-        self.assertNotIn("interval", first_week_types)
+        self.assertIn("interval", first_week_types)
         self.assertNotIn("tempo", first_week_types)
         self.assertIn("race_pace", {workout["workout_type"] for workout in taper_workouts})
         self.assertTrue(all(workout["phase"] == "taper" for workout in taper_workouts))
@@ -741,7 +805,7 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         build_week = [workout for workout in preview["workouts"] if workout["week_index"] == build_week_index and workout["distance_km"] is not None]
         workout_types = {workout["workout_type"] for workout in build_week}
         hard = [workout for workout in build_week if workout["workout_type"] in {"interval", "tempo", "threshold", "hill", "race_pace"}]
-        self.assertIn("hill", workout_types)
+        self.assertIn("interval", workout_types)
         self.assertEqual(len(hard), 1)
         self.assertNotIn("missing_pace_zones", {flag["code"] for flag in preview["risk_flags"]})
 
