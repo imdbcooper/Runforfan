@@ -130,6 +130,17 @@ def long_run_share_for_level(training_age_level: str, conservative: bool) -> flo
     return min(share, 0.32) if conservative else share
 
 
+def long_run_share_for_goal_frequency(training_age_level: str, conservative: bool, goal_distance: float, running_days: int) -> float:
+    share = long_run_share_for_level(training_age_level, conservative)
+    if goal_distance >= 42 and running_days <= 2:
+        return max(share, 0.55)
+    if goal_distance >= 42 and running_days == 3:
+        return max(share, 0.42)
+    if goal_distance >= 21 and running_days <= 2:
+        return max(share, 0.50)
+    return share
+
+
 def default_long_run_distance_cap_km(goal_distance: float, training_age_level: str) -> float | None:
     if goal_distance >= 42:
         return MARATHON_LONG_RUN_DISTANCE_CAP_KM.get(training_age_level, MARATHON_LONG_RUN_DISTANCE_CAP_KM["beginner"])
@@ -581,7 +592,7 @@ def build_safety_context(profile, completeness: dict, context: dict[str, object]
         reasons.append("no threshold pace zones")
     if intensity_mode == "hr" and not (completeness["can_calculate_hr_zones"] or completeness["can_calculate_hrr_zones"]):
         reasons.append("no HR zones")
-    if goal_distance >= 21 and current_weekly_volume < 25 and not (quality_sessions > 0 and current_weekly_volume >= 15):
+    if goal_distance >= 21 and current_weekly_volume < 25 and not (quality_sessions > 0 and current_weekly_volume >= 15) and not rpe_quality_ready:
         reasons.append("low current volume for long-distance goal")
     return {
         "conservative": bool(reasons),
@@ -611,7 +622,7 @@ def effective_running_days_for_pattern(requested_days: int, max_days: int, curre
     return effective_days, effective_days < days
 
 
-def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0) -> list[tuple[int, str, str, str]]:
+def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0, goal_distance: float | None = None) -> list[tuple[int, str, str, str]]:
     hard_allowed = (not conservative) and can_prescribe_hard
     quality_lite = (not conservative)
     specific_phase = phase in {"specific", "taper"} and has_race_goal and has_target_time
@@ -642,6 +653,16 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
 
     quality_type, quality_title, quality_intensity = primary_quality()
     if days <= 2:
+        if hard_allowed:
+            return [
+                (1, quality_type, quality_title, quality_intensity),
+                (days, "long", "Длинная тренировка", "easy-long"),
+            ]
+        if goal_distance and goal_distance >= 21 and not conservative:
+            return [
+                (1, "steady", "Аэробная работа", "steady-rpe"),
+                (days, "long", "Длинная тренировка", "easy-long"),
+            ]
         return [
             (1, "strides" if quality_lite else "easy", "Легкий бег со страйдами" if quality_lite else "Легкий бег", "strides" if quality_lite else "easy"),
             (days, "long", "Длинная тренировка", "easy-long"),
@@ -668,8 +689,8 @@ def workout_template(days: int, conservative: bool, can_prescribe_hard: bool, tr
     return template[:days]
 
 
-def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0) -> list[tuple[int, str, str, str]]:
-    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time, phase, has_race_goal, recent_quality_sessions)
+def workout_template_for_schedule(days: int, conservative: bool, can_prescribe_hard: bool, training_age_level: str, has_pace_zones: bool, long_run_day_index: int | None = None, week_index: int = 1, weeks: int = 8, has_target_time: bool = False, phase: str = "build", has_race_goal: bool = True, recent_quality_sessions: int = 0, goal_distance: float | None = None) -> list[tuple[int, str, str, str]]:
+    template = workout_template(days, conservative, can_prescribe_hard, training_age_level, has_pace_zones, week_index, weeks, has_target_time, phase, has_race_goal, recent_quality_sessions, goal_distance)
     if not long_run_day_index or long_run_day_index >= days:
         return template
     long_item = next((item for item in template if item[1] == "long"), None)
@@ -2581,6 +2602,23 @@ def builder_risk_flags(
             "message": "Marathon requested при объеме меньше 20 км/нед.",
             "reasons": [f"current volume: {current_volume:.1f} km/week"],
         })
+    if goal_distance >= 42 and request.available_days_per_week < 3:
+        flags.append({
+            "code": "marathon_low_frequency",
+            "severity": "warning",
+            "message": "Марафонский план на 2 беговых дня ограничен: это минимум, а не полноценная подготовка.",
+            "reasons": [
+                f"requested days/week: {request.available_days_per_week}",
+                "recommended marathon minimum: 3 running days/week",
+            ],
+        })
+    elif goal_distance >= 21 and request.available_days_per_week < 3:
+        flags.append({
+            "code": "long_goal_low_frequency",
+            "severity": "warning",
+            "message": "Для длинной цели лучше иметь минимум 3 беговых дня в неделю.",
+            "reasons": [f"requested days/week: {request.available_days_per_week}"],
+        })
     if request.target_time_seconds and request.recent_race_distance_km and request.recent_race_time_seconds:
         target_pace = request.target_time_seconds / max(goal_distance, 1)
         recent_pace = request.recent_race_time_seconds / max(request.recent_race_distance_km, 1)
@@ -2752,7 +2790,7 @@ def build_plan_preview_blueprint(
     if conservative:
         peak_volume = min(peak_volume, current_volume * growth_factor)
     max_weekly_growth = max_weekly_growth_for_level(training_age_level)
-    long_run_share = long_run_share_for_level(training_age_level, conservative)
+    long_run_share = long_run_share_for_goal_frequency(training_age_level, conservative, goal_distance, days)
 
     workouts: list[dict[str, object]] = []
     weekly_curve: list[dict[str, object]] = []
@@ -2805,6 +2843,7 @@ def build_plan_preview_blueprint(
             phase=phase,
             has_race_goal=has_race_goal,
             recent_quality_sessions=quality_sessions_8w if int(context.get("recent_run_count_4w") or 0) > 0 else 0,
+            goal_distance=goal_distance,
         )
         week_distances = allocate_week_distances(week_volume, long_run, week_workouts, recent_run_distance_median_float)
         week_preview_workouts: list[dict[str, object]] = []

@@ -3320,6 +3320,27 @@ function planIntensitySplit(plan: Plan) {
   return Object.entries(totals).filter(([, value]) => value > 0).map(([key, value]) => ({ key, value, percent: Math.round((value / total) * 100) }))
 }
 
+function planQualityWorkouts(plan: Plan) {
+  return plan.workouts.filter((workout) => planWorkoutIntensityCategory(workout) === "hard")
+}
+
+function planReviewWarnings(plan: Plan) {
+  const warnings: string[] = []
+  const isLongGoal = (plan.race_distance_km || 0) >= 21 || plan.goal_type === "half_marathon" || plan.goal_type === "marathon"
+  const isMarathon = (plan.race_distance_km || 0) >= 42 || plan.goal_type === "marathon"
+  if (isMarathon && plan.available_days_per_week < 3) warnings.push("Марафонский план на 2 беговых дня - это компромисс. Для полноценной подготовки лучше 3+ беговых дня.")
+  if (isLongGoal && planQualityWorkouts(plan).length === 0) warnings.push("В плане нет interval/tempo/race-pace тренировок. Он получится слишком мягким и однообразным.")
+  const weekIndexes = Array.from(new Set(plan.workouts.map((workout) => workout.week_index)))
+  const weakLongWeek = weekIndexes.find((weekIndex) => {
+    const runs = plan.workouts.filter((workout) => workout.week_index === weekIndex && !isSupportWorkoutType(workout.workout_type) && workout.distance_km)
+    const longRun = runs.find((workout) => workout.workout_type === "long")
+    const biggestOther = Math.max(...runs.filter((workout) => workout.workout_type !== "long").map((workout) => workout.distance_km || 0), 0)
+    return longRun && biggestOther > (longRun.distance_km || 0) + 0.5
+  })
+  if (weakLongWeek) warnings.push(`Week ${weakLongWeek}: long run короче другой беговой тренировки. Для длинной цели это подозрительно.`)
+  return warnings
+}
+
 function workoutTargetMode(workout: PlanWorkout) {
   if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "strength"
   if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "mobility"
@@ -3785,6 +3806,7 @@ function Planning() {
   const nextWorkout = result ? planNextWorkout(result) : null
   const intensitySplit = result ? planIntensitySplit(result) : []
   const visibleRecommendations = recommendations?.plan_id === result?.id ? recommendations : null
+  const planWarnings = result ? planReviewWarnings(result) : []
   const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
   const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
   const planMode = !result || !hasSafetyInfo ? null : conservative ? "safety gated" : "standard"
@@ -3838,7 +3860,10 @@ function Planning() {
         {result ? <>
           <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />
           <NextPlanWorkoutCard workout={nextWorkout} currentWeekIndex={currentWeekIndex} />
-          <p className="leading-6" translate="no">{result.explanation}</p>
+          {planWarnings.length ? <div className="grid gap-2" translate="no">{planWarnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
+          <CollapsibleSection title="Plan explanation">
+            <p className="leading-6" translate="no">{result.explanation}</p>
+          </CollapsibleSection>
           <div className="flex flex-wrap items-center gap-2">
             {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Activate plan</Button> : <Badge>active plan</Badge>}
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round((result.adherence?.completion_rate || 0) * 100)}% adherence</Badge>
@@ -3846,15 +3871,20 @@ function Planning() {
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
           {result.adherence?.warnings?.length ? <div className="grid gap-2" translate="no">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
-          <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
-          <PlanVersions versions={planVersions} />
+          <CollapsibleSection title="Coach recommendations" summary={<Badge className={visibleRecommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{visibleRecommendations?.status || "idle"}</Badge>}>
+            <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
+          </CollapsibleSection>
+          <CollapsibleSection title="Version history" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{planVersions.length}</Badge>}>
+            <PlanVersions versions={planVersions} />
+          </CollapsibleSection>
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="weeks" value={weekCount} />
             <Stat label="workouts" value={result.workouts.length} />
             <Stat label="days/week" value={result.available_days_per_week} />
           </div>
-          <PlanVolumeChart weeks={detailWeeks} />
-          <PlanIntensitySplit split={intensitySplit} />
+          <CollapsibleSection title="Charts and distribution" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">advanced</Badge>}>
+            <div className="grid gap-3"><PlanVolumeChart weeks={detailWeeks} /><PlanIntensitySplit split={intensitySplit} /></div>
+          </CollapsibleSection>
           {planWeeksError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planWeeksError}</p> : null}
           <div className="grid gap-3">{detailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={week.week_index === currentWeekIndex || week.workouts.some((workout) => workout.id === nextWorkout?.id)} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
         </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
@@ -3866,21 +3896,24 @@ function Planning() {
 function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
   const maxVolume = Math.max(...preview.weekly_volume_curve.map((week) => week.planned_distance_km), 1)
   const split = Object.entries(preview.intensity_split).map(([key, value]) => ({ key, value: Math.round(value * 100) }))
-  const firstWorkouts = preview.workouts.slice(0, 8)
+  const firstWorkouts = preview.workouts.slice(0, 3)
+  const remainingWorkouts = preview.workouts.slice(3)
   const supportSessions = preview.weekly_volume_curve.reduce((sum, week) => sum + (week.support_sessions || 0), 0)
   return <div className="mx-4 mb-4 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div><p className="font-semibold text-white">Builder preview</p><p className="mt-1 text-zinc-500">Baseline, risk flags and first workouts before saving a draft.</p></div>
       <Badge className={preview.risk_flags.some((flag) => flag.severity === "critical" || flag.severity === "warning") ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{preview.risk_flags.length} flags</Badge>
     </div>
-    <p className="mt-3 leading-5 text-zinc-400" translate="no">{preview.explanation}</p>
     <div className="mt-3 grid grid-cols-4 gap-2 text-center">
       <Stat label="weeks" value={preview.weeks} />
       <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
       <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
       <Stat label="support" value={supportSessions} />
     </div>
-    <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2">
+    <CollapsibleSection title="Preview explanation" className="mt-3">
+      <p className="leading-5 text-zinc-400" translate="no">{preview.explanation}</p>
+    </CollapsibleSection>
+    <CollapsibleSection title="Baseline diagnostics" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge>}>
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Baseline</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500" translate="no">
         <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
@@ -3893,13 +3926,20 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
         <p>runs 4w: <span className="text-zinc-300">{preview.baseline.recent_run_count_4w || 0}</span></p>
       </div>
       <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
-    </div>
-    <div className="mt-3 grid gap-2">
+    </CollapsibleSection>
+    <CollapsibleSection title="Weekly volume curve" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.weekly_volume_curve.length} weeks</Badge>}>
+    <div className="grid gap-2">
       {preview.weekly_volume_curve.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_8.5rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className={cn("h-full rounded", week.is_taper ? "bg-orange-200/80" : "bg-orange-400/70")} style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} {kmUnit()} · {week.phase}</span></div>)}
     </div>
-    <div className="mt-3 flex flex-wrap gap-2" translate="no"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+    </CollapsibleSection>
+    <CollapsibleSection title="Intensity and schedule" className="mt-3">
+      <div className="flex flex-wrap gap-2" translate="no"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+    </CollapsibleSection>
     {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5" translate="no">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
     <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · target: {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
+    {remainingWorkouts.length ? <CollapsibleSection title="More preview workouts" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
+      <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · target: {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
+    </CollapsibleSection> : null}
   </div>
 }
 
@@ -3911,17 +3951,19 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
   return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
     <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
       <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge></div>
-      <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="workouts" value={plan.workouts.length} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="support" value={planSupportWorkouts(plan)} /></div>
-      <div className="mt-1 grid grid-cols-2 gap-1 text-center text-[11px]"><Stat label="duration" value={formatDuration(planPlannedDuration(plan))} /><Stat label="done" value={`${adherence}%`} /></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="done" value={`${adherence}%`} /></div>
     </div>
-    <div className="mt-2 grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Plan title" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Saving..." : "Rename"}</Button></div>
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Activate</Button> : null}
-      {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Complete</Button> : null}
-      {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>Archive</Button> : null}
-      <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Duplicate</Button>
-      <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Delete</Button>
-    </div>
+    <CollapsibleSection title="Manage plan" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">actions</Badge>}>
+      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Plan title" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Saving..." : "Rename"}</Button></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="workouts" value={plan.workouts.length} /><Stat label="support" value={planSupportWorkouts(plan)} /><Stat label="duration" value={formatDuration(planPlannedDuration(plan))} /></div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Activate</Button> : null}
+        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Complete</Button> : null}
+        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>Archive</Button> : null}
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Duplicate</Button>
+        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Delete</Button>
+      </div>
+    </CollapsibleSection>
   </div>
 }
 
@@ -3935,15 +3977,16 @@ function PlanDetailHeader({ plan, currentWeekIndex }: { plan: Plan; currentWeekI
       <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Plan header</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{plan.title}</h3><p className="mt-1 text-zinc-500" translate="no">{planGoalLabel(plan)}</p></div>
       <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">current week {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">current week --</Badge>}</div>
     </div>
-    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-6">
+    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-4">
       <Stat label="target date" value={formatDate(plan.target_date)} />
       <Stat label="target time" value={formatTargetTime(plan.target_time_seconds)} />
       <Stat label="planned km" value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
       <Stat label="completed km" value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
-      <Stat label="support" value={planSupportWorkouts(plan)} />
-      <Stat label="duration" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} />
     </div>
-    <div className="mt-3 grid gap-1.5 text-[11px] text-zinc-500 md:grid-cols-2">{history.map((item) => <div key={item.label} className="rounded border border-zinc-900 bg-zinc-950 px-2 py-1"><span className="font-mono uppercase tracking-[0.12em] text-zinc-600">{item.label}</span><span className="ml-2 text-zinc-300">{item.value}</span></div>)}</div>
+    <CollapsibleSection title="Plan metadata" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">details</Badge>}>
+      <div className="grid gap-1.5 text-[11px] text-zinc-500 md:grid-cols-2">{history.map((item) => <div key={item.label} className="rounded border border-zinc-900 bg-zinc-950 px-2 py-1"><span className="font-mono uppercase tracking-[0.12em] text-zinc-600">{item.label}</span><span className="ml-2 text-zinc-300">{item.value}</span></div>)}</div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="support" value={planSupportWorkouts(plan)} /><Stat label="duration" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} /></div>
+    </CollapsibleSection>
   </div>
 }
 
@@ -4015,21 +4058,23 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
     {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100" translate="no">{actionError}</div> : null}
     {recommendations ? <>
       <p className="mt-3 leading-5 text-zinc-300" translate="no">{recommendations.adaptation_summary || recommendations.summary}</p>
-      <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-6">
-        <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
-        <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
-        <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
-        <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
-        <Stat label="risk" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
-        <Stat label="hard 7d" value={recommendations.metrics.upcoming_hard_workouts || 0} />
-      </div>
+      <CollapsibleSection title="Recommendation metrics" className="mt-3">
+        <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
+          <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
+          <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
+          <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
+          <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
+          <Stat label="risk" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
+          <Stat label="hard 7d" value={recommendations.metrics.upcoming_hard_workouts || 0} />
+        </div>
+      </CollapsibleSection>
       <div className="mt-3 grid gap-2" translate="no">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
-      {preview ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 p-2">
+      {preview ? <CollapsibleSection title="Preview diff" className="mt-3 border-orange-400/20 bg-orange-400/10" summary={<Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge>}>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Preview diff</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge></div>
         {preview.changes.length ? <div className="mt-2 grid gap-1.5" translate="no">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
         {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2" translate="no"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
-      </div> : null}
-      {audits.length ? <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex items-center justify-between gap-2"><p className="font-medium text-white">Adjustment history</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge></div><div className="mt-2 grid gap-1 text-[11px] text-zinc-500" translate="no">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {formatLocalDateTime(audit.created_at)}</p>)}</div></div> : null}
+      </CollapsibleSection> : null}
+      {audits.length ? <CollapsibleSection title="Adjustment history" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge>}><div className="grid gap-1 text-[11px] text-zinc-500" translate="no">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {formatLocalDateTime(audit.created_at)}</p>)}</div></CollapsibleSection> : null}
     </> : <p className="mt-3 text-zinc-500">{loading ? "Recommendations are loading..." : error ? "Recommendations are unavailable." : "No recommendations loaded."}</p>}
   </div>
 }
@@ -4043,14 +4088,16 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
     </summary>
     <div className="border-b border-zinc-900 px-3 py-2">
-      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} {kmUnit()}</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">support</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">done</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
-        <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} {kmUnit()}</div></div>
-      </div>
+      <CollapsibleSection title="Week metrics" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{summary.planned_time_label}</Badge>}>
+        <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} {kmUnit()}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">support</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">done</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} {kmUnit()}</div></div>
+        </div>
+      </CollapsibleSection>
       {summary.warnings.length ? <div className="mt-2 grid gap-1" translate="no">{summary.warnings.map((warning) => <p key={warning} className="rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">{warning}</p>)}</div> : null}
     </div>
     <div className="grid gap-2 p-3">{summary.workouts.map((workout) => {
@@ -4069,15 +4116,19 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
       const actualSupportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className={cn("rounded-md border bg-zinc-950 p-3 text-xs", isNextWorkout ? "border-orange-400/50 ring-1 ring-orange-400/30" : "border-zinc-900")}>
         <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · target: {formatWorkoutTarget(workout)} · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">next</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"} translate="no">{workout.status}</Badge></div></div>
-        <div className="mt-2 grid gap-2 md:grid-cols-4">
-          <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
-          <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Purpose</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
-          <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Safety note</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
-        <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
+        <CollapsibleSection title="Workout details" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">blocks</Badge>}>
+          <div className="grid gap-2 md:grid-cols-4">
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Purpose</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Safety note</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
+          <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
+        </CollapsibleSection>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100" translate="no">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
-        {workout.execution_score?.score !== null && workout.execution_score ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 px-2 py-1.5 text-[11px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-zinc-500">Execution score</span><Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge></div><div className="mt-1 flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}</div> : null}
+        {workout.execution_score?.score !== null && workout.execution_score ? <CollapsibleSection title="Execution score" className="mt-2" summary={<Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge>}>
+          <div className="flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
+        </CollapsibleSection> : null}
         <CollapsibleSection title="Edit target" className="mt-2" summary={targetChanged ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">unsaved</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">manual</Badge>}>
           <p className="mb-2 text-[11px] text-zinc-500">Если план дал странную цель, поправьте ее здесь. После сохранения блоки тренировки пересчитаются от новой дистанции/длительности.</p>
           <div className="grid gap-2 md:grid-cols-3">

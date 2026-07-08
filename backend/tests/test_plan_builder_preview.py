@@ -233,6 +233,49 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         self.assertIn("interval", first_week_types)
         self.assertNotIn("safety_gates", {flag["code"] for flag in preview["risk_flags"]})
 
+    def test_two_day_marathon_keeps_long_run_primary_and_adds_quality(self):
+        start_date = date(2026, 7, 8)
+        profile = make_profile(lactate_threshold_pace_seconds_per_km=300, lactate_threshold_hr_bpm=160)
+        request = PlanGenerateRequest(
+            goal_type="marathon",
+            race_distance_km=42.2,
+            plan_length_weeks=16,
+            available_days_per_week=2,
+            current_weekly_distance_km=22.0,
+            longest_recent_run_km=11.7,
+        )
+
+        preview = build_plan_preview_blueprint(
+            request,
+            profile,
+            profile_completeness(profile),
+            safety_check(profile),
+            {"pace": [], "hr": [], "rpe": [], "metadata": {}},
+            make_context(
+                activity_count=5,
+                current_weekly_volume_km=22.0,
+                recent_weekly_distance_km=22.0,
+                recent_long_run_km=11.7,
+                recent_run_count_4w=3,
+                recent_run_distance_median_km=10.3,
+                consistent_weeks=2,
+                quality_sessions_8w=1,
+            ),
+            start_date,
+        )
+
+        first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
+        interval = next(workout for workout in first_week if workout["workout_type"] == "interval")
+        long = next(workout for workout in first_week if workout["workout_type"] == "long")
+        block_types = {block["block_type"] for block in interval["blocks"]}
+
+        self.assertEqual(preview["available_days_per_week"], 2)
+        self.assertGreater(float(long["distance_km"] or 0), float(interval["distance_km"] or 0))
+        self.assertGreaterEqual(float(long["distance_km"] or 0), preview["weekly_volume_curve"][0]["planned_distance_km"] * 0.5)
+        self.assertIn("work", block_types)
+        self.assertIn("recovery", block_types)
+        self.assertIn("marathon_low_frequency", {flag["code"] for flag in preview["risk_flags"]})
+
     def test_aggressiveness_override_only_lowers_detected_level(self):
         start_date = date(2026, 6, 8)
         profile = make_profile(lactate_threshold_pace_seconds_per_km=300)
