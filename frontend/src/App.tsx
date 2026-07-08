@@ -216,7 +216,7 @@ function formatWorkoutTarget(target: { distance_km?: number | null; duration_sec
   const duration = formatDuration(target.duration_seconds)
   const durationMinutes = formatDurationMinutes(target.duration_seconds)
   const distance = formatDistance(target.distance_km)
-  if (isSupportWorkoutType(target.workout_type)) return durationMinutes !== "--" ? `${durationMinutes} ${target.workout_type}` : target.workout_type || "support"
+  if (isSupportWorkoutType(target.workout_type)) return durationMinutes !== "--" ? `${durationMinutes} ${workoutTypeLabel(target.workout_type)}` : workoutTypeLabel(target.workout_type)
   if (distance !== "--" && duration !== "--") return `${distance} · ${duration}`
   if (distance !== "--") return distance
   return durationMinutes !== "--" ? durationMinutes : duration
@@ -226,7 +226,7 @@ function formatWorkoutActual(workout: { actual_distance_km?: number | null; actu
   const duration = formatDuration(workout.actual_duration_seconds)
   const durationMinutes = formatDurationMinutes(workout.actual_duration_seconds)
   const distance = formatDistance(workout.actual_distance_km)
-  if (isSupportWorkoutType(workout.workout_type)) return durationMinutes !== "--" ? `${durationMinutes} ${workout.workout_type}` : "--"
+  if (isSupportWorkoutType(workout.workout_type)) return durationMinutes !== "--" ? `${durationMinutes} ${workoutTypeLabel(workout.workout_type)}` : "--"
   if (distance !== "--" && duration !== "--") return `${distance} · ${duration}`
   if (distance !== "--") return distance
   return durationMinutes !== "--" ? durationMinutes : duration
@@ -1119,9 +1119,9 @@ function CollapsibleSection({ title, summary, defaultOpen = false, children, cla
   return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className={cn("group rounded-md border border-zinc-800 bg-zinc-950/70", className)}>
     <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-white [&::-webkit-details-marker]:hidden">
       <span>{title}</span>
-      <span className="flex items-center gap-2 text-[10px] font-normal uppercase tracking-[0.14em] text-zinc-500">{summary}<span className="text-orange-300 group-open:hidden">open</span><span className="hidden text-zinc-500 group-open:inline">close</span></span>
+      <span className="flex items-center gap-2 text-[10px] font-normal uppercase tracking-[0.14em] text-zinc-500">{summary}<span className="text-orange-300 group-open:hidden">открыть</span><span className="hidden text-zinc-500 group-open:inline">скрыть</span></span>
     </summary>
-    <div className="border-t border-zinc-800 p-3">{children}</div>
+    <div hidden={!isOpen} className="border-t border-zinc-800 p-3">{children}</div>
   </details>
 }
 
@@ -3224,9 +3224,9 @@ function planCurrentWeekLabel(plan: Plan) {
   const weekStart = startOfWeekISO()
   const weekEnd = addDays(weekStart, 6)
   const currentWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date >= weekStart && workout.scheduled_date <= weekEnd)
-  if (currentWorkout) return `week ${currentWorkout.week_index}`
+  if (currentWorkout) return `неделя ${currentWorkout.week_index}`
   const nextWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date > weekEnd)
-  return nextWorkout ? `next ${formatDate(nextWorkout.scheduled_date)}` : "--"
+  return nextWorkout ? `следующая ${formatDate(nextWorkout.scheduled_date)}` : "--"
 }
 
 function planStatusClass(status: string) {
@@ -3234,6 +3234,78 @@ function planStatusClass(status: string) {
   if (status === "completed") return "border-zinc-500 bg-zinc-800 text-zinc-100"
   if (status === "archived") return "border-zinc-800 bg-zinc-950 text-zinc-500"
   return "border-zinc-700 bg-zinc-900 text-zinc-300"
+}
+
+function planStatusLabel(status: string) {
+  if (status === "active") return "активная"
+  if (status === "completed") return "завершена"
+  if (status === "archived") return "архив"
+  if (status === "draft") return "черновик"
+  return status
+}
+
+function planGoalTypeLabel(goalType: string) {
+  if (goalType === "5k") return "5 км"
+  if (goalType === "10k") return "10 км"
+  if (goalType === "half_marathon") return "полумарафон"
+  if (goalType === "marathon") return "марафон"
+  if (goalType === "base_building") return "база"
+  if (goalType === "custom") return "своя цель"
+  return goalType
+}
+
+function workoutTypeLabel(type?: string | null) {
+  if (type === "easy") return "легкий бег"
+  if (type === "recovery") return "восстановление"
+  if (type === "strides") return "легкий + ускорения"
+  if (type === "steady") return "ровная работа"
+  if (type === "interval") return "интервалы"
+  if (type === "tempo") return "темповая"
+  if (type === "threshold") return "пороговая"
+  if (type === "hill") return "горки"
+  if (type === "long") return "длинная"
+  if (type === "race_pace") return "темп старта"
+  if (type === "strength" || type === "ofp") return "ОФП"
+  if (type === "mobility" || type === "prehab") return "мобилити"
+  return type || "тренировка"
+}
+
+function workoutStatusLabel(status: string) {
+  if (status === "planned") return "запланирована"
+  if (status === "rescheduled") return "перенесена"
+  if (status === "done") return "сделана"
+  if (status === "missed") return "пропущена"
+  if (status === "skipped") return "отменена"
+  return status
+}
+
+function workoutIntensityLabel(intensity?: string | null) {
+  if (!intensity) return "по плану"
+  const lower = intensity.toLowerCase()
+  if (lower.includes("easy-long")) return "легко, долго"
+  if (lower.includes("easy")) return "легко"
+  if (lower.includes("recovery")) return "восстановительно"
+  if (lower.includes("steady")) return "ровно"
+  if (lower.includes("interval")) return "быстро с отдыхом"
+  if (lower.includes("tempo") || lower.includes("threshold")) return "контролируемо быстро"
+  if (lower.includes("race")) return "темп старта"
+  if (lower.includes("strides")) return "легко + ускорения"
+  return intensity
+}
+
+function trainingLevelLabel(level: string) {
+  if (level === "beginner") return "начинаем осторожно"
+  if (level === "intermediate") return "средняя база"
+  if (level === "advanced") return "хорошая база"
+  if (level === "novice") return "мало истории"
+  return level || "по истории"
+}
+
+function confidenceLabel(confidence: string) {
+  if (confidence === "high") return "данных достаточно"
+  if (confidence === "medium") return "данных частично достаточно"
+  if (confidence === "low") return "данных мало"
+  return confidence || "оценка по доступной истории"
 }
 
 function formatTargetTime(seconds?: number | null) {
@@ -3249,7 +3321,7 @@ function formatDateTime(value?: string | null) {
 }
 
 function planGoalLabel(plan: Plan) {
-  return `${plan.goal_type}${plan.race_distance_km ? ` · ${plan.race_distance_km.toFixed(1)} км` : ""}`
+  return `${planGoalTypeLabel(plan.goal_type)}${plan.race_distance_km ? ` · ${plan.race_distance_km.toFixed(1)} км` : ""}`
 }
 
 function planCurrentWeekIndex(plan: Plan) {
@@ -3329,7 +3401,7 @@ function planReviewWarnings(plan: Plan) {
   const isLongGoal = (plan.race_distance_km || 0) >= 21 || plan.goal_type === "half_marathon" || plan.goal_type === "marathon"
   const isMarathon = (plan.race_distance_km || 0) >= 42 || plan.goal_type === "marathon"
   if (isMarathon && plan.available_days_per_week < 3) warnings.push("Марафонский план на 2 беговых дня - это компромисс. Для полноценной подготовки лучше 3+ беговых дня.")
-  if (isLongGoal && planQualityWorkouts(plan).length === 0) warnings.push("В плане нет interval/tempo/race-pace тренировок. Он получится слишком мягким и однообразным.")
+  if (isLongGoal && planQualityWorkouts(plan).length === 0) warnings.push("В плане нет быстрых или темповых тренировок. Он получится слишком мягким и однообразным.")
   const weekIndexes = Array.from(new Set(plan.workouts.map((workout) => workout.week_index)))
   const weakLongWeek = weekIndexes.find((weekIndex) => {
     const runs = plan.workouts.filter((workout) => workout.week_index === weekIndex && !isSupportWorkoutType(workout.workout_type) && workout.distance_km)
@@ -3337,17 +3409,52 @@ function planReviewWarnings(plan: Plan) {
     const biggestOther = Math.max(...runs.filter((workout) => workout.workout_type !== "long").map((workout) => workout.distance_km || 0), 0)
     return longRun && biggestOther > (longRun.distance_km || 0) + 0.5
   })
-  if (weakLongWeek) warnings.push(`Week ${weakLongWeek}: long run короче другой беговой тренировки. Для длинной цели это подозрительно.`)
+  if (weakLongWeek) warnings.push(`Неделя ${weakLongWeek}: длинная пробежка короче другой беговой тренировки. Для длинной цели это подозрительно.`)
   return warnings
 }
 
+function plainPlanWarning(warning: string) {
+  return warning
+    .replace(/interval\/tempo\/race-pace/gi, "быстрых или темповых")
+    .replace(/\bWeek\s+(\d+)/gi, "Неделя $1")
+    .replace(/long run/gi, "длинная пробежка")
+    .replace(/hard workouts/gi, "быстрые тренировки")
+}
+
+const QUICK_PLAN_GOALS = [
+  { value: "5k", label: "5 км", distance: "5", title: "Программа на 5 км" },
+  { value: "10k", label: "10 км", distance: "10", title: "Программа на 10 км" },
+  { value: "half_marathon", label: "Полумарафон", distance: "21.1", title: "Программа на полумарафон" },
+  { value: "marathon", label: "Марафон", distance: "42.2", title: "Марафонская программа" },
+  { value: "base_building", label: "Просто база", distance: "10", title: "Базовая беговая программа" },
+] as const
+
+const QUICK_PLAN_DAYS = [2, 3, 4, 5, 6]
+
+function quickGoalDefaults(goal: string) {
+  return QUICK_PLAN_GOALS.find((item) => item.value === goal) || QUICK_PLAN_GOALS[3]
+}
+
+function dayChoiceLabel(days: number) {
+  return days === 2 || days === 3 || days === 4 ? `${days} раза в неделю` : `${days} раз в неделю`
+}
+
+function plainRiskMessage(message: string) {
+  const lower = message.toLowerCase()
+  if (lower.includes("injury") || lower.includes("pain")) return "Учтем боль или травму и сделаем план осторожнее."
+  if (lower.includes("volume") || lower.includes("load")) return "Объем будет расти аккуратно, без резких скачков."
+  if (lower.includes("long")) return "Длинные пробежки будут ограничены до безопасного уровня."
+  if (/[а-яё]/i.test(message)) return plainPlanWarning(message)
+  return "План будет построен осторожнее из-за ограничений или нехватки данных."
+}
+
 function workoutTargetMode(workout: PlanWorkout) {
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "strength"
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "mobility"
-  if (workout.intensity?.includes("HR") || workout.description?.includes("HR")) return "HR"
-  if (workout.intensity?.includes("RPE") || workout.description?.includes("RPE")) return "RPE"
-  if (workout.description?.includes("pace") || workout.description?.includes("пейс")) return "pace"
-  return workout.duration_seconds ? "duration" : "distance"
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "ОФП"
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "мобилити"
+  if (workout.intensity?.includes("HR") || workout.description?.includes("HR")) return "пульс"
+  if (workout.intensity?.includes("RPE") || workout.description?.includes("RPE")) return "ощущения"
+  if (workout.description?.includes("pace") || workout.description?.includes("пейс")) return "темп"
+  return workout.duration_seconds ? "время" : "дистанция"
 }
 
 function workoutBlocks(workout: PlanWorkout) {
@@ -3364,30 +3471,30 @@ function workoutBlocks(workout: PlanWorkout) {
         return `${repeat}${block.block_type}: ${target}${pace}${hr}${rpe}`
       })
   }
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return ["Warmup", "Calves/soleus", "Single-leg strength", "Glutes/core", "Cooldown"]
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return ["Ankle mobility", "Hip mobility", "Glute activation", "Breathing"]
-  if (workout.workout_type === "interval") return ["Warmup 10-15m", "Repeats at target", "Easy recovery", "Cooldown"]
-  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return ["Warmup", "Controlled quality block", "Cooldown"]
-  if (workout.workout_type === "long") return ["Easy start", "Steady middle", "Fuel/hydrate", "Easy finish"]
-  if (workout.workout_type === "recovery") return ["Short easy run", "Mobility", "Stop if fatigue rises"]
-  return ["Continuous easy run", "Keep form relaxed", "Optional strides"]
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return ["Разминка", "Икры/стопы", "Одна нога", "Ягодицы/кор", "Заминка"]
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return ["Голеностоп", "Тазобедренные", "Активация ягодиц", "Дыхание"]
+  if (workout.workout_type === "interval") return ["Разминка 10-15 мин", "Быстрые отрезки", "Легкое восстановление", "Заминка"]
+  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return ["Разминка", "Контролируемая работа", "Заминка"]
+  if (workout.workout_type === "long") return ["Легкое начало", "Ровная середина", "Питье/питание", "Легкий финиш"]
+  if (workout.workout_type === "recovery") return ["Коротко и легко", "Мобилити", "Остановиться при усталости"]
+  return ["Легкий непрерывный бег", "Расслабленная техника", "Ускорения по самочувствию"]
 }
 
 function workoutPurpose(workout: PlanWorkout) {
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Build runner durability: calves, hips, posterior chain and trunk stability."
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Restore range of motion and keep common runner weak links controlled."
-  if (workout.workout_type === "long") return "Build aerobic endurance and race-specific durability."
-  if (workout.workout_type === "interval") return "Raise threshold/VO2 stimulus while keeping recovery controlled."
-  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return "Practice sustainable quality without turning the week into a race."
-  if (workout.workout_type === "recovery") return "Restore legs and preserve frequency with low load."
-  return "Accumulate aerobic volume and support consistency."
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Сделать тело устойчивее к беговой нагрузке: стопы, икры, таз, ягодицы и кор."
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Снять зажатость и поддержать слабые места бегуна без лишней усталости."
+  if (workout.workout_type === "long") return "Развить выносливость и подготовить ноги к долгой работе."
+  if (workout.workout_type === "interval") return "Дать быстрый стимул, но оставить восстановление под контролем."
+  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return "Потренировать устойчивый темп без гонки на тренировке."
+  if (workout.workout_type === "recovery") return "Восстановить ноги и сохранить регулярность."
+  return "Набрать аэробный объем и поддержать стабильность."
 }
 
 function workoutSafetyNote(workout: PlanWorkout) {
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Avoid failure, heavy soreness and painful movements; keep 1-2 reps in reserve."
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Keep it easy and pain-free; mobility should improve readiness, not add fatigue."
-  if (["interval", "tempo", "threshold", "race_pace", "long"].includes(workout.workout_type)) return "Reduce or skip if pain, poor sleep, unusual fatigue or HR drift is present."
-  return "Keep it conversational; shorten if recovery signals are worse than expected."
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Не делать до отказа и не добиваться сильной крепатуры."
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Легко и без боли: это должно улучшать готовность, а не утомлять."
+  if (["interval", "tempo", "threshold", "race_pace", "long"].includes(workout.workout_type)) return "Сократить или пропустить при боли, плохом сне, необычной усталости или странном пульсе."
+  return "Держать разговорный темп; сократить, если восстановление хуже обычного."
 }
 
 function Planning() {
@@ -3418,6 +3525,8 @@ function Planning() {
   const [busyPlan, setBusyPlan] = useState<number | null>(null)
   const [planActionError, setPlanActionError] = useState("")
   const [renameDrafts, setRenameDrafts] = useState<Record<number, string>>({})
+  const [quickGoal, setQuickGoal] = useState("marathon")
+  const [quickDays, setQuickDays] = useState(4)
   const planBuilderForm = useRef<HTMLFormElement>(null)
   const recommendationsRequest = useRef(0)
   const planWeeksRequest = useRef(0)
@@ -3445,7 +3554,7 @@ function Planning() {
 
   async function generate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    await createPlan(false)
+    await createPlan(true)
   }
 
   async function createPlan(activatePlan = false) {
@@ -3533,7 +3642,7 @@ function Planning() {
   }
 
   async function deleteSelectedPlan(plan: Plan) {
-    if (!window.confirm(`Delete plan #${plan.id}? This cannot be undone.`)) return
+    if (!window.confirm(`Удалить программу #${plan.id}? Это действие нельзя отменить.`)) return
     setBusyPlan(plan.id)
     setPlanActionError("")
     try {
@@ -3810,84 +3919,91 @@ function Planning() {
   const hasSafetyInfo = result?.explanation?.includes("Safety gates:") || false
   const conservative = hasSafetyInfo && result?.explanation?.includes("Safety gates: no active safety gates") === false
   const planMode = !result || !hasSafetyInfo ? null : conservative ? "safety gated" : "standard"
+  const goalDefaults = quickGoalDefaults(quickGoal)
+  const visibleDetailWeeks = currentWeekIndex ? detailWeeks.filter((week) => week.week_index >= currentWeekIndex).slice(0, 4) : detailWeeks.slice(0, 4)
+  const remainingDetailWeeks = detailWeeks.filter((week) => !visibleDetailWeeks.some((visible) => visible.week_index === week.week_index))
   return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <Card>
-      <CardHeader><div><CardTitle>Program planner</CardTitle><p className="text-xs text-zinc-500">Profile-aware running plus strength/OFP support sessions.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
+      <CardHeader><div><CardTitle>Создать программу</CardTitle><p className="text-xs text-zinc-500">Мы берем твои последние пробежки, зоны и ограничения. Если данных мало, программа будет осторожнее.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
       <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
-        <Field label="Название"><Input name="title" defaultValue="Марафонская программа" /></Field>
-        <Field label="Цель"><Select name="goal_type" defaultValue="marathon"><option value="5k">5K</option><option value="10k">10K</option><option value="half_marathon">Half marathon</option><option value="marathon">Marathon</option><option value="custom">Custom</option><option value="base_building">Base building</option></Select></Field>
-        <Field label="Дистанция, км"><Input name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue="42.2" /></Field>
-        <Field label="Дата старта"><Input name="target_date" type="date" /></Field>
-        <Field label="Длина, недель"><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder="если без даты" /></Field>
-        <Field label="Дней в неделю"><Input name="available_days_per_week" type="number" min="2" max="7" defaultValue="4" /></Field>
-        <CollapsibleSection title="Performance inputs">
-        <Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field>
-        <Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">A race</option><option value="b">B race</option><option value="c">C race</option></Select></Field>
-        <Field label="Aggressiveness"><Select name="aggressiveness" defaultValue="auto"><option value="auto">Auto safety</option><option value="beginner">Beginner cap</option><option value="intermediate">Intermediate cap</option><option value="advanced">Advanced if detected</option></Select></Field>
-        <Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field>
-        <Field label="Longest recent run, км"><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder="optional" /></Field>
-        <div className="grid gap-2 sm:grid-cols-2"><Field label="Recent race, км"><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Recent race time, мин"><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder="optional" /></Field></div>
-        <div className="grid gap-2 sm:grid-cols-2"><Field label="Intensity"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">Mixed</option><option value="pace">Pace</option><option value="hr">HR</option><option value="rpe">RPE</option></Select></Field><Field label="Time budget, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="optional" /></Field></div>
-        </CollapsibleSection>
-        <CollapsibleSection title="Constraints">
-        <Field label="Preferred days"><Input name="preferred_weekdays" placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
-        <div className="grid gap-2 sm:grid-cols-2"><Field label="Max long run, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="optional" /></Field><Field label="Max long run, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="optional" /></Field></div>
-        <Field label="Terrain"><Input name="terrain" placeholder="road, trail, treadmill" /></Field>
-        </CollapsibleSection>
-        <CollapsibleSection title="Support / OFP">
-        <div className="rounded-md border border-zinc-800 bg-zinc-950 p-2">
-          <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">ОФП / support</p>
-          <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_strength" type="checkbox" defaultChecked /> strength/OFP</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="include_mobility" type="checkbox" defaultChecked /> mobility/prehab</label></div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3"><Field label="Strength / week"><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label="Mobility / week"><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label="Equipment"><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">Bodyweight</option><option value="bands">Bands</option><option value="dumbbells">Dumbbells</option><option value="gym">Gym</option></Select></Field></div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">К чему готовимся?</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {QUICK_PLAN_GOALS.map((goal) => <label key={goal.value} aria-label={goal.label} className={cn("cursor-pointer rounded-xl border px-3 py-3 transition", quickGoal === goal.value ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="goal_type" type="radio" value={goal.value} checked={quickGoal === goal.value} onChange={() => setQuickGoal(goal.value)} /><span className="text-sm font-semibold">{goal.label}</span></label>)}
+          </div>
         </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">Когда старт или сколько недель готовимся?</p>
+          <div className="grid gap-2 sm:grid-cols-2"><Field label="Дата старта"><Input name="target_date" type="date" /></Field><Field label="Если даты нет"><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder="например, 12 недель" /></Field></div>
+        </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">Сколько раз в неделю реально бегать?</p>
+          <div className="grid grid-cols-5 gap-2">
+            {QUICK_PLAN_DAYS.map((days) => <label key={days} aria-label={dayChoiceLabel(days)} className={cn("cursor-pointer rounded-xl border px-2 py-3 text-center transition", quickDays === days ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="available_days_per_week" type="radio" value={days} checked={quickDays === days} onChange={() => setQuickDays(days)} /><span className="text-base font-semibold">{days}</span></label>)}
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">Есть ограничения?</p>
+          <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="injury" type="checkbox" /> травма/боль</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="no_hard_workouts" type="checkbox" /> пока без быстрых работ</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_strength" type="checkbox" defaultChecked /> ОФП</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_mobility" type="checkbox" defaultChecked /> мобилити</label></div>
+        </div>
+        <CollapsibleSection title="Точные настройки (необязательно)" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">можно не трогать</Badge>}>
+          <div className="grid gap-3">
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Название"><Input key={`title-${quickGoal}`} name="title" defaultValue={goalDefaults.title} /></Field><Field label="Дистанция, км"><Input key={`distance-${quickGoal}`} name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue={goalDefaults.distance} /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="необязательно" /></Field><Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field></div>
+            <Field label="Самая длинная недавняя пробежка, км"><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder="необязательно" /></Field>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Недавний старт, км"><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder="необязательно" /></Field><Field label="Время недавнего старта, мин"><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder="необязательно" /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Удобные дни"><Input name="preferred_weekdays" placeholder="1,3,6 если важно" /></Field><Field label="Лимит времени, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="необязательно" /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label="Макс. длинная, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="необязательно" /></Field><Field label="Макс. длинная, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="необязательно" /></Field></div>
+            <Field label="Покрытие"><Input name="terrain" placeholder="асфальт, трейл, дорожка" /></Field>
+            <div className="grid gap-2 sm:grid-cols-3"><Field label="ОФП в неделю"><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label="Мобилити в неделю"><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label="Оборудование"><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">Вес тела</option><option value="bands">Резинки</option><option value="dumbbells">Гантели</option><option value="gym">Зал</option></Select></Field></div>
+            <div className="grid gap-2 sm:grid-cols-3"><Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">главный старт</option><option value="b">обычный старт</option><option value="c">тренировочный старт</option></Select></Field><Field label="Рост нагрузки"><Select name="aggressiveness" defaultValue="auto"><option value="auto">авто</option><option value="beginner">осторожнее</option><option value="intermediate">средне</option><option value="advanced">смелее, если история позволяет</option></Select></Field><Field label="Ориентир"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">смешанный</option><option value="pace">темп</option><option value="hr">пульс</option><option value="rpe">ощущения</option></Select></Field></div>
+          </div>
         </CollapsibleSection>
-        <CollapsibleSection title="Safety">
-        <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="injury" type="checkbox" /> injury constraint</label><label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input name="no_hard_workouts" type="checkbox" /> no hard workouts</label></div>
-        </CollapsibleSection>
-        <div className="grid gap-2 sm:grid-cols-3"><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Previewing..." : "Preview"}</Button><Button type="submit">Create draft</Button><Button type="button" onClick={() => createPlan(true)}>Create active</Button></div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Button type="submit" className="h-10 text-sm">Создать программу</Button><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Проверяем..." : "Проверить перед созданием"}</Button></div>
       </form>
       {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
       {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
       <div className="border-t border-zinc-800 p-4">
-        <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-white">Saved plans</p><Badge>{plans.length} total</Badge></div>
-        {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
-        <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
+        <CollapsibleSection title="Мои программы" summary={<Badge>{plans.length}</Badge>}>
+          {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
+          <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
+        </CollapsibleSection>
       </div>
     </Card>
     <Card>
-      <CardHeader><div><CardTitle>Plan detail</CardTitle><p className="text-xs text-zinc-500">Structured weeks, execution controls and adaptation history.</p></div>{planMode ? <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{planMode}</Badge> : null}</CardHeader>
+      <CardHeader><div><CardTitle>Моя программа</CardTitle><p className="text-xs text-zinc-500">Ближайшая тренировка, понятный обзор и недели плана без лишней диагностики.</p></div>{planMode ? <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{conservative ? "осторожный режим" : "обычный режим"}</Badge> : null}</CardHeader>
       <div className="grid gap-4 p-4 text-sm text-zinc-400">
         {result ? <>
-          <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />
           <NextPlanWorkoutCard workout={nextWorkout} currentWeekIndex={currentWeekIndex} />
-          {planWarnings.length ? <div className="grid gap-2" translate="no">{planWarnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
-          <CollapsibleSection title="Plan explanation">
-            <p className="leading-6" translate="no">{result.explanation}</p>
-          </CollapsibleSection>
+          {planWarnings.length ? <div className="grid gap-2">{planWarnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{plainPlanWarning(warning)}</div>)}</div> : null}
+          <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />
           <div className="flex flex-wrap items-center gap-2">
-            {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Activate plan</Button> : <Badge>active plan</Badge>}
-            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{Math.round((result.adherence?.completion_rate || 0) * 100)}% adherence</Badge>
+            {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Сделать активной</Button> : <Badge>активная программа</Badge>}
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">выполнено {Math.round((result.adherence?.completion_rate || 0) * 100)}%</Badge>
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} {kmUnit()}</Badge>
-            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">linked {result.adherence?.linked_workouts || 0}/{result.adherence?.done_workouts || 0}</Badge>
           </div>
-          {result.adherence?.warnings?.length ? <div className="grid gap-2" translate="no">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : null}
-          <CollapsibleSection title="Coach recommendations" summary={<Badge className={visibleRecommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{visibleRecommendations?.status || "idle"}</Badge>}>
-            <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
-          </CollapsibleSection>
-          <CollapsibleSection title="Version history" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{planVersions.length}</Badge>}>
-            <PlanVersions versions={planVersions} />
-          </CollapsibleSection>
+          {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{plainPlanWarning(warning)}</div>)}</div> : null}
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
-            <Stat label="weeks" value={weekCount} />
-            <Stat label="workouts" value={result.workouts.length} />
-            <Stat label="days/week" value={result.available_days_per_week} />
+            <Stat label="недель" value={weekCount} />
+            <Stat label="тренировок" value={result.workouts.length} />
+            <Stat label="раз в неделю" value={result.available_days_per_week} />
           </div>
-          <CollapsibleSection title="Charts and distribution" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">advanced</Badge>}>
-            <div className="grid gap-3"><PlanVolumeChart weeks={detailWeeks} /><PlanIntensitySplit split={intensitySplit} /></div>
-          </CollapsibleSection>
           {planWeeksError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planWeeksError}</p> : null}
-          <div className="grid gap-3">{detailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={week.week_index === currentWeekIndex || week.workouts.some((workout) => workout.id === nextWorkout?.id)} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
-        </> : <p>Generate a plan to see how profile completeness, safety gates and zones change the weekly structure.</p>}
+          <div className="grid gap-3">{visibleDetailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={week.week_index === currentWeekIndex || week.workouts.some((workout) => workout.id === nextWorkout?.id)} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
+          {remainingDetailWeeks.length ? <CollapsibleSection title="Остальные недели" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingDetailWeeks.length}</Badge>}>
+            <div className="grid gap-3">{remainingDetailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={false} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
+          </CollapsibleSection> : null}
+          <CollapsibleSection title="Для продвинутых" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">детали</Badge>}>
+            <div className="grid gap-3">
+              <CollapsibleSection title="Объяснение плана"><p className="leading-6" translate="no">{result.explanation}</p></CollapsibleSection>
+              <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
+              <CollapsibleSection title="Графики и распределение" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">опционально</Badge>}>
+                <div className="grid gap-3"><PlanVolumeChart weeks={detailWeeks} /><PlanIntensitySplit split={intensitySplit} /></div>
+              </CollapsibleSection>
+              <PlanVersions versions={planVersions} />
+            </div>
+          </CollapsibleSection>
+        </> : <p>Создайте программу слева, и здесь появятся ближайшая тренировка, недели и простые подсказки.</p>}
       </div>
     </Card>
   </div>
@@ -3899,22 +4015,29 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
   const firstWorkouts = preview.workouts.slice(0, 3)
   const remainingWorkouts = preview.workouts.slice(3)
   const supportSessions = preview.weekly_volume_curve.reduce((sum, week) => sum + (week.support_sessions || 0), 0)
+  const firstWeekDistance = preview.weekly_volume_curve[0]?.planned_distance_km
+  const warningFlags = preview.risk_flags.filter((flag) => flag.severity === "critical" || flag.severity === "warning")
   return <div className="mx-4 mb-4 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><p className="font-semibold text-white">Builder preview</p><p className="mt-1 text-zinc-500">Baseline, risk flags and first workouts before saving a draft.</p></div>
-      <Badge className={preview.risk_flags.some((flag) => flag.severity === "critical" || flag.severity === "warning") ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{preview.risk_flags.length} flags</Badge>
+      <div><p className="font-semibold text-white">Проверка программы</p><p className="mt-1 text-zinc-500">Коротко о том, как стартует план до создания.</p></div>
+      <Badge className={warningFlags.length ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{warningFlags.length ? "есть предупреждения" : "выглядит спокойно"}</Badge>
     </div>
     <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-      <Stat label="weeks" value={preview.weeks} />
-      <Stat label="current" value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
-      <Stat label="peak" value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
-      <Stat label="support" value={supportSessions} />
+      <Stat label="недель" value={preview.weeks} />
+      <Stat label="сейчас" value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
+      <Stat label="пик" value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
+      <Stat label="ОФП" value={supportSessions} />
     </div>
-    <CollapsibleSection title="Preview explanation" className="mt-3">
+    <div className="mt-3 grid gap-2 text-zinc-300">
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Стартуем от уровня: <span className="font-medium text-white">{trainingLevelLabel(preview.baseline.training_age_level)}</span>. История: <span className="font-medium text-white">{confidenceLabel(preview.baseline.confidence)}</span>.</p>
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Объем: от {preview.current_weekly_distance_km.toFixed(1)} до {preview.peak_weekly_distance_km.toFixed(1)} {kmUnit()} в неделю.</p>
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Первая неделя: примерно {firstWeekDistance?.toFixed(1) || "--"} {kmUnit()} и {firstWorkouts.length} ближайшие тренировки ниже.</p>
+    </div>
+    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.slice(0, 3).map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><p className="font-medium">{plainRiskMessage(flag.message)}</p></div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">Серьезных предупреждений на проверке нет.</p>}
+    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white" translate="no">Неделя {workout.week_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
+    <CollapsibleSection title="Для любопытных" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">технические детали</Badge>}>
       <p className="leading-5 text-zinc-400" translate="no">{preview.explanation}</p>
-    </CollapsibleSection>
-    <CollapsibleSection title="Baseline diagnostics" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge>}>
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Baseline</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Данные истории</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500" translate="no">
         <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
         <p>history: <span className="text-zinc-300">{preview.baseline.history_span_days} days</span></p>
@@ -3926,19 +4049,14 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
         <p>runs 4w: <span className="text-zinc-300">{preview.baseline.recent_run_count_4w || 0}</span></p>
       </div>
       <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
-    </CollapsibleSection>
-    <CollapsibleSection title="Weekly volume curve" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.weekly_volume_curve.length} weeks</Badge>}>
-    <div className="grid gap-2">
-      {preview.weekly_volume_curve.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_8.5rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className={cn("h-full rounded", week.is_taper ? "bg-orange-200/80" : "bg-orange-400/70")} style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} {kmUnit()} · {week.phase}</span></div>)}
-    </div>
-    </CollapsibleSection>
-    <CollapsibleSection title="Intensity and schedule" className="mt-3">
+      <div className="mt-3 grid gap-2">
+        {preview.weekly_volume_curve.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_8.5rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className={cn("h-full rounded", week.is_taper ? "bg-orange-200/80" : "bg-orange-400/70")} style={{ width: `${Math.max(4, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><span className="text-right text-zinc-300">{week.planned_distance_km.toFixed(1)} {kmUnit()} · {week.phase}</span></div>)}
+      </div>
       <div className="flex flex-wrap gap-2" translate="no"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
+      {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5" translate="no">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : null}
     </CollapsibleSection>
-    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5" translate="no">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">No preview risk flags.</p>}
-    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · target: {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
-    {remainingWorkouts.length ? <CollapsibleSection title="More preview workouts" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
-      <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">W{workout.week_index}D{workout.day_index} · {workout.title}</p><div className="flex flex-wrap gap-1"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.phase}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workout.workout_type}</Badge></div></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · target: {formatWorkoutTarget(workout)} · {workout.intensity || "--"}</p></div>)}</div>
+    {remainingWorkouts.length ? <CollapsibleSection title="Остальные тренировки в проверке" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
+      <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white" translate="no">Неделя {workout.week_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
     </CollapsibleSection> : null}
   </div>
 }
@@ -3950,18 +4068,18 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
   const renameChanged = renameDraft.trim() && renameDraft.trim() !== plan.title
   return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
     <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
-      <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{plan.goal_type} · target {formatDate(plan.target_date)} · current {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="weeks" value={weeks} /><Stat label="km" value={plannedKm.toFixed(1)} /><Stat label="done" value={`${adherence}%`} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{planGoalTypeLabel(plan.goal_type)} · старт {formatDate(plan.target_date)} · {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="недель" value={weeks} /><Stat label="км" value={plannedKm.toFixed(1)} /><Stat label="готово" value={`${adherence}%`} /></div>
     </div>
-    <CollapsibleSection title="Manage plan" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">actions</Badge>}>
-      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Plan title" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Saving..." : "Rename"}</Button></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="workouts" value={plan.workouts.length} /><Stat label="support" value={planSupportWorkouts(plan)} /><Stat label="duration" value={formatDuration(planPlannedDuration(plan))} /></div>
+    <CollapsibleSection title="Управление" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">действия</Badge>}>
+      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Название программы" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Сохраняем..." : "Переименовать"}</Button></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="тренировок" value={plan.workouts.length} /><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label="время" value={formatDuration(planPlannedDuration(plan))} /></div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Activate</Button> : null}
-        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Complete</Button> : null}
-        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>Archive</Button> : null}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Duplicate</Button>
-        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Delete</Button>
+        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Сделать активной</Button> : null}
+        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Завершить</Button> : null}
+        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>В архив</Button> : null}
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Копия</Button>
+        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Удалить</Button>
       </div>
     </CollapsibleSection>
   </div>
@@ -3969,45 +4087,45 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
 
 function PlanDetailHeader({ plan, currentWeekIndex }: { plan: Plan; currentWeekIndex: number | null }) {
   const history = [
-    { label: "created", value: formatDateTime(plan.created_at) },
-    { label: "edited", value: formatDateTime(plan.updated_at) },
+    { label: "создана", value: formatDateTime(plan.created_at) },
+    { label: "обновлена", value: formatDateTime(plan.updated_at) },
   ]
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Plan header</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{plan.title}</h3><p className="mt-1 text-zinc-500" translate="no">{planGoalLabel(plan)}</p></div>
-      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)} translate="no">{plan.status}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">current week {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">current week --</Badge>}</div>
+      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">программа</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{plan.title}</h3><p className="mt-1 text-zinc-500" translate="no">{planGoalLabel(plan)}</p></div>
+      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">неделя {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">неделя --</Badge>}</div>
     </div>
     <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-4">
-      <Stat label="target date" value={formatDate(plan.target_date)} />
-      <Stat label="target time" value={formatTargetTime(plan.target_time_seconds)} />
-      <Stat label="planned km" value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
-      <Stat label="completed km" value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
+      <Stat label="старт" value={formatDate(plan.target_date)} />
+      <Stat label="цель" value={formatTargetTime(plan.target_time_seconds)} />
+      <Stat label="план км" value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
+      <Stat label="сделано км" value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
     </div>
-    <CollapsibleSection title="Plan metadata" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">details</Badge>}>
+    <CollapsibleSection title="Детали программы" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">ещё</Badge>}>
       <div className="grid gap-1.5 text-[11px] text-zinc-500 md:grid-cols-2">{history.map((item) => <div key={item.label} className="rounded border border-zinc-900 bg-zinc-950 px-2 py-1"><span className="font-mono uppercase tracking-[0.12em] text-zinc-600">{item.label}</span><span className="ml-2 text-zinc-300">{item.value}</span></div>)}</div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="support" value={planSupportWorkouts(plan)} /><Stat label="duration" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} /></div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label="время" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} /></div>
     </CollapsibleSection>
   </div>
 }
 
 function NextPlanWorkoutCard({ workout, currentWeekIndex }: { workout: PlanWorkout | null; currentWeekIndex: number | null }) {
   if (!workout) return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Следующая тренировка</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">not scheduled</Badge></div>
-    <p className="mt-2 text-zinc-500">В активном плане нет будущей тренировки со статусом planned/rescheduled.</p>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Следующая тренировка</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">нет в календаре</Badge></div>
+    <p className="mt-2 text-zinc-500">В активной программе пока нет будущей запланированной тренировки.</p>
   </div>
   const isCurrentWeek = currentWeekIndex === workout.week_index
   return <div className="rounded-md border border-orange-400/30 bg-orange-400/10 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-orange-200">Следующая тренировка</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{workout.title}</h3><p className="mt-1 text-orange-100" translate="no">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · week {workout.week_index}{isCurrentWeek ? " · текущая неделя" : ""}</p></div>
-      <div className="flex flex-wrap gap-1.5"><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">next</Badge><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300" translate="no">{workout.workout_type}</Badge></div>
+      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-orange-200">Следующая тренировка</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{workout.title}</h3><p className="mt-1 text-orange-100" translate="no">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · неделя {workout.week_index}{isCurrentWeek ? " · текущая" : ""}</p></div>
+      <div className="flex flex-wrap gap-1.5"><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">ближайшая</Badge><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div>
     </div>
     <div className="mt-3 grid gap-2 md:grid-cols-3">
       <Stat label="цель" value={formatWorkoutTarget(workout)} />
-      <Stat label="интенсивность" value={workout.intensity || "--"} />
-      <Stat label="статус" value={workout.status} />
+      <Stat label="интенсивность" value={workoutIntensityLabel(workout.intensity)} />
+      <Stat label="статус" value={workoutStatusLabel(workout.status)} />
     </div>
     <p className="mt-3 leading-5 text-zinc-300" translate="no">{workout.description || workoutPurpose(workout)}</p>
-    <p className="mt-2 text-[11px] text-zinc-500">Ниже автоматически раскрыта неделя с этой тренировкой. Target можно поправить вручную прямо в карточке тренировки.</p>
+    <p className="mt-2 text-[11px] text-zinc-500">Ниже автоматически раскрыта неделя с этой тренировкой. Если цель выглядит странно, ее можно поправить в карточке тренировки.</p>
   </div>
 }
 
@@ -4015,21 +4133,21 @@ function PlanVolumeChart({ weeks }: { weeks: PlanWeekSummary[] }) {
   const maxVolume = Math.max(...weeks.map((week) => Math.max(week.planned_distance_km, week.completed_distance_km)), 1)
   if (!weeks.length) return null
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">Volume chart</p><p className="mt-1 text-zinc-500">Weekly running distance with support-session markers.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{weeks.length} weeks</Badge></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-white">График объема</p><p className="mt-1 text-zinc-500">План/факт по неделям и отметки ОФП.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{weeks.length} недель</Badge></div>
     <div className="mt-3 grid gap-2">{weeks.map((week) => <div key={week.week_index} className="grid grid-cols-[3.5rem_1fr_7rem] items-center gap-2 text-[11px]" translate="no"><span className="text-zinc-500">W{week.week_index}</span><div className="grid gap-1"><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(3, Math.round((week.planned_distance_km / maxVolume) * 100))}%` }} /></div><div className="h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-zinc-400/70" style={{ width: `${Math.round((week.completed_distance_km / maxVolume) * 100)}%` }} /></div></div><span className="text-right text-zinc-400">{week.completed_distance_km.toFixed(1)}/{week.planned_distance_km.toFixed(1)} {kmUnit()} · S{week.support_workouts}</span></div>)}</div>
   </div>
 }
 
 function PlanIntensitySplit({ split }: { split: { key: string; value: number; percent: number }[] }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Intensity split</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">planned time</Badge></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Распределение нагрузки</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">план</Badge></div>
     <div className="mt-3 grid gap-2 md:grid-cols-5">{split.map((item) => <div key={item.key} className="rounded-md border border-zinc-900 bg-zinc-950 p-2" translate="no"><div className="flex items-center justify-between"><span className="font-medium text-white">{item.key}</span><span className="text-zinc-400">{item.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded bg-zinc-900"><div className="h-full rounded bg-orange-400/70" style={{ width: `${Math.max(2, item.percent)}%` }} /></div><p className="mt-1 text-[11px] text-zinc-500">{item.value.toFixed(1)}</p></div>)}</div>
   </div>
 }
 
 function PlanVersions({ versions }: { versions: PlanVersion[] }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">Plan versions</p><p className="mt-1 text-zinc-500">Immutable snapshots for generation, manual edits and adaptation.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{versions.length} saved</Badge></div>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">История программы</p><p className="mt-1 text-zinc-500">Снимки после создания, ручных правок и адаптаций.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{versions.length}</Badge></div>
     {versions.length ? <div className="mt-3 grid gap-2">{versions.slice(0, 5).map((version) => {
       const workoutCount = Array.isArray(version.snapshot_json?.workouts) ? version.snapshot_json.workouts.length : 0
       return <div key={version.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-2 md:grid-cols-[5rem_1fr_auto] md:items-center" translate="no">
@@ -4037,7 +4155,7 @@ function PlanVersions({ versions }: { versions: PlanVersion[] }) {
         <div><p className="font-medium text-white">{version.summary || version.reason}</p><p className="mt-1 text-zinc-500">{version.reason} · {workoutCount} workouts · {formatLocalDateTime(version.created_at)}</p></div>
         <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">snapshot</Badge>
       </div>
-    })}</div> : <p className="mt-3 text-zinc-500">Versions will appear after generating or editing a plan.</p>}
+    })}</div> : <p className="mt-3 text-zinc-500">История появится после создания или правок программы.</p>}
   </div>
 }
 
@@ -4051,14 +4169,14 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
   const canApply = Boolean(preview?.changes.length) && !applying && !previewing
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><p className="font-semibold text-white">Coach recommendations</p><p className="mt-1 text-zinc-500">Adaptive guidance with preview/apply safeguards and audit history.</p></div>
-      <div className="flex flex-wrap items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading || previewing || applying} onClick={onRefresh}>{loading ? "Refreshing..." : "Refresh"}</Button><Button size="sm" variant="ghost" disabled={!recommendations || loading || previewing || applying} onClick={onPreview}>{previewing ? "Previewing..." : "Preview"}</Button><Button size="sm" disabled={!canApply} onClick={onApply}>{applying ? "Applying..." : "Apply"}</Button></div>
+      <div><p className="font-semibold text-white">Рекомендации тренера</p><p className="mt-1 text-zinc-500">Автоматическая адаптация программы с проверкой перед применением.</p></div>
+      <div className="flex flex-wrap items-center gap-2"><Badge className={statusClass}>{statusLabel}</Badge><Button size="sm" variant="ghost" disabled={loading || previewing || applying} onClick={onRefresh}>{loading ? "Обновляем..." : "Обновить"}</Button><Button size="sm" variant="ghost" disabled={!recommendations || loading || previewing || applying} onClick={onPreview}>{previewing ? "Проверяем..." : "Проверить"}</Button><Button size="sm" disabled={!canApply} onClick={onApply}>{applying ? "Применяем..." : "Применить"}</Button></div>
     </div>
     {error ? <div className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100" translate="no">{error}</div> : null}
     {actionError ? <div className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-rose-100" translate="no">{actionError}</div> : null}
     {recommendations ? <>
       <p className="mt-3 leading-5 text-zinc-300" translate="no">{recommendations.adaptation_summary || recommendations.summary}</p>
-      <CollapsibleSection title="Recommendation metrics" className="mt-3">
+      <CollapsibleSection title="Метрики рекомендации" className="mt-3">
         <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
           <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
           <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
@@ -4069,8 +4187,8 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
         </div>
       </CollapsibleSection>
       <div className="mt-3 grid gap-2" translate="no">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
-      {preview ? <CollapsibleSection title="Preview diff" className="mt-3 border-orange-400/20 bg-orange-400/10" summary={<Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge>}>
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Preview diff</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length} changes</Badge></div>
+      {preview ? <CollapsibleSection title="Что изменится" className="mt-3 border-orange-400/20 bg-orange-400/10" summary={<Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length}</Badge>}>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Что изменится</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length}</Badge></div>
         {preview.changes.length ? <div className="mt-2 grid gap-1.5" translate="no">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
         {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2" translate="no"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
       </CollapsibleSection> : null}
@@ -4085,20 +4203,20 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
 
   return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className="group rounded-md border border-zinc-800 bg-zinc-950/60">
     <summary className="cursor-pointer list-none border-b border-transparent px-3 py-2 group-open:border-zinc-800 [&::-webkit-details-marker]:hidden">
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Week {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">support {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">deload</Badge> : null}</div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Неделя {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">ОФП {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">легче</Badge> : null}</div></div>
     </summary>
     <div className="border-b border-zinc-900 px-3 py-2">
-      <CollapsibleSection title="Week metrics" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{summary.planned_time_label}</Badge>}>
+      <CollapsibleSection title="Цифры недели" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{summary.planned_time_label}</Badge>}>
         <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-6">
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">time</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">hard</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">long</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} {kmUnit()}</div></div>
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">support</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">done</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
-          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">actual</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} {kmUnit()}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">время</span><div className="text-zinc-300">{summary.planned_time_label}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">быстрые</span><div className="text-zinc-300">{summary.hard_sessions}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">длинная</span><div className="text-zinc-300">{summary.long_run_km?.toFixed(1) || "--"} {kmUnit()}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">ОФП</span><div className="text-zinc-300">{formatDuration(summary.support_duration_seconds)}</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">готово</span><div className="text-zinc-300">{Math.round(summary.completion_rate * 100)}%</div></div>
+          <div className="rounded bg-zinc-950 px-2 py-1"><span className="text-zinc-600">факт</span><div className="text-zinc-300">{summary.completed_distance_km.toFixed(1)} {kmUnit()}</div></div>
         </div>
       </CollapsibleSection>
-      {summary.warnings.length ? <div className="mt-2 grid gap-1" translate="no">{summary.warnings.map((warning) => <p key={warning} className="rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">{warning}</p>)}</div> : null}
+      {summary.warnings.length ? <div className="mt-2 grid gap-1">{summary.warnings.map((warning) => <p key={warning} className="rounded border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[11px] text-orange-100">{plainPlanWarning(warning)}</p>)}</div> : null}
     </div>
     <div className="grid gap-2 p-3">{summary.workouts.map((workout) => {
       const candidates = candidatesByWorkout[workout.id] || []
@@ -4115,41 +4233,41 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
       const targetSupportWorkout = isSupportWorkoutType(targetDraft.workout_type)
       const actualSupportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className={cn("rounded-md border bg-zinc-950 p-3 text-xs", isNextWorkout ? "border-orange-400/50 ring-1 ring-orange-400/30" : "border-zinc-900")}>
-        <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · target: {formatWorkoutTarget(workout)} · {workout.intensity}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">next</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{workout.workout_type}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"} translate="no">{workout.status}</Badge></div></div>
-        <CollapsibleSection title="Workout details" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">blocks</Badge>}>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · цель: {formatWorkoutTarget(workout)}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">ближайшая</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workoutStatusLabel(workout.status)}</Badge></div></div>
+        <CollapsibleSection title="Что внутри" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">блоки</Badge>}>
           <div className="grid gap-2 md:grid-cols-4">
-            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Target</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
-            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Purpose</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
-            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">Safety note</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">цель</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">зачем</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
+            <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">безопасность</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
           <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
         </CollapsibleSection>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100" translate="no">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
-        {workout.execution_score?.score !== null && workout.execution_score ? <CollapsibleSection title="Execution score" className="mt-2" summary={<Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge>}>
-          <div className="flex flex-wrap gap-2 text-zinc-500"><span>volume {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>intensity {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>adherence {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
+        {workout.execution_score?.score !== null && workout.execution_score ? <CollapsibleSection title="Оценка выполнения" className="mt-2" summary={<Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge>}>
+          <div className="flex flex-wrap gap-2 text-zinc-500"><span>объем {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>интенсивность {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>статус {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
         </CollapsibleSection> : null}
-        <CollapsibleSection title="Edit target" className="mt-2" summary={targetChanged ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">unsaved</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">manual</Badge>}>
+        <CollapsibleSection title="Поправить цель" className="mt-2" summary={targetChanged ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">не сохранено</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">вручную</Badge>}>
           <p className="mb-2 text-[11px] text-zinc-500">Если план дал странную цель, поправьте ее здесь. После сохранения блоки тренировки пересчитаются от новой дистанции/длительности.</p>
           <div className="grid gap-2 md:grid-cols-3">
-            <Input placeholder="title" value={targetDraft.title} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { title: event.target.value })} />
-            <Select value={targetDraft.workout_type} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { workout_type: event.target.value })}><option value="easy">easy</option><option value="recovery">recovery</option><option value="strides">strides</option><option value="steady">steady</option><option value="interval">interval</option><option value="tempo">tempo</option><option value="threshold">threshold</option><option value="hill">hill</option><option value="long">long</option><option value="race_pace">race pace</option><option value="strength">strength/OFP</option><option value="mobility">mobility</option></Select>
-            <Input placeholder="intensity" value={targetDraft.intensity} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { intensity: event.target.value })} />
+            <Input placeholder="название" value={targetDraft.title} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { title: event.target.value })} />
+            <Select value={targetDraft.workout_type} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { workout_type: event.target.value })}><option value="easy">легкий бег</option><option value="recovery">восстановление</option><option value="strides">ускорения</option><option value="steady">ровная работа</option><option value="interval">интервалы</option><option value="tempo">темповая</option><option value="threshold">пороговая</option><option value="hill">горки</option><option value="long">длинная</option><option value="race_pace">темп старта</option><option value="strength">ОФП</option><option value="mobility">мобилити</option></Select>
+            <Input placeholder="интенсивность" value={targetDraft.intensity} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { intensity: event.target.value })} />
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_2fr_auto]">
-            <Input type="number" min="0" max="250" step="0.1" placeholder="target km" value={targetDraft.distance_km} disabled={!canEditTarget || targetSupportWorkout} onChange={(event) => onTargetDraft(workout, { distance_km: event.target.value })} />
-            <Input type="number" min="1" max="1440" step="1" placeholder="target minutes" value={targetDraft.duration_minutes} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { duration_minutes: event.target.value })} />
-            <Input placeholder="description" value={targetDraft.description} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { description: event.target.value })} />
-            <Button size="sm" disabled={!canEditTarget || !targetChanged} onClick={() => onSaveTarget(workout)}>Save target</Button>
+            <Input type="number" min="0" max="250" step="0.1" placeholder="цель, км" value={targetDraft.distance_km} disabled={!canEditTarget || targetSupportWorkout} onChange={(event) => onTargetDraft(workout, { distance_km: event.target.value })} />
+            <Input type="number" min="1" max="1440" step="1" placeholder="цель, мин" value={targetDraft.duration_minutes} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { duration_minutes: event.target.value })} />
+            <Input placeholder="описание" value={targetDraft.description} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { description: event.target.value })} />
+            <Button size="sm" disabled={!canEditTarget || !targetChanged} onClick={() => onSaveTarget(workout)}>Сохранить</Button>
           </div>
-          <p className="mt-2 text-[11px] text-zinc-500" translate="no">Will save as: {formatWorkoutTarget(targetPayload(targetDraft))}</p>
+          <p className="mt-2 text-[11px] text-zinc-500" translate="no">Сохраним как: {formatWorkoutTarget(targetPayload(targetDraft))}</p>
           {!canEditTarget ? <p className="mt-2 text-[11px] text-zinc-600">Выполненную или привязанную тренировку сначала нужно отвязать, чтобы не менять историю.</p> : null}
         </CollapsibleSection>
-        {canCompleteManually ? <CollapsibleSection title="Manual completion" className="mt-2">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Manual completion</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Workout Detail</Badge></div>
+        {canCompleteManually ? <CollapsibleSection title="Отметить вручную" className="mt-2">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Отметить тренировку</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">вручную</Badge></div>
           <div className="grid gap-2 md:grid-cols-4">
-            {actualSupportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">duration-only</div> : <Input type="number" min="0" max="250" step="0.1" placeholder="actual km" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}
-            <Input type="number" min="1" max="2880" step="1" placeholder="minutes" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} />
+            {actualSupportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">только время</div> : <Input type="number" min="0" max="250" step="0.1" placeholder="факт, км" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}
+            <Input type="number" min="1" max="2880" step="1" placeholder="минуты" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} />
             <Input type="number" min="0" max="10" step="1" placeholder="RPE" value={completionDraft.rpe} onChange={(event) => onCompletionDraft(workout, { rpe: event.target.value })} />
             <Input type="number" min="30" max="240" step="1" placeholder="avg HR" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} />
           </div>
@@ -4159,10 +4277,10 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
             <Input type="number" min="0" max="10" placeholder="sleep" value={completionDraft.sleep_quality_0_10} onChange={(event) => onCompletionDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
             <Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} />
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Complete</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="боль/заметки" value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="погода" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="комментарий" value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Готово</Button></div>
         </CollapsibleSection> : null}
-        {canGiveFeedback ? <CollapsibleSection title="Workout feedback" className="mt-2" summary={workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Workout feedback</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">saved</Badge> : <Badge>new</Badge>}</div>
+        {canGiveFeedback ? <CollapsibleSection title="Самочувствие" className="mt-2" summary={workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">сохранено</Badge> : <Badge>новое</Badge>}>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Самочувствие после тренировки</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">сохранено</Badge> : <Badge>новое</Badge>}</div>
           <div className="grid gap-2 md:grid-cols-5">
             <Input type="number" min="0" max="10" placeholder="RPE" value={draft.rpe} onChange={(event) => onFeedbackDraft(workout, { rpe: event.target.value })} />
             <Input type="number" min="0" max="10" placeholder="soreness" value={draft.soreness_0_10} onChange={(event) => onFeedbackDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} />
@@ -4170,11 +4288,11 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
             <Input type="number" min="0" max="10" placeholder="sleep" value={draft.sleep_quality_0_10} onChange={(event) => onFeedbackDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
             <label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> pain</label>
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="pain notes" value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="weather" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="user notes" value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Save feedback</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="боль/заметки" value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="погода" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="комментарий" value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Сохранить</Button></div>
         </CollapsibleSection> : null}
-        <CollapsibleSection title="Workout actions" className="mt-2">
-        {canReschedule ? <div className="mb-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Reschedule</Button></div> : null}
-        <div className="flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">linked done</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Unlink activity</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Missed</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Skipped</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Matching..." : "Find activity"}</Button></div>
+        <CollapsibleSection title="Действия" className="mt-2">
+        {canReschedule ? <div className="mb-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Перенести</Button></div> : null}
+        <div className="flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">связана с пробежкой</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Отвязать</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Пропустил</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Отменить</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Ищем..." : "Найти пробежку"}</Button></div>
         </CollapsibleSection>
         {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200" translate="no">{candidateErrors[workout.id]}</p> : null}
         {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
