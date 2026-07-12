@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models import Activity, AthleteProfile, CoachingEvent, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutMissIn, PlanWorkoutUpdate
 from app.services.activity_metrics import is_running_activity_type, sync_derived_activity_metrics
+from app.services.audit import log_audit_event
 from app.services.coaching_events import record_coaching_event
 from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout
 from app.services.plan_versions import create_plan_version
@@ -3281,6 +3282,47 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
     except IntegrityError as error:
         db.rollback()
         raise ValueError("Activity already linked to another workout") from error
+    db.refresh(workout)
+    return workout
+
+
+def unlink_workout_activity(db: Session, user: User, workout: TrainingPlanWorkout) -> TrainingPlanWorkout:
+    if workout.completed_activity_id is None:
+        raise ValueError("Workout has no completed activity to unlink")
+    previous_activity_id = workout.completed_activity_id
+    workout.completed_activity_id = None
+    workout.completed_activity = None
+    workout.status = "planned"
+    if workout.feedback:
+        sync_feedback_context(workout.feedback, workout)
+    plan = workout.plan
+    if plan is None:
+        plan = db.scalar(select(TrainingPlan).where(TrainingPlan.id == workout.plan_id, TrainingPlan.user_id == user.id).with_for_update())
+    if plan is None:
+        raise ValueError("Training plan not found")
+    version = create_plan_version(db, user, plan, "completion_correction", f"Removed completion from workout #{workout.id}")
+    db.flush()
+    event = record_coaching_event(
+        db,
+        user_id=user.id,
+        event_type="workout_completion_removed",
+        category="outcome",
+        source="user",
+        plan_id=plan.id,
+        workout_id=workout.id,
+        activity_id=previous_activity_id,
+        payload={"previous_activity_id": previous_activity_id, "status": "planned", "plan_version_id": version.id},
+    )
+    db.flush()
+    log_audit_event(
+        db,
+        user.id,
+        "workout_completion_removed",
+        "training_plan_workout",
+        workout.id,
+        {"previous_activity_id": previous_activity_id, "plan_id": plan.id, "plan_version_id": version.id, "coaching_event_id": event.id},
+    )
+    db.commit()
     db.refresh(workout)
     return workout
 

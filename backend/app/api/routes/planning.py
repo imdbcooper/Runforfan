@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanVersion, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanVersionOut, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutMissIn, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, EmptyRequest, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanVersionOut, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutMissIn, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
-from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, complete_workout, delete_plan, duplicate_plan, feedback_to_dict, generate_plan, link_activity_to_workout, mark_workout_missed, patch_workout_feedback, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, complete_workout, delete_plan, duplicate_plan, feedback_to_dict, generate_plan, link_activity_to_workout, mark_workout_missed, patch_workout_feedback, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, unlink_workout_activity, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -220,6 +220,22 @@ def delete_training_plan(plan_id: int, user: User = Depends(get_current_user), d
 @router.patch("/workouts/{workout_id}", response_model=PlanWorkoutOut)
 def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     workout = get_user_workout(db, user, workout_id, lock=True)
+    if "scheduled_date" in payload.model_fields_set or payload.status in {"planned", "skipped", "rescheduled"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "coach_action_required",
+                "message": "Use a Coach Action preview and explicit confirmation for skip or reschedule transitions",
+            },
+        )
+    if "completed_activity_id" in payload.model_fields_set or payload.status == "done":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "completion_action_required",
+                "message": "Use the explicit complete, link, or completion correction endpoint",
+            },
+        )
     try:
         if payload.status == "missed":
             if set(payload.model_fields_set) != {"status"}:
@@ -231,6 +247,15 @@ def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, us
         status_code = 404 if "not found" in str(error).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(error)) from error
     return workout_to_dict(updated)
+
+
+@router.post("/workouts/{workout_id}/unlink-activity", response_model=PlanWorkoutOut)
+def unlink_training_plan_workout_activity(workout_id: int, _payload: EmptyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        corrected = unlink_workout_activity(db, user, get_user_workout(db, user, workout_id, lock=True))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return workout_to_dict(corrected)
 
 
 @router.get("/workouts/{workout_id}", response_model=PlanWorkoutOut)

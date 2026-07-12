@@ -532,6 +532,36 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_athlete_state_snapshots_user_date ON athlete_state_snapshots (user_id, local_date DESC, id DESC)",
         ),
     ),
+    (
+        "20260712_0024_coach_action_previews",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS coach_action_previews (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                workout_id INTEGER NOT NULL REFERENCES training_plan_workouts(id) ON DELETE CASCADE,
+                action VARCHAR(64) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                request_snapshot JSONB NOT NULL,
+                preview_snapshot JSONB NOT NULL,
+                state_fingerprint VARCHAR(64) NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                applied_at TIMESTAMP WITH TIME ZONE,
+                recommendation_audit_id INTEGER REFERENCES training_plan_recommendation_audits(id) ON DELETE SET NULL,
+                plan_version_id INTEGER REFERENCES plan_versions(id) ON DELETE SET NULL,
+                audit_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL,
+                coaching_event_id INTEGER REFERENCES coaching_events(id) ON DELETE SET NULL,
+                applied_response_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_action_previews_user_id ON coach_action_previews (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_action_previews_plan_id ON coach_action_previews (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_action_previews_workout_id ON coach_action_previews (workout_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_action_previews_expires_at ON coach_action_previews (expires_at)",
+        ),
+    ),
 )
 
 

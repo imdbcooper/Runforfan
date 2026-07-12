@@ -67,6 +67,8 @@ GET /health
 - `PUT /api/readiness/today` — создать или заменить check-in на локальную дату пользователя без автоматического изменения плана.
 - `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
+- `POST /api/coach-actions/workouts/{workout_id}/preview` — создать server-generated preview для `skip` или `reschedule` со структурированной причиной, календарно-недельным эффектом и проверкой safety constraints.
+- `POST /api/coach-actions/{preview_id}/apply` — явно подтвердить generic coach action; backend блокирует stale/expired preview, повторно проверяет план, сохраняет version/audit/event linkage и поддерживает идемпотентный retry.
 - `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
 - `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot текущего состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил. `as_of_at` отмечает завершение сбора текущих mutable inputs, но не обещает историческую реконструкцию БД.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.

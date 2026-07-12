@@ -1172,6 +1172,72 @@ class DailyReadinessActionApplyOut(BaseModel):
     summary: str
 
 
+class CoachActionPreviewRequest(BaseModel):
+    action: Literal["skip", "reschedule"]
+    reason: Literal["illness", "pain", "fatigue", "schedule_conflict", "weather", "other"]
+    notes: str | None = Field(default=None, max_length=1000)
+    target_date: date | None = None
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_target_date(self):
+        if self.action == "reschedule" and self.target_date is None:
+            raise ValueError("target_date is required for reschedule")
+        if self.action == "skip" and self.target_date is not None:
+            raise ValueError("target_date is only allowed for reschedule")
+        return self
+
+
+class CoachActionChangeOut(BaseModel):
+    field: str
+    before: object | None = None
+    after: object | None = None
+
+
+class CoachActionWeeklyEffectOut(BaseModel):
+    planned_distance_km_before: float
+    planned_distance_km_after: float
+    planned_duration_seconds_before: int
+    planned_duration_seconds_after: int
+
+
+class CoachActionCalendarWeekEffectOut(BaseModel):
+    week_start: date
+    week_end: date
+    planned_distance_km_before: float
+    planned_distance_km_after: float
+    planned_duration_seconds_before: int
+    planned_duration_seconds_after: int
+
+
+class CoachActionPreviewOut(BaseModel):
+    preview_id: str
+    expires_at: datetime
+    action: Literal["skip", "reschedule"]
+    rule_version: str
+    reason: str
+    target_date: date | None = None
+    workout: PlanWorkoutOut
+    changes: list[CoachActionChangeOut]
+    weekly_effect: CoachActionWeeklyEffectOut
+    calendar_week_effects: list[CoachActionCalendarWeekEffectOut]
+    constraint_facts: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class CoachActionApplyOut(BaseModel):
+    status: str
+    preview_id: str
+    action: str
+    workout: PlanWorkoutOut
+    plan_version_id: int
+    plan_version_number: int
+    recommendation_audit_id: int
+    audit_log_id: int
+    coaching_event_id: int
+    summary: str
+
+
 class AthleteStateSourceRefOut(BaseModel):
     model: str
     id: int | str

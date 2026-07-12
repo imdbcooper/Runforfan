@@ -224,6 +224,61 @@ export type AuditLogEntry = {
 
 export type WorkoutMissReason = "illness" | "pain" | "fatigue" | "schedule_conflict" | "weather" | "other"
 
+export type CoachAction = "skip" | "reschedule"
+
+export type CoachActionPreviewRequest = {
+  action: CoachAction
+  reason: WorkoutMissReason
+  notes?: string | null
+  target_date?: string | null
+}
+
+export type CoachActionChange = {
+  field: string
+  before: unknown
+  after: unknown
+}
+
+export type CoachActionWeeklyEffect = {
+  planned_distance_km_before: number
+  planned_distance_km_after: number
+  planned_duration_seconds_before: number
+  planned_duration_seconds_after: number
+}
+
+export type CoachActionCalendarWeekEffect = CoachActionWeeklyEffect & {
+  week_start: string
+  week_end: string
+}
+
+export type CoachActionPreview = {
+  preview_id: string
+  expires_at: string
+  action: CoachAction
+  rule_version: string
+  reason: WorkoutMissReason
+  target_date: string | null
+  workout: PlanWorkout
+  changes: CoachActionChange[]
+  weekly_effect: CoachActionWeeklyEffect
+  calendar_week_effects: CoachActionCalendarWeekEffect[]
+  constraint_facts: string[]
+  summary: string
+}
+
+export type CoachActionApplyResult = {
+  status: string
+  preview_id: string
+  action: CoachAction
+  workout: PlanWorkout
+  plan_version_id: number
+  plan_version_number: number
+  recommendation_audit_id: number
+  audit_log_id: number
+  coaching_event_id: number
+  summary: string
+}
+
 export type GoalProgress = {
   metric: string
   value: number | null
@@ -1455,7 +1510,10 @@ export const api = {
   workout: (id: number) => request<PlanWorkout>(`/planning/workouts/${id}`),
   completeWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   missWorkout: (id: number, reason: WorkoutMissReason, notes?: string) => request<PlanWorkout>(`/planning/workouts/${id}/miss`, { method: "POST", body: JSON.stringify({ reason, notes: notes || null }) }),
+  previewCoachAction: (workoutId: number, payload: CoachActionPreviewRequest) => request<CoachActionPreview>(`/coach-actions/workouts/${workoutId}/preview`, { method: "POST", body: JSON.stringify(payload) }),
+  applyCoachAction: (previewId: string) => request<CoachActionApplyResult>(`/coach-actions/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  unlinkPlanWorkoutActivity: (id: number) => request<PlanWorkout>(`/planning/workouts/${id}/unlink-activity`, { method: "POST", body: "{}" }),
   workoutFeedback: (id: number) => request<PlanWorkoutFeedback | null>(`/planning/workouts/${id}/feedback`),
   patchWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PATCH", body: JSON.stringify(payload) }),
   saveWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PUT", body: JSON.stringify(payload) }),

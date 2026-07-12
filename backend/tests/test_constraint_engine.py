@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 
 try:
-    from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout, validate_readiness_action_target
+    from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout, validate_coach_action_target, validate_readiness_action_target
 except ModuleNotFoundError as exc:
     if exc.name == "sqlalchemy":
         raise unittest.SkipTest("Backend dependencies are required for constraint engine tests") from exc
@@ -86,6 +86,41 @@ class ConstraintEngineTests(unittest.TestCase):
 
         self.assertEqual(missing.reason, "safety_blocks_action")
         self.assertTrue(allowed.allowed)
+
+    def test_coach_reschedule_blocks_pain_and_past_dates(self):
+        pain = validate_coach_action_target(
+            action="reschedule", target_date=date(2026, 7, 14), current_date=date(2026, 7, 12), status="planned",
+            completed_activity_id=None, workout_is_hard=False, other_hard_workout_dates=[], reason="pain", today=date(2026, 7, 12),
+        )
+        past = validate_coach_action_target(
+            action="reschedule", target_date=date(2026, 7, 11), current_date=date(2026, 7, 12), status="planned",
+            completed_activity_id=None, workout_is_hard=False, other_hard_workout_dates=[], reason="schedule_conflict", today=date(2026, 7, 12),
+        )
+
+        self.assertEqual(pain.reason, "safety_blocks_action")
+        self.assertEqual(past.reason, "target_date_in_past")
+
+    def test_coach_reschedule_enforces_hard_spacing_for_hard_workout_only(self):
+        hard = validate_coach_action_target(
+            action="reschedule", target_date=date(2026, 7, 14), current_date=date(2026, 7, 12), status="planned",
+            completed_activity_id=None, workout_is_hard=True, other_hard_workout_dates=[date(2026, 7, 16)], reason="schedule_conflict", today=date(2026, 7, 12),
+        )
+        easy = validate_coach_action_target(
+            action="reschedule", target_date=date(2026, 7, 14), current_date=date(2026, 7, 12), status="planned",
+            completed_activity_id=None, workout_is_hard=False, other_hard_workout_dates=[date(2026, 7, 16)], reason="schedule_conflict", today=date(2026, 7, 12),
+        )
+
+        self.assertEqual(hard.reason, "hard_session_spacing")
+        self.assertTrue(easy.allowed)
+
+    def test_coach_reschedule_stays_inside_plan_horizon(self):
+        result = validate_coach_action_target(
+            action="reschedule", target_date=date(2026, 8, 1), current_date=date(2026, 7, 12), status="planned",
+            completed_activity_id=None, workout_is_hard=False, other_hard_workout_dates=[], reason="schedule_conflict",
+            today=date(2026, 7, 12), plan_end_date=date(2026, 7, 30),
+        )
+
+        self.assertEqual(result.reason, "target_date_outside_plan")
 
 
 if __name__ == "__main__":

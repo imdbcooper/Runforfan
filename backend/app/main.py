@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import add_exception_handlers
-from app.api.routes import account, activities, analytics, athlete_state, audit_log, auth, calendar, coaching_events, dashboard, export, goals, imports, performance, planning, profile, readiness, settings as settings_routes, zones
+from app.api.routes import account, activities, analytics, athlete_state, audit_log, auth, calendar, coach_actions, coaching_events, dashboard, export, goals, imports, performance, planning, profile, readiness, settings as settings_routes, zones
 from app.core.settings import get_settings
 from app.db.base import Base
 from app.db.migrations.runner import run_migrations
@@ -70,6 +70,7 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(calendar.router, prefix="/api")
 app.include_router(planning.router, prefix="/api")
 app.include_router(readiness.router, prefix="/api")
+app.include_router(coach_actions.router, prefix="/api")
 app.include_router(settings_routes.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(zones.router, prefix="/api")

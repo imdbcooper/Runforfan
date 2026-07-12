@@ -210,6 +210,27 @@ class ApiOwnershipTests(unittest.TestCase):
         self.assertIn("training_plan_workouts.id = 9", query)
         self.assertIn("training_plans.user_id = 42", query)
 
+    def test_planning_workout_patch_rejects_direct_skip_and_reschedule(self):
+        workout = SimpleNamespace(id=9)
+        db = CapturingDb()
+        app = app_with_router(planning_routes.router, planning_routes.get_current_user, planning_routes.get_db, db)
+
+        with patch("app.api.routes.planning.get_user_workout", return_value=workout):
+            skipped = TestClient(app).patch("/api/planning/workouts/9", json={"status": "skipped"})
+            rescheduled = TestClient(app).patch("/api/planning/workouts/9", json={"scheduled_date": "2026-07-15"})
+            restored = TestClient(app).patch("/api/planning/workouts/9", json={"status": "planned"})
+            unlinked = TestClient(app).patch("/api/planning/workouts/9", json={"completed_activity_id": None})
+            linked = TestClient(app).patch("/api/planning/workouts/9", json={"completed_activity_id": 12, "status": "done"})
+
+        self.assertEqual(skipped.status_code, 409)
+        self.assertEqual(rescheduled.status_code, 409)
+        self.assertEqual(restored.status_code, 409)
+        self.assertEqual(unlinked.status_code, 409)
+        self.assertEqual(linked.status_code, 409)
+        self.assertEqual(skipped.json()["code"], "coach_action_required")
+        self.assertEqual(unlinked.json()["code"], "completion_action_required")
+        self.assertEqual(linked.json()["code"], "completion_action_required")
+
     def test_planning_activity_match_lookup_is_user_scoped(self):
         db = CapturingDb()
         app = app_with_router(planning_routes.router, planning_routes.get_current_user, planning_routes.get_db, db)

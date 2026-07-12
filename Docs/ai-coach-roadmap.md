@@ -54,7 +54,7 @@
 
 ## Этап 2. Event-Driven Adaptation
 
-Статус: в работе. Подэтап подтверждаемых readiness-действий завершён 12 июля 2026 года (`4077984`); post-workout feedback и typed события пропуска уже реализованы. Общий pure Constraint Engine централизует hard-workout policies, calendar spacing и readiness target validation без изменения safety thresholds. Generic actions `skip`/`reschedule`, event-driven recalculation и rollback остаются в scope этапа.
+Статус: в работе. Подэтап подтверждаемых readiness-действий завершён 12 июля 2026 года (`4077984`); post-workout feedback и typed события пропуска уже реализованы. Общий pure Constraint Engine централизует hard-workout policies, calendar spacing и readiness target validation без изменения safety thresholds. Generic actions `skip`/`reschedule` теперь используют durable server preview, explicit confirmation, stale revalidation, plan version, audit и coaching event. Event-driven recalculation и rollback остаются в scope этапа.
 
 ### Результат
 

@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,8 @@ type WorkoutTargetDraft = { title: string; workout_type: string; distance_km: st
 type CalendarMatchState =
   | { mode: "workout_to_activity"; candidates: PlanActivityMatchCandidate[] }
   | { mode: "activity_to_workout"; candidates: PlanWorkoutMatchCandidate[] }
+
+type CoachActionTarget = { workoutId: number; title: string; action: CoachAction; targetDate?: string; eventId?: string }
 
 type CalendarDayProps = {
   day: string
@@ -1341,6 +1343,133 @@ function MissWorkoutDialog({ title, busy, error, onSubmit, onClose }: { title: s
   </div>
 }
 
+function coachActionChangeLabel(field: string) {
+  const labels: Record<string, string> = {
+    status: uiText("Статус", "Status"),
+    scheduled_date: uiText("Дата", "Date"),
+  }
+  return labels[field] || readinessChangeLabel(field)
+}
+
+function coachActionServerSummary(summary: string, action: CoachAction) {
+  const summaries: Record<string, [string, string]> = {
+    "Тренировка будет отменена без переноса пропущенного объёма.": ["Тренировка будет отменена без переноса пропущенного объема.", "The workout will be skipped without moving missed volume to another session."],
+    "Тренировка будет перенесена после проверки интервалов между тяжёлыми сессиями.": ["Тренировка будет перенесена после проверки интервалов между тяжелыми сессиями.", "The workout will be rescheduled after checking spacing between hard sessions."],
+  }
+  const mapped = summaries[summary]
+  if (mapped) return uiText(...mapped)
+  return action === "skip"
+    ? uiText("Тренировка будет отменена. Проверьте изменения и ограничения ниже.", "The workout will be skipped. Review the changes and constraints below.")
+    : uiText("Тренировка будет перенесена. Проверьте изменения и ограничения ниже.", "The workout will be rescheduled. Review the changes and constraints below.")
+}
+
+function coachActionConstraintFact(fact: string) {
+  const facts: Record<string, [string, string]> = {
+    "No missed volume will be moved to another workout.": ["Пропущенный объем не будет перенесен на другую тренировку.", "No missed volume will be moved to another workout."],
+    "Hard-session spacing was checked against the current active plan.": ["Интервалы между тяжелыми тренировками проверены по текущему активному плану.", "Hard-session spacing was checked against the current active plan."],
+    "This workout is not classified as a hard session by the planning policy.": ["Эта тренировка не относится к тяжелым по правилам планирования.", "This workout is not classified as a hard session by the planning policy."],
+  }
+  const mapped = facts[fact]
+  return mapped ? uiText(...mapped) : fact
+}
+
+function coachActionDurationEffect(before: number, after: number) {
+  if (before <= 0 && after <= 0) return uiText("Длительность не задана в плане", "Duration target is unavailable for this plan")
+  const value = (seconds: number) => seconds > 0 ? formatDuration(seconds) : uiText("0 мин", "0 min")
+  return `${value(before)} → ${value(after)}`
+}
+
+function CoachActionDialog({ target, onApplied, onClose }: { target: CoachActionTarget; onApplied: () => Promise<void>; onClose: () => void }) {
+  const [reason, setReason] = useState<WorkoutMissReason>("schedule_conflict")
+  const [notes, setNotes] = useState("")
+  const [preview, setPreview] = useState<CoachActionPreview | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState("")
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const reasonRef = useRef<HTMLSelectElement | null>(null)
+  const applyButtonRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef(onClose)
+  const busyRef = useRef(false)
+  closeRef.current = onClose
+  busyRef.current = previewing || applying
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    reasonRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busyRef.current) closeRef.current()
+      if (event.key !== "Tab" || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      previousFocus?.focus()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (preview) applyButtonRef.current?.focus()
+  }, [preview])
+
+  async function createPreview() {
+    setPreviewing(true)
+    setError("")
+    try {
+      setPreview(await api.previewCoachAction(target.workoutId, {
+        action: target.action,
+        reason,
+        notes: notes.trim() || null,
+        target_date: target.action === "reschedule" ? target.targetDate || null : null,
+      }))
+    } catch (caught) {
+      setError(apiErrorMessage(caught, uiText("Не удалось проверить изменение", "Could not prepare the change preview")))
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  async function applyPreview() {
+    if (!preview) return
+    setApplying(true)
+    setError("")
+    try {
+      await api.applyCoachAction(preview.preview_id)
+      await onApplied()
+      onClose()
+    } catch (caught) {
+      setError(apiErrorMessage(caught, uiText("Preview устарел или изменение нельзя применить", "The preview expired or the change can no longer be applied")))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const actionLabel = target.action === "skip" ? uiText("отменить тренировку", "skip workout") : uiText("перенести тренировку", "reschedule workout")
+  return <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/75 p-3 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !busyRef.current) onClose() }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="coach-action-title" aria-describedby="coach-action-description" className="my-auto flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-2xl border border-orange-400/30 bg-[#111] shadow-2xl shadow-black/50">
+      <div className="shrink-0 border-b border-zinc-800 p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-300">Coach action</p><h2 id="coach-action-title" className="mt-2 text-lg font-semibold text-white">{preview ? uiText("Проверьте изменение плана", "Review plan change") : `${uiText("Подготовить", "Prepare")} ${actionLabel}`}</h2><p id="coach-action-description" className="mt-2 text-xs leading-5 text-zinc-400">{preview ? coachActionServerSummary(preview.summary, preview.action) : `${target.title}. ${uiText("Сначала укажите причину. Тренер проверит влияние на план до подтверждения.", "Choose a reason first. Coach will check the plan impact before confirmation.")}`}</p></div>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
+        <div className="grid gap-4">
+          {!preview ? <div className="grid gap-3"><Field label={uiText("Причина", "Reason")}><Select ref={reasonRef} value={reason} disabled={previewing} onChange={(event) => setReason(event.target.value as WorkoutMissReason)}><option value="illness">{uiText("Болезнь", "Illness")}</option><option value="pain">{uiText("Боль", "Pain")}</option><option value="fatigue">{uiText("Усталость", "Fatigue")}</option><option value="schedule_conflict">{uiText("Не подошло расписание", "Schedule conflict")}</option><option value="weather">{uiText("Погода", "Weather")}</option><option value="other">{uiText("Другое", "Other")}</option></Select></Field><Field label={uiText("Комментарий (необязательно)", "Note (optional)")}><Input value={notes} disabled={previewing} maxLength={1000} onChange={(event) => setNotes(event.target.value)} /></Field></div> : <><div className="grid gap-2">{preview.changes.map((change) => <div key={change.field} className="grid min-w-0 gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"><span className="font-medium text-zinc-400">{coachActionChangeLabel(change.field)}</span><span className="min-w-0 break-words text-zinc-500">{readinessChangeValue(change.before)}</span><span className="text-orange-300">→</span><span className="min-w-0 break-words text-white">{readinessChangeValue(change.after)}</span></div>)}</div><div className="grid gap-2 rounded-xl border border-zinc-800 p-3 text-xs sm:grid-cols-2"><div><p className="text-zinc-500">{uiText("Текущая неделя: дистанция", "Current week: distance")}</p><p className="mt-1 break-words text-white">{formatDistance(preview.weekly_effect.planned_distance_km_before)} → {formatDistance(preview.weekly_effect.planned_distance_km_after)}</p></div><div><p className="text-zinc-500">{uiText("Текущая неделя: время", "Current week: duration")}</p><p className="mt-1 break-words text-white">{coachActionDurationEffect(preview.weekly_effect.planned_duration_seconds_before, preview.weekly_effect.planned_duration_seconds_after)}</p></div></div>{preview.calendar_week_effects.length ? <div className="grid gap-2"><p className="text-xs font-medium text-white">{uiText("Нагрузка по календарным неделям", "Calendar week load")}</p>{preview.calendar_week_effects.map((effect) => <div key={effect.week_start} className="grid min-w-0 gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-2"><span className="break-words text-zinc-400">{formatDate(effect.week_start)} - {formatDate(effect.week_end)}</span><span className="break-words text-zinc-300">{formatDistance(effect.planned_distance_km_before)} → {formatDistance(effect.planned_distance_km_after)}</span><span className="break-words text-zinc-300">{coachActionDurationEffect(effect.planned_duration_seconds_before, effect.planned_duration_seconds_after)}</span></div>)}</div> : null}{preview.constraint_facts.length ? <div className="rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-xs text-orange-100"><p className="font-medium">{uiText("Проверка ограничений", "Constraint check")}</p><div className="mt-2 grid gap-1">{preview.constraint_facts.map((fact) => <p key={fact}>{coachActionConstraintFact(fact)}</p>)}</div></div> : null}<p className="text-[11px] leading-5 text-zinc-600">{uiText("Правила", "Rules")} {preview.rule_version} · {uiText("действует до", "valid until")} {formatLocalDateTime(preview.expires_at)}</p></>}
+          {error ? <p role="alert" aria-live="assertive" className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p> : null}
+        </div>
+      </div>
+      <div className="shrink-0 flex flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button variant="secondary" disabled={previewing || applying} onClick={onClose}>{uiText("Оставить как есть", "Keep original")}</Button>{preview ? <Button ref={applyButtonRef} disabled={applying} onClick={applyPreview}>{applying ? uiText("Применяем...", "Applying...") : uiText("Подтвердить изменение", "Confirm change")}</Button> : <Button disabled={previewing} onClick={createPreview}>{previewing ? uiText("Проверяем...", "Checking...") : uiText("Показать последствия", "Show impact")}</Button>}</div>
+    </div>
+  </div>
+}
+
 function DailyCoachCheckIn({ readiness, onChanged, onActionApplied }: { readiness: DailyReadiness | null; onChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void> }) {
   const [draft, setDraft] = useState<DailyCheckInDraft>(() => dailyDraft(readiness))
   const [editing, setEditing] = useState(() => !readiness?.checkin)
@@ -2406,6 +2535,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
   const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({})
   const [missEvent, setMissEvent] = useState<CalendarEvent | null>(null)
   const [missError, setMissError] = useState("")
+  const [coachAction, setCoachAction] = useState<CoachActionTarget | null>(null)
 
   async function loadRange(fromValue = fromDate, toValue = toDate) {
     setError("")
@@ -2462,16 +2592,8 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
       setMissEvent(event)
       return
     }
-    setBusyEvent(event.id)
-    setError("")
-    try {
-      await api.updatePlanWorkout(event.planned_workout_id, { status })
-      await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
-    } catch (updateError) {
-      console.error(updateError)
-      setError("Не удалось обновить workout из календаря")
-    } finally {
-      setBusyEvent("")
+    if (status === "skipped") {
+      setCoachAction({ workoutId: event.planned_workout_id, eventId: event.id, title: event.title, action: "skip" })
     }
   }
 
@@ -2505,15 +2627,14 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
       setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Выберите новую дату" }))
       return
     }
-    setBusyEvent(event.id)
-    try {
-      await api.updatePlanWorkout(event.planned_workout_id, { scheduled_date: scheduledDate })
-      await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
-    } catch (updateError) {
-      console.error(updateError)
-      setCalendarMatchErrors((current) => ({ ...current, [event.id]: "Не удалось перенести workout" }))
-    } finally {
-      setBusyEvent("")
+    setCoachAction({ workoutId: event.planned_workout_id, eventId: event.id, title: event.title, action: "reschedule", targetDate: scheduledDate })
+  }
+
+  async function refreshCalendarCoachAction() {
+    const refreshed = await loadRange(calendar?.from_date || fromDate, calendar?.to_date || toDate)
+    if (!refreshed) throw new Error(uiText("Изменение применено, но календарь не обновился", "The change was applied, but calendar refresh failed"))
+    if (coachAction?.action === "reschedule" && coachAction.targetDate && coachAction.eventId) {
+      setRescheduleDrafts((current) => ({ ...current, [coachAction.eventId!]: coachAction.targetDate! }))
     }
   }
 
@@ -2569,6 +2690,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
 
   return <div className="grid gap-4">
     {missEvent ? <MissWorkoutDialog title={missEvent.title} busy={busyEvent === missEvent.id} error={missError} onSubmit={missCalendarWorkout} onClose={() => setMissEvent(null)} /> : null}
+    {coachAction ? <CoachActionDialog target={coachAction} onApplied={refreshCalendarCoachAction} onClose={() => setCoachAction(null)} /> : null}
     <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
       <Card className="min-w-0 overflow-hidden p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2646,7 +2768,6 @@ function CalendarEventCard({ event, busyEvent, loadingMatchEvent, matchesByEvent
       {isWorkout ? <>
         <Button size="sm" variant="ghost" disabled={busy || !["planned", "rescheduled"].includes(event.status || "") || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "missed")}>Missed</Button>
         <Button size="sm" variant="ghost" disabled={busy || !["planned", "rescheduled"].includes(event.status || "") || Boolean(event.linked_activity_id)} onClick={() => onUpdate(event, "skipped")}>Skipped</Button>
-        {event.status !== "planned" && !event.linked_activity_id ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUpdate(event, "planned")}>Restore</Button> : null}
       </> : null}
       {canFindWorkoutActivity || canFindActivityWorkout ? <Button size="sm" variant="ghost" disabled={busy || loadingMatches} onClick={() => onFindMatches(event)}>{loadingMatches ? "Matching..." : canFindWorkoutActivity ? "Find activity" : "Find workout"}</Button> : null}
     </div>
@@ -4245,6 +4366,7 @@ function Planning() {
   const [missedWorkout, setMissedWorkout] = useState<PlanWorkout | null>(null)
   const [savingMissedWorkout, setSavingMissedWorkout] = useState(false)
   const [missedWorkoutError, setMissedWorkoutError] = useState("")
+  const [coachAction, setCoachAction] = useState<CoachActionTarget | null>(null)
   const [recommendations, setRecommendations] = useState<PlanRecommendations | null>(null)
   const [recommendationPreview, setRecommendationPreview] = useState<PlanRecommendationPreview | null>(null)
   const [recommendationAudits, setRecommendationAudits] = useState<PlanRecommendationAudit[]>([])
@@ -4361,6 +4483,10 @@ function Planning() {
   }
 
   async function updateWorkout(workout: PlanWorkout, status: string) {
+    if (status === "skipped") {
+      setCoachAction({ workoutId: workout.id, title: coachWorkoutTitle(workout), action: "skip" })
+      return
+    }
     if (status !== "missed") {
       await patchWorkout(workout, { status }, "Не удалось обновить статус")
       return
@@ -4399,12 +4525,18 @@ function Planning() {
 
   async function rescheduleWorkout(workout: PlanWorkout, scheduledDate: string) {
     if (!scheduledDate) return
-    const updated = await patchWorkout(workout, { scheduled_date: scheduledDate }, "Не удалось перенести тренировку")
-    if (updated) setRescheduleDrafts((current) => ({ ...current, [workout.id]: scheduledDate }))
+    setCoachAction({ workoutId: workout.id, title: coachWorkoutTitle(workout), action: "reschedule", targetDate: scheduledDate })
   }
 
   async function unlinkWorkoutActivity(workout: PlanWorkout) {
-    await patchWorkout(workout, { completed_activity_id: null }, "Не удалось отвязать активность")
+    if (!result) return
+    try {
+      await api.unlinkPlanWorkoutActivity(workout.id)
+      await refreshPlanDetail(result.id)
+    } catch (error) {
+      console.error(error)
+      setCandidateErrors((current) => ({ ...current, [workout.id]: apiErrorMessage(error, uiText("Не удалось исправить отметку о выполнении", "Could not correct workout completion")) }))
+    }
   }
 
   async function loadCandidates(workout: PlanWorkout) {
@@ -4617,6 +4749,7 @@ function Planning() {
   const remainingDetailWeeks = detailWeeks.filter((week) => !visibleDetailWeeks.some((visible) => visible.week_index === week.week_index))
   return <div className="grid gap-4">
     {missedWorkout ? <MissWorkoutDialog title={coachWorkoutTitle(missedWorkout)} busy={savingMissedWorkout} error={missedWorkoutError} onSubmit={saveMissedWorkout} onClose={() => setMissedWorkout(null)} /> : null}
+    {coachAction ? <CoachActionDialog target={coachAction} onApplied={async () => { if (!result) return; await refreshPlanDetail(result.id); if (coachAction.action === "reschedule" && coachAction.targetDate) setRescheduleDrafts((current) => ({ ...current, [coachAction.workoutId]: coachAction.targetDate! })) }} onClose={() => setCoachAction(null)} /> : null}
     <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="text-xs font-semibold text-orange-200">{uiText("Моя программа", "My plan")}</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{result ? uiText("Следующий шаг уже в плане", "Your next step is already in the plan") : uiText("Сначала создайте программу", "Create a plan first")}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">{result ? uiText("У вас одна текущая программа. Здесь всегда показаны ближайшая тренировка и актуальная неделя.", "You have one current plan. The next workout and current week are always shown here.") : uiText("Ответьте на несколько вопросов, и программа появится здесь.", "Answer a few questions and the plan will appear here.")}</p></div>

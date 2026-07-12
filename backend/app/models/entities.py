@@ -37,6 +37,7 @@ class User(Base, TimestampMixin):
     daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    coach_action_previews: Mapped[list["CoachActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coaching_events: Mapped[list["CoachingEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     athlete_state_snapshots: Mapped[list["AthleteStateSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -349,6 +350,30 @@ class DailyReadinessActionPreview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="daily_readiness_action_previews")
+
+
+class CoachActionPreview(Base):
+    __tablename__ = "coach_action_previews"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    request_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    preview_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    state_fingerprint: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recommendation_audit_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_recommendation_audits.id", ondelete="SET NULL"))
+    plan_version_id: Mapped[int | None] = mapped_column(ForeignKey("plan_versions.id", ondelete="SET NULL"))
+    audit_log_id: Mapped[int | None] = mapped_column(ForeignKey("audit_log.id", ondelete="SET NULL"))
+    coaching_event_id: Mapped[int | None] = mapped_column(ForeignKey("coaching_events.id", ondelete="SET NULL"))
+    applied_response_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="coach_action_previews")
 
 
 class CoachingEvent(Base):
