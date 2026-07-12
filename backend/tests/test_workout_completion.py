@@ -2,7 +2,7 @@ import unittest
 from datetime import UTC, date, datetime
 
 try:
-    from app.models import TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
+    from app.models import CoachingEvent, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutCompleteIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
     from app.services.planning import complete_workout, feedback_to_dict, patch_workout_feedback, update_workout, workout_execution_score
 except ModuleNotFoundError as exc:
@@ -105,6 +105,9 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertEqual(workout.feedback.activity_id, workout.completed_activity_id)
         self.assertEqual(workout.feedback.completion_status, "done")
         self.assertEqual(workout.feedback.weather_notes, "warm")
+        events = [item for item in db.added if isinstance(item, CoachingEvent)]
+        self.assertEqual([item.event_type for item in events], ["workout_completed", "workout_feedback_saved"])
+        self.assertEqual(events[0].activity_id, workout.completed_activity_id)
         self.assertTrue(db.committed)
 
     def test_patch_feedback_preserves_unset_values(self):
@@ -120,6 +123,9 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertEqual(feedback.weather_notes, "rain")
         self.assertEqual(feedback.user_notes, "new")
         self.assertEqual(feedback.notes, "new")
+        events = [item for item in db.added if isinstance(item, CoachingEvent)]
+        self.assertEqual([item.event_type for item in events], ["workout_feedback_saved"])
+        self.assertEqual(events[0].payload_json["operation"], "patched")
         self.assertTrue(db.committed)
 
     def test_feedback_dict_returns_spec_fields_with_workout_fallbacks(self):

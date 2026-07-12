@@ -473,6 +473,40 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_expires_at ON daily_readiness_action_previews (expires_at)",
         ),
     ),
+    (
+        "20260712_0022_coaching_events",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS coaching_events (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                event_type VARCHAR(64) NOT NULL,
+                event_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+                category VARCHAR(32) NOT NULL,
+                source VARCHAR(64) NOT NULL,
+                occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                plan_id INTEGER REFERENCES training_plans(id) ON DELETE SET NULL,
+                workout_id INTEGER REFERENCES training_plan_workouts(id) ON DELETE SET NULL,
+                activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
+                checkin_id INTEGER REFERENCES daily_readiness_checkins(id) ON DELETE SET NULL,
+                feedback_id INTEGER REFERENCES training_plan_workout_feedback(id) ON DELETE SET NULL,
+                correlation_id VARCHAR(128),
+                payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_user_id ON coaching_events (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_event_type ON coaching_events (event_type)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_occurred_at ON coaching_events (occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_user_occurred ON coaching_events (user_id, occurred_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_plan_id ON coaching_events (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_workout_id ON coaching_events (workout_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_activity_id ON coaching_events (activity_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_checkin_id ON coaching_events (checkin_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_feedback_id ON coaching_events (feedback_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_correlation_id ON coaching_events (correlation_id)",
+        ),
+    ),
 )
 
 

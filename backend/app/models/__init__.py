@@ -8,6 +8,7 @@ from app.models.entities import (  # noqa: F401
     AthleteMeasurement,
     AthleteProfile,
     AuthSession,
+    CoachingEvent,
     DailyReadinessActionPreview,
     DailyReadinessCheckIn,
     DailyTrainingLoad,

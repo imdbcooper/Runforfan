@@ -67,6 +67,7 @@ GET /health
 - `PUT /api/readiness/today` — создать или заменить check-in на локальную дату пользователя без автоматического изменения плана.
 - `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
+- `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
@@ -113,8 +114,9 @@ GET /health
 - `GET /api/planning/plans/{id}/recommendations/audit` — история примененных coach adjustments для плана.
 - `POST /api/planning/plans/{id}/activate` — сделать программу активной.
 - `GET /api/planning/workouts/{id}` — детальная planned workout card со структурой, feedback и execution score.
-- `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку.
+- `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку; переход в `missed` выполняется только через отдельный endpoint с причиной.
 - `POST /api/planning/workouts/{id}/complete` — вручную завершить workout, создать manual activity, сохранить фактические метрики и feedback.
+- `POST /api/planning/workouts/{id}/miss` — отметить пропуск с обязательной структурированной причиной и сохранить typed coaching events.
 - `GET /api/planning/workouts/{id}/feedback` — получить субъективный feedback по planned workout.
 - `PUT /api/planning/workouts/{id}/feedback` — заменить RPE/fatigue/pain/sleep/weather/notes и обновить execution score в выдаче плана.
 - `PATCH /api/planning/workouts/{id}/feedback` — частично обновить workout feedback без сброса незаданных полей.

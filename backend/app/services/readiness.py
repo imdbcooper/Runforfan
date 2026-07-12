@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models import AthleteProfile, DailyReadinessActionPreview, DailyReadinessCheckIn, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
 from app.schemas.common import DailyReadinessCheckInUpsert
 from app.services.audit import log_audit_event
+from app.services.coaching_events import record_coaching_event
 from app.services.dashboard import active_training_plan
 from app.services.plan_versions import create_plan_version, json_safe, workout_snapshot
 from app.services.planning import today_for_user, workout_to_dict
@@ -371,6 +372,12 @@ def save_daily_readiness_checkin(db: Session, user: User, payload: DailyReadines
     db.scalar(select(User).where(User.id == user.id).with_for_update())
     checkin_date, profile, workout = today_context(db, user, lock=True)
     checkin = today_checkin(db, user, checkin_date, lock=True)
+    pain_was_reported = bool(checkin and checkin.pain)
+    illness_was_reported = bool(checkin and checkin.illness_symptoms)
+    previous_signals = checkin_to_dict(checkin)
+    if previous_signals:
+        previous_signals = {key: value for key, value in previous_signals.items() if key not in {"id", "created_at", "updated_at"}}
+    previous_recommendation = canonical_recommendation(checkin.recommendation_snapshot or {}) if checkin else None
     if checkin is None:
         checkin = DailyReadinessCheckIn(user_id=user.id, checkin_date=checkin_date)
         db.add(checkin)
@@ -391,6 +398,49 @@ def save_daily_readiness_checkin(db: Session, user: User, payload: DailyReadines
     db.add(checkin)
     db.flush()
     db.refresh(checkin)
+    current_signals = checkin_to_dict(checkin) or {}
+    comparable_signals = {key: value for key, value in current_signals.items() if key not in {"id", "created_at", "updated_at"}}
+    if comparable_signals != previous_signals or canonical_recommendation(current_recommendation) != previous_recommendation:
+        record_coaching_event(
+            db,
+            user_id=user.id,
+            event_type="readiness_checkin_saved",
+            category="user_input",
+            source="daily_readiness",
+            occurred_at=datetime.now(UTC),
+            plan_id=workout.plan_id if workout else None,
+            workout_id=workout.id if workout else None,
+            checkin_id=checkin.id,
+            payload={
+                "checkin_date": checkin_date,
+                "signals": current_signals,
+                "recommendation": current_recommendation,
+            },
+        )
+    if checkin.pain and not pain_was_reported:
+        record_coaching_event(
+            db,
+            user_id=user.id,
+            event_type="pain_reported",
+            category="user_input",
+            source="daily_readiness",
+            plan_id=workout.plan_id if workout else None,
+            workout_id=workout.id if workout else None,
+            checkin_id=checkin.id,
+            payload={"pain_level_0_10": checkin.pain_level_0_10, "notes": checkin.pain_notes},
+        )
+    if checkin.illness_symptoms and not illness_was_reported:
+        record_coaching_event(
+            db,
+            user_id=user.id,
+            event_type="illness_reported",
+            category="user_input",
+            source="daily_readiness",
+            plan_id=workout.plan_id if workout else None,
+            workout_id=workout.id if workout else None,
+            checkin_id=checkin.id,
+            payload={"notes": checkin.illness_notes},
+        )
     result = readiness_to_dict(checkin_date, checkin, workout, current_recommendation)
     db.commit()
     return result

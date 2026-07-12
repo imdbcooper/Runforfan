@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
-from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
+from app.models import Activity, AthleteProfile, CoachingEvent, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
+from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutMissIn, PlanWorkoutUpdate
 from app.services.activity_metrics import is_running_activity_type, sync_derived_activity_metrics
+from app.services.coaching_events import record_coaching_event
 from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.training_load import sync_daily_training_loads_for_activity
@@ -2466,11 +2467,14 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
         raise ValueError("Workout status cannot be linked")
     if activity_is_linked(db, user, activity.id, exclude_workout_id=workout.id):
         raise ValueError("Activity already linked to another workout")
+    newly_completed = workout.completed_activity_id is None
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"
     if workout.feedback:
         sync_feedback_context(workout.feedback, workout)
+    if newly_completed:
+        record_workout_completed_event(db, user, workout, activity, "manual_activity_link")
     sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
@@ -2482,6 +2486,9 @@ def link_activity_to_workout(db: Session, user: User, workout: TrainingPlanWorko
 
 
 def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> TrainingPlanWorkout | None:
+    # FOR NO KEY UPDATE serializes plan writers without conflicting with the
+    # foreign-key key-share lock held by an activity inserted in this transaction.
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update(key_share=True))
     if activity_is_linked(db, user, activity.id):
         return None
     candidates = workout_match_candidates_for_activity(
@@ -2498,6 +2505,20 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
     if len(candidates) > 1 and float(candidates[1]["score"]) >= float(candidates[0]["score"]) - 0.08:
         return None
     workout = candidates[0]["workout"]
+    db.scalar(select(TrainingPlan.id).where(TrainingPlan.id == workout.plan_id, TrainingPlan.user_id == user.id).with_for_update())
+    workout = db.scalar(
+        select(TrainingPlanWorkout)
+        .where(TrainingPlanWorkout.id == workout.id, TrainingPlanWorkout.plan_id == workout.plan_id)
+        .options(
+            selectinload(TrainingPlanWorkout.completed_activity),
+            selectinload(TrainingPlanWorkout.feedback),
+            selectinload(TrainingPlanWorkout.blocks),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if workout is None:
+        return None
     if workout.completed_activity_id is not None or workout.status not in MATCHABLE_WORKOUT_STATUSES:
         return None
     workout.completed_activity_id = activity.id
@@ -2506,6 +2527,7 @@ def auto_match_activity_to_plan(db: Session, user: User, activity: Activity) -> 
     if workout.feedback:
         sync_feedback_context(workout.feedback, workout)
     db.flush()
+    record_workout_completed_event(db, user, workout, activity, "activity_import")
     sync_daily_training_loads_for_activity(db, user, activity)
     return workout
 
@@ -3179,6 +3201,10 @@ def delete_plan(db: Session, user: User, plan: TrainingPlan) -> int:
 
 def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutUpdate) -> TrainingPlanWorkout:
     updates = payload.model_dump(exclude_unset=True)
+    previous_status = workout.status
+    previous_activity_id = workout.completed_activity_id
+    if updates.get("status") == "missed" and previous_status != "missed":
+        raise ValueError("Use the missed workout action to record a reason")
     version_summary = None
     next_completed_activity_id = workout.completed_activity_id
     target_fields = {"workout_type", "title", "distance_km", "duration_seconds", "intensity", "description"}
@@ -3249,6 +3275,8 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
         sync_feedback_context(workout.feedback, workout)
     if version_summary and workout.plan is not None:
         create_plan_version(db, user, workout.plan, "manual_edit", version_summary)
+    if previous_activity_id is None and workout.completed_activity_id is not None and workout.completed_activity is not None:
+        record_workout_completed_event(db, user, workout, workout.completed_activity, "manual_activity_link")
     try:
         db.commit()
     except IntegrityError as error:
@@ -3302,6 +3330,83 @@ def sync_feedback_context(feedback: TrainingPlanWorkoutFeedback, workout: Traini
     feedback.completion_status = workout.status
 
 
+def feedback_event_snapshot(feedback: TrainingPlanWorkoutFeedback, workout: TrainingPlanWorkout) -> dict[str, object]:
+    snapshot = feedback_to_dict(feedback, workout) or {}
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"created_at", "updated_at"}
+    }
+
+
+def record_feedback_events(
+    db: Session,
+    user: User,
+    workout: TrainingPlanWorkout,
+    feedback: TrainingPlanWorkoutFeedback,
+    *,
+    operation: str,
+    pain_was_reported: bool,
+) -> None:
+    db.flush()
+    snapshot = feedback_event_snapshot(feedback, workout)
+    record_coaching_event(
+        db,
+        user_id=user.id,
+        event_type="workout_feedback_saved",
+        category="user_input",
+        source="post_workout_feedback",
+        plan_id=workout.plan_id,
+        workout_id=workout.id,
+        activity_id=feedback.activity_id,
+        feedback_id=feedback.id,
+        payload={
+            "operation": operation,
+            "feedback": snapshot,
+            "execution_score": workout_execution_score(workout),
+        },
+    )
+    if feedback.pain and not pain_was_reported:
+        record_coaching_event(
+            db,
+            user_id=user.id,
+            event_type="pain_reported",
+            category="user_input",
+            source="post_workout_feedback",
+            plan_id=workout.plan_id,
+            workout_id=workout.id,
+            activity_id=feedback.activity_id,
+            feedback_id=feedback.id,
+            payload={"pain_level_0_10": feedback.pain_level, "notes": feedback.pain_notes},
+        )
+
+
+def record_workout_completed_event(
+    db: Session,
+    user: User,
+    workout: TrainingPlanWorkout,
+    activity: Activity,
+    source: str,
+) -> None:
+    record_coaching_event(
+        db,
+        user_id=user.id,
+        event_type="workout_completed",
+        category="outcome",
+        source=source,
+        occurred_at=activity.started_at or datetime.now(UTC),
+        plan_id=workout.plan_id,
+        workout_id=workout.id,
+        activity_id=activity.id,
+        payload={
+            "scheduled_date": workout.scheduled_date,
+            "workout_type": workout.workout_type,
+            "actual_distance_km": activity.distance_km,
+            "actual_duration_seconds": activity.duration_seconds,
+        },
+    )
+
+
 def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, updates: dict[str, object], explicit_fields: set[str] | None = None) -> TrainingPlanWorkoutFeedback:
     if workout.status not in {"done", "missed", "skipped"}:
         raise ValueError("Workout feedback requires completed, missed or skipped workout")
@@ -3320,9 +3425,14 @@ def upsert_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkou
 
 
 def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutFeedbackIn) -> TrainingPlanWorkoutFeedback:
+    existed = workout.feedback is not None
+    pain_was_reported = bool(workout.feedback and workout.feedback.pain)
+    previous_snapshot = feedback_event_snapshot(workout.feedback, workout) if workout.feedback else None
     feedback = upsert_workout_feedback(db, user, workout, payload.model_dump(), set(payload.model_fields_set))
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
+    if feedback_event_snapshot(feedback, workout) != previous_snapshot:
+        record_feedback_events(db, user, workout, feedback, operation="replaced" if existed else "created", pain_was_reported=pain_was_reported)
     db.commit()
     db.refresh(feedback)
     return feedback
@@ -3332,9 +3442,13 @@ def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise ValueError("Feedback patch is empty")
+    pain_was_reported = bool(workout.feedback and workout.feedback.pain)
+    previous_snapshot = feedback_event_snapshot(workout.feedback, workout) if workout.feedback else None
     feedback = upsert_workout_feedback(db, user, workout, updates, set(payload.model_fields_set))
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
+    if feedback_event_snapshot(feedback, workout) != previous_snapshot:
+        record_feedback_events(db, user, workout, feedback, operation="patched", pain_was_reported=pain_was_reported)
     db.commit()
     db.refresh(feedback)
     return feedback
@@ -3378,6 +3492,8 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
     workout.completed_activity_id = activity.id
     workout.completed_activity = activity
     workout.status = "done"
+    pain_was_reported = bool(workout.feedback and workout.feedback.pain)
+    feedback_existed = workout.feedback is not None
     feedback_updates = payload.model_dump(
         include={"rpe", "soreness_0_10", "fatigue", "pain", "pain_level", "sleep_quality_0_10", "sleep_quality", "pain_notes", "user_notes", "weather_notes", "notes"},
         exclude_unset=True,
@@ -3387,8 +3503,12 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
     if not payload.pain and payload.pain_level is None:
         feedback_updates["pain_level"] = None
         feedback_fields_set.add("pain_level")
+    feedback = None
     if feedback_updates:
-        upsert_workout_feedback(db, user, workout, feedback_updates, feedback_fields_set)
+        feedback = upsert_workout_feedback(db, user, workout, feedback_updates, feedback_fields_set)
+    record_workout_completed_event(db, user, workout, activity, "manual_completion")
+    if feedback is not None:
+        record_feedback_events(db, user, workout, feedback, operation="replaced" if feedback_existed else "created", pain_was_reported=pain_was_reported)
     sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
@@ -3397,4 +3517,62 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
         raise ValueError("Manual completion could not be saved") from error
     db.refresh(workout)
     workout.completed_activity = activity
+    return workout
+
+
+def mark_workout_missed(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutMissIn) -> TrainingPlanWorkout:
+    if workout.plan.user_id != user.id:
+        raise ValueError("Workout not found")
+    if workout.completed_activity_id is not None or workout.status == "done":
+        raise ValueError("Completed workout cannot be marked missed")
+    if workout.status not in {"planned", "rescheduled", "missed"}:
+        raise ValueError("Workout status cannot be marked missed")
+    if workout.status == "missed":
+        previous_event = db.scalar(
+            select(CoachingEvent)
+            .where(
+                CoachingEvent.user_id == user.id,
+                CoachingEvent.workout_id == workout.id,
+                CoachingEvent.event_type == "workout_missed",
+            )
+            .order_by(CoachingEvent.id.desc())
+            .limit(1)
+        )
+        if previous_event is not None:
+            previous_payload = previous_event.payload_json or {}
+            if previous_payload.get("reason") == payload.reason and previous_payload.get("notes") == payload.notes:
+                return workout
+            raise ValueError("Workout is already marked missed with another reason")
+    else:
+        workout.status = "missed"
+    if workout.feedback:
+        sync_feedback_context(workout.feedback, workout)
+    record_coaching_event(
+        db,
+        user_id=user.id,
+        event_type="workout_missed",
+        category="outcome",
+        source="user",
+        plan_id=workout.plan_id,
+        workout_id=workout.id,
+        payload={
+            "reason": payload.reason,
+            "notes": payload.notes,
+            "scheduled_date": workout.scheduled_date,
+            "workout_type": workout.workout_type,
+        },
+    )
+    if payload.reason in {"pain", "illness"}:
+        record_coaching_event(
+            db,
+            user_id=user.id,
+            event_type="pain_reported" if payload.reason == "pain" else "illness_reported",
+            category="user_input",
+            source="user",
+            plan_id=workout.plan_id,
+            workout_id=workout.id,
+            payload={"notes": payload.notes, "context": "missed_workout"},
+        )
+    db.commit()
+    db.refresh(workout)
     return workout

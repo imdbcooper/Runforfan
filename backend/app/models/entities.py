@@ -37,6 +37,7 @@ class User(Base, TimestampMixin):
     daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    coaching_events: Mapped[list["CoachingEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -347,6 +348,28 @@ class DailyReadinessActionPreview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="daily_readiness_action_previews")
+
+
+class CoachingEvent(Base):
+    __tablename__ = "coaching_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    event_version: Mapped[str] = mapped_column(String(32), default="v1")
+    category: Mapped[str] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(64))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("training_plans.id", ondelete="SET NULL"), index=True)
+    workout_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="SET NULL"), index=True)
+    activity_id: Mapped[int | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"), index=True)
+    checkin_id: Mapped[int | None] = mapped_column(ForeignKey("daily_readiness_checkins.id", ondelete="SET NULL"), index=True)
+    feedback_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_workout_feedback.id", ondelete="SET NULL"), index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="coaching_events")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):

@@ -222,6 +222,8 @@ export type AuditLogEntry = {
   created_at: string
 }
 
+export type WorkoutMissReason = "illness" | "pain" | "fatigue" | "schedule_conflict" | "weather" | "other"
+
 export type GoalProgress = {
   metric: string
   value: number | null
@@ -1413,6 +1415,7 @@ export const api = {
   deletePlan: (id: number) => request<{ deleted: boolean; id: number }>(`/planning/plans/${id}`, { method: "DELETE" }),
   workout: (id: number) => request<PlanWorkout>(`/planning/workouts/${id}`),
   completeWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
+  missWorkout: (id: number, reason: WorkoutMissReason, notes?: string) => request<PlanWorkout>(`/planning/workouts/${id}/miss`, { method: "POST", body: JSON.stringify({ reason, notes: notes || null }) }),
   updatePlanWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   workoutFeedback: (id: number) => request<PlanWorkoutFeedback | null>(`/planning/workouts/${id}/feedback`),
   patchWorkoutFeedback: (id: number, payload: Record<string, unknown>) => request<PlanWorkoutFeedback>(`/planning/workouts/${id}/feedback`, { method: "PATCH", body: JSON.stringify(payload) }),

@@ -11,6 +11,9 @@ from app.models import (
     AuditLog,
     AthleteMeasurement,
     AthleteProfile,
+    CoachingEvent,
+    DailyReadinessActionPreview,
+    DailyReadinessCheckIn,
     DailyTrainingLoad,
     DerivedActivityMetric,
     ImportBatch,
@@ -123,11 +126,12 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
     ))
     providers = list(db.scalars(select(LlmProviderSetting).where(LlmProviderSetting.user_id == user.id).order_by(LlmProviderSetting.created_at.desc())))
     audit_logs = list(db.scalars(select(AuditLog).where(AuditLog.user_id == user.id).order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(500)))
+    coaching_events = list(db.scalars(select(CoachingEvent).where(CoachingEvent.user_id == user.id).order_by(CoachingEvent.occurred_at.desc(), CoachingEvent.id.desc())))
     daily_training_loads = list(db.scalars(select(DailyTrainingLoad).where(DailyTrainingLoad.user_id == user.id).order_by(DailyTrainingLoad.date.asc())))
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-06-08.0021",
+        "version": "2026-07-12.0022",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -138,6 +142,9 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "plan_versions": [model_to_dict(item) for item in db.scalars(select(TrainingPlanVersion).where(TrainingPlanVersion.user_id == user.id).order_by(TrainingPlanVersion.plan_id.asc(), TrainingPlanVersion.version_number.asc()))],
         "performance_results": [model_to_dict(item) for item in db.scalars(select(PerformanceResult).where(PerformanceResult.user_id == user.id).order_by(PerformanceResult.result_date.desc()))],
         "daily_training_loads": [model_to_dict(item) for item in daily_training_loads],
+        "daily_readiness_checkins": [model_to_dict(item) for item in db.scalars(select(DailyReadinessCheckIn).where(DailyReadinessCheckIn.user_id == user.id).order_by(DailyReadinessCheckIn.checkin_date.asc()))],
+        "daily_readiness_action_previews": [model_to_dict(item) for item in db.scalars(select(DailyReadinessActionPreview).where(DailyReadinessActionPreview.user_id == user.id).order_by(DailyReadinessActionPreview.created_at.asc()))],
+        "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
         "lactate_threshold_measurements": [model_to_dict(item) for item in db.scalars(select(LactateThresholdMeasurement).where(LactateThresholdMeasurement.user_id == user.id).order_by(LactateThresholdMeasurement.measured_at.desc().nullslast()))],
@@ -160,6 +167,9 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 
 
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
+    ("coaching_events", CoachingEvent),
+    ("daily_readiness_action_previews", DailyReadinessActionPreview),
+    ("daily_readiness_checkins", DailyReadinessCheckIn),
     ("audit_log", AuditLog),
     ("training_plan_recommendation_audits", TrainingPlanRecommendationAudit),
     ("plan_versions", TrainingPlanVersion),

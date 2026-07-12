@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt, model_validator
 
@@ -932,6 +933,11 @@ class PlanWorkoutUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=4000)
 
 
+class PlanWorkoutMissIn(BaseModel):
+    reason: Literal["illness", "pain", "fatigue", "schedule_conflict", "weather", "other"]
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class PlanWorkoutFeedbackIn(BaseModel):
     rpe: StrictInt | None = Field(default=None, ge=0, le=10)
     soreness_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
@@ -1474,6 +1480,25 @@ class AuditLogOut(BaseModel):
     entity_type: str
     entity_id: int | None = None
     metadata_json: dict[str, object] | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CoachingEventOut(BaseModel):
+    id: int
+    event_type: str
+    event_version: str
+    category: str
+    source: str
+    occurred_at: datetime
+    plan_id: int | None = None
+    workout_id: int | None = None
+    activity_id: int | None = None
+    checkin_id: int | None = None
+    feedback_id: int | None = None
+    correlation_id: str | None = None
+    payload_json: dict[str, object]
     created_at: datetime
 
     model_config = {"from_attributes": True}
