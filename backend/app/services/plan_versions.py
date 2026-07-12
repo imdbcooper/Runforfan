@@ -72,21 +72,75 @@ def plan_snapshot(plan: TrainingPlan) -> dict[str, Any]:
     })
 
 
+def action_plan_snapshot(plan: TrainingPlan) -> dict[str, Any]:
+    workouts = sorted(plan.workouts, key=lambda workout: workout.id or 0)
+    return json_safe({
+        "schema_version": "action-plan-state-v1",
+        "plan_id": plan.id,
+        "workouts": [
+            {
+                "id": workout.id,
+                "scheduled_date": workout.scheduled_date,
+                "status": workout.status,
+                "completed_activity_id": workout.completed_activity_id,
+                "workout_type": workout.workout_type,
+                "title": workout.title,
+                "distance_km": workout.distance_km,
+                "duration_seconds": workout.duration_seconds,
+                "intensity": workout.intensity,
+                "description": workout.description,
+                "blocks": [
+                    {field: getattr(block, field) for field in (
+                        "block_index",
+                        "block_type",
+                        "repeat_count",
+                        "target_distance_km",
+                        "target_duration_seconds",
+                        "target_pace_min_seconds_per_km",
+                        "target_pace_max_seconds_per_km",
+                        "target_hr_min_bpm",
+                        "target_hr_max_bpm",
+                        "target_rpe_min",
+                        "target_rpe_max",
+                        "description",
+                    )}
+                    for block in sorted(getattr(workout, "blocks", []) or [], key=lambda item: (item.block_index, item.id or 0))
+                ],
+            }
+            for workout in workouts
+        ],
+    })
+
+
 def next_plan_version_number(db: Session, plan_id: int) -> int:
     db.scalar(select(TrainingPlan.id).where(TrainingPlan.id == plan_id).with_for_update())
     current = db.scalar(select(func.max(TrainingPlanVersion.version_number)).where(TrainingPlanVersion.plan_id == plan_id))
     return int(current or 0) + 1
 
 
-def create_plan_version(db: Session, user: User, plan: TrainingPlan, reason: str, summary: str | None = None) -> TrainingPlanVersion:
+def create_plan_version(
+    db: Session,
+    user: User,
+    plan: TrainingPlan,
+    reason: str,
+    summary: str | None = None,
+    *,
+    pre_snapshot: dict[str, Any] | None = None,
+    rollback_of_version_id: int | None = None,
+) -> TrainingPlanVersion:
     db.flush()
+    full_snapshot = plan_snapshot(plan)
+    post_snapshot = action_plan_snapshot(plan) if pre_snapshot is not None else full_snapshot
     version = TrainingPlanVersion(
         user_id=user.id,
         plan_id=plan.id,
         version_number=next_plan_version_number(db, plan.id),
         reason=reason,
         summary=summary,
-        snapshot_json=plan_snapshot(plan),
+        snapshot_json=full_snapshot,
+        pre_snapshot_json=json_safe(pre_snapshot) if pre_snapshot is not None else None,
+        post_snapshot_json=post_snapshot,
+        rollback_of_version_id=rollback_of_version_id,
     )
     db.add(version)
     return version

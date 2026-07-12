@@ -12,7 +12,7 @@ from app.schemas.common import CoachActionPreviewRequest
 from app.services.audit import log_audit_event
 from app.services.coaching_events import record_coaching_event
 from app.services.constraint_engine import CONSTRAINT_RULE_VERSION, validate_coach_action_target
-from app.services.plan_versions import create_plan_version, json_safe, workout_snapshot
+from app.services.plan_versions import action_plan_snapshot, create_plan_version, json_safe, workout_snapshot
 from app.services.planning import today_for_user, workout_is_hard, workout_to_dict
 
 
@@ -248,6 +248,7 @@ def apply_coach_action_preview(db: Session, user: User, preview_id: str) -> dict
         raise CoachActionConflict("Action preview is stale; create a new preview", "preview_stale")
 
     changes = list(preview.preview_snapshot.get("changes") or [])
+    pre_snapshot = action_plan_snapshot(plan)
     workout.scheduled_date = target.get("scheduled_date")
     workout.status = str(target["status"])
     db.flush()
@@ -262,7 +263,14 @@ def apply_coach_action_preview(db: Session, user: User, preview_id: str) -> dict
     )
     db.add(recommendation_audit)
     db.flush()
-    version = create_plan_version(db, user, plan, f"coach_action_{preview.action}", f"Applied {preview.action} to workout #{workout.id}")
+    version = create_plan_version(
+        db,
+        user,
+        plan,
+        f"coach_action_{preview.action}",
+        f"Applied {preview.action} to workout #{workout.id}",
+        pre_snapshot=pre_snapshot,
+    )
     db.flush()
     event = record_coaching_event(
         db,

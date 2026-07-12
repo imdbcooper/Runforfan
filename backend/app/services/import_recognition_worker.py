@@ -15,6 +15,7 @@ from app.models import AthleteProfile, ImportBatch, User
 from app.services.activity_metrics import sync_derived_activity_metrics
 from app.services.audit import log_audit_event
 from app.services.planning import auto_match_activity_to_plan
+from app.services.plan_recalculations import record_activity_import_recalculation
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
 from app.services.training_load import sync_daily_training_loads_for_activity
 
@@ -181,6 +182,13 @@ def process_import_batch(db: Session, batch_id: int, settings: Settings | None =
             sync_daily_training_loads_for_activity(db, user, activity)
             profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
             sync_derived_activity_metrics(db, activity, profile)
+            record_activity_import_recalculation(
+                db,
+                user,
+                activity,
+                source_key=f"import_batch:{batch.id}:activity:{activity.id}",
+                matched_workout=matched_workout,
+            )
         final_status = "recognized" if activity else recognition["status"]
         _finish_success(batch, final_status, recognition["engine"], recognition["message"], activity.id if activity else None)
         log_audit_event(db, user.id, "import.recognition.completed", "import_batch", batch.id, {

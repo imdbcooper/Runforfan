@@ -1150,6 +1150,7 @@ class DailyReadinessActionPreviewOut(BaseModel):
     expires_at: datetime
     date: date
     action: str
+    action_type: Literal["shorten", "replace_easy"]
     rule_version: str
     rule_id: str
     workout: PlanWorkoutOut
@@ -1163,6 +1164,7 @@ class DailyReadinessActionApplyOut(BaseModel):
     status: str
     preview_id: str
     action: str
+    action_type: Literal["shorten", "replace_easy"]
     date: date
     workout: PlanWorkoutOut
     plan_version_id: int
@@ -1394,7 +1396,50 @@ class PlanVersionOut(BaseModel):
     reason: str
     summary: str | None = None
     snapshot_json: dict | None = None
+    pre_snapshot_json: dict | None = None
+    post_snapshot_json: dict | None = None
+    rollback_of_version_id: int | None = None
+    rollback_supported: bool = False
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlanRollbackPreviewOut(BaseModel):
+    preview_id: str
+    expires_at: datetime
+    plan_id: int
+    version_id: int
+    version_number: int
+    rule_version: str
+    changes: list[PlanRecommendationChangeOut]
+    summary: str
+
+
+class PlanRollbackApplyOut(BaseModel):
+    status: str
+    preview_id: str
+    plan_id: int
+    version_id: int
+    rollback_version_id: int
+    rollback_version_number: int
+    recommendation_audit_id: int
+    audit_log_id: int
+    coaching_event_id: int
+    summary: str
+
+
+class PlanRecalculationOut(BaseModel):
+    id: int
+    plan_id: int | None = None
+    trigger_type: str
+    source_key: str
+    source_event_id: int | None = None
+    input_fingerprint: str
+    status: str
+    assessment_json: dict
+    requested_at: datetime
+    completed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

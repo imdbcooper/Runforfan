@@ -615,7 +615,43 @@ export type PlanVersion = {
   reason: "initial" | "manual_edit" | "auto_adaptation" | "user_request" | string
   summary: string | null
   snapshot_json: Record<string, unknown> | null
+  pre_snapshot_json: Record<string, unknown> | null
+  post_snapshot_json: Record<string, unknown> | null
+  rollback_of_version_id: number | null
+  rollback_supported: boolean
   created_at: string
+}
+
+export type PlanRollbackChange = {
+  workout_id: number | null
+  field: string
+  before: unknown
+  after: unknown
+  reason?: string | null
+}
+
+export type PlanRollbackPreview = {
+  preview_id: string
+  expires_at: string
+  plan_id: number
+  version_id: number
+  version_number: number
+  rule_version: string
+  changes: PlanRollbackChange[]
+  summary: string
+}
+
+export type PlanRollbackApplyResult = {
+  status: string
+  preview_id: string
+  plan_id: number
+  version_id: number
+  rollback_version_id: number
+  rollback_version_number: number
+  recommendation_audit_id: number
+  audit_log_id: number
+  coaching_event_id: number
+  summary: string
 }
 
 export type Plan = {
@@ -814,6 +850,7 @@ export type DailyReadinessActionPreview = {
   expires_at: string
   date: string
   action: string
+  action_type: "shorten" | "replace_easy"
   rule_version: string
   rule_id: string
   workout: PlanWorkout
@@ -832,6 +869,7 @@ export type DailyReadinessActionApplyResult = {
   status: "applied" | "already_applied" | string
   preview_id: string
   action: string
+  action_type: "shorten" | "replace_easy"
   date: string
   workout: PlanWorkout
   plan_version_id: number
@@ -1504,6 +1542,8 @@ export const api = {
   applyPlanRecommendations: (id: number, changes: PlanRecommendationChange[]) => request<PlanRecommendationApplyResult>(`/planning/plans/${id}/recommendations/apply`, { method: "POST", body: JSON.stringify({ changes }) }),
   planRecommendationAudit: (id: number) => request<PlanRecommendationAudit[]>(`/planning/plans/${id}/recommendations/audit`),
   planVersions: (id: number) => request<PlanVersion[]>(`/planning/plans/${id}/versions`),
+  previewPlanRollback: (planId: number, versionId: number) => request<PlanRollbackPreview>(`/planning/plans/${planId}/versions/${versionId}/rollback-preview`, { method: "POST", body: "{}" }),
+  applyPlanRollback: (previewId: string) => request<PlanRollbackApplyResult>(`/planning/rollback-previews/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlan: (id: number, payload: Record<string, unknown>) => request<Plan>(`/planning/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deletePlan: (id: number) => request<{ deleted: boolean; id: number }>(`/planning/plans/${id}`, { method: "DELETE" }),

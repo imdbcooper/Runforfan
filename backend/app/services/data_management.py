@@ -21,6 +21,8 @@ from app.models import (
     LactateThresholdMeasurement,
     LlmProviderSetting,
     PerformanceResult,
+    PlanRecalculationRequest,
+    PlanRollbackPreview,
     RunningGoal,
     ScreenshotSource,
     TrainingPlan,
@@ -132,7 +134,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-12.0024",
+        "version": "2026-07-13.0025",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -146,6 +148,8 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "daily_readiness_checkins": [model_to_dict(item) for item in db.scalars(select(DailyReadinessCheckIn).where(DailyReadinessCheckIn.user_id == user.id).order_by(DailyReadinessCheckIn.checkin_date.asc()))],
         "daily_readiness_action_previews": [model_to_dict(item) for item in db.scalars(select(DailyReadinessActionPreview).where(DailyReadinessActionPreview.user_id == user.id).order_by(DailyReadinessActionPreview.created_at.asc()))],
         "coach_action_previews": [model_to_dict(item) for item in db.scalars(select(CoachActionPreview).where(CoachActionPreview.user_id == user.id).order_by(CoachActionPreview.created_at.asc()))],
+        "plan_rollback_previews": [model_to_dict(item) for item in db.scalars(select(PlanRollbackPreview).where(PlanRollbackPreview.user_id == user.id).order_by(PlanRollbackPreview.created_at.asc()))],
+        "plan_recalculation_requests": [model_to_dict(item) for item in db.scalars(select(PlanRecalculationRequest).where(PlanRecalculationRequest.user_id == user.id).order_by(PlanRecalculationRequest.requested_at.asc()))],
         "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -169,6 +173,8 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 
 
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
+    ("plan_rollback_previews", PlanRollbackPreview),
+    ("plan_recalculation_requests", PlanRecalculationRequest),
     ("coach_action_previews", CoachActionPreview),
     ("coaching_events", CoachingEvent),
     ("daily_readiness_action_previews", DailyReadinessActionPreview),

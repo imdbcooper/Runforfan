@@ -12,7 +12,7 @@ from app.services.audit import log_audit_event
 from app.services.coaching_events import record_coaching_event
 from app.services.constraint_engine import HardWorkoutPolicy, is_hard_workout, validate_readiness_action_target
 from app.services.dashboard import active_training_plan
-from app.services.plan_versions import create_plan_version, json_safe, workout_snapshot
+from app.services.plan_versions import action_plan_snapshot, create_plan_version, json_safe, workout_snapshot
 from app.services.planning import today_for_user, workout_to_dict
 from app.services.profile import get_or_create_profile, safety_check
 
@@ -627,6 +627,7 @@ def build_action_preview_snapshot(
         "expires_at": expires_at,
         "date": checkin_date,
         "action": action,
+        "action_type": "shorten" if action == "shorten_easy" else "replace_easy",
         "rule_version": current_recommendation["rule_version"],
         "rule_id": current_recommendation["rule_id"],
         "workout": workout_to_dict(workout),
@@ -730,6 +731,7 @@ def apply_daily_readiness_action_preview(db: Session, user: User, preview_id: st
         raise ReadinessActionConflict("Action preview is stale; create a new preview", "preview_stale")
 
     changes = list(preview.preview_snapshot.get("changes") or [])
+    pre_snapshot = action_plan_snapshot(plan)
     apply_target(db, workout, target)
     db.flush()
     recommendation_audit = TrainingPlanRecommendationAudit(
@@ -743,7 +745,14 @@ def apply_daily_readiness_action_preview(db: Session, user: User, preview_id: st
     )
     db.add(recommendation_audit)
     db.flush()
-    version = create_plan_version(db, user, plan, "daily_readiness_action", f"Applied {preview.action} to workout #{workout.id}")
+    version = create_plan_version(
+        db,
+        user,
+        plan,
+        "daily_readiness_action",
+        f"Applied {preview.action} to workout #{workout.id}",
+        pre_snapshot=pre_snapshot,
+    )
     db.flush()
     audit_event = log_audit_event(
         db,
@@ -768,6 +777,7 @@ def apply_daily_readiness_action_preview(db: Session, user: User, preview_id: st
         "status": "applied",
         "preview_id": preview.id,
         "action": preview.action,
+        "action_type": preview.preview_snapshot.get("action_type") or ("shorten" if preview.action == "shorten_easy" else "replace_easy"),
         "date": checkin_date,
         "workout": workout_to_dict(workout),
         "plan_version_id": version.id,

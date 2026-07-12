@@ -18,6 +18,7 @@ from app.services.auth import get_current_user
 from app.services.csv_imports import activity_payload_from_csv_row, create_activity_from_csv_payload, iter_csv_rows
 from app.services.import_recognition_worker import enqueue_recognition_batch
 from app.services.planning import auto_match_activity_to_plan
+from app.services.plan_recalculations import record_activity_import_recalculation
 from app.services.recognition import RecognitionValidationError, validate_activity_payload
 from app.services.training_load import sync_daily_training_loads_for_activities, sync_daily_training_loads_for_activity
 
@@ -495,6 +496,13 @@ def confirm_import(batch_id: int, user: User = Depends(get_current_user), db: Se
         matched_workout = auto_match_activity_to_plan(db, user, activity)
         sync_daily_training_loads_for_activity(db, user, activity)
         batch.created_activity_id = activity.id
+        record_activity_import_recalculation(
+            db,
+            user,
+            activity,
+            source_key=f"import_batch:{batch.id}:activity:{activity.id}",
+            matched_workout=matched_workout,
+        )
     batch.status = "recognized" if activity else "validation_failed"
     batch.recognition_message = "Import candidate confirmed by user and activity was created." if activity else "Confirmed candidate did not contain activity data."
     log_audit_event(db, user.id, "import.confirmed", "import_batch", batch.id, {
@@ -620,6 +628,20 @@ def upload_csv(
     batch.status = "failed" if not created_ids and not skipped_duplicates else "partial_failed" if errors else "imported"
     batch.recognition_message = f"CSV import: {len(created_ids)} created, {skipped_duplicates} duplicates, {len(errors)} failed, {matched_workouts} matched."
     sync_daily_training_loads_for_activities(db, user, touched_activities)
+    for activity in touched_activities:
+        if activity.id in created_ids:
+            matched_workout = db.scalar(
+                select(TrainingPlanWorkout)
+                .join(TrainingPlan)
+                .where(TrainingPlan.user_id == user.id, TrainingPlanWorkout.completed_activity_id == activity.id)
+            )
+            record_activity_import_recalculation(
+                db,
+                user,
+                activity,
+                source_key=f"import_batch:{batch.id}:activity:{activity.id}",
+                matched_workout=matched_workout,
+            )
     log_audit_event(db, user.id, "import.csv", "import_batch", batch.id, {
         "source_app": source_label,
         "created_activities": len(created_ids),

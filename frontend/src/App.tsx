@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
 import { cn } from "@/lib/utils"
@@ -1466,6 +1466,48 @@ function CoachActionDialog({ target, onApplied, onClose }: { target: CoachAction
         </div>
       </div>
       <div className="shrink-0 flex flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button variant="secondary" disabled={previewing || applying} onClick={onClose}>{uiText("Оставить как есть", "Keep original")}</Button>{preview ? <Button ref={applyButtonRef} disabled={applying} onClick={applyPreview}>{applying ? uiText("Применяем...", "Applying...") : uiText("Подтвердить изменение", "Confirm change")}</Button> : <Button disabled={previewing} onClick={createPreview}>{previewing ? uiText("Проверяем...", "Checking...") : uiText("Показать последствия", "Show impact")}</Button>}</div>
+    </div>
+  </div>
+}
+
+function PlanRollbackDialog({ preview, applying, error, onApply, onClose }: { preview: PlanRollbackPreview; applying: boolean; error: string; onApply: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const applyRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef(onClose)
+  const applyingRef = useRef(applying)
+  closeRef.current = onClose
+  applyingRef.current = applying
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    applyRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !applyingRef.current) closeRef.current()
+      if (event.key !== "Tab" || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      previousFocus?.focus()
+    }
+  }, [])
+
+  return <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/80 p-3 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !applying) onClose() }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="rollback-title" aria-describedby="rollback-summary" className="my-auto w-full max-w-2xl rounded-2xl border border-orange-400/30 bg-[#111] shadow-2xl shadow-black/50">
+      <div className="border-b border-zinc-800 p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-300">Compensating rollback</p><h2 id="rollback-title" className="mt-2 text-lg font-semibold text-white">{uiText(`Отменить изменения версии v${preview.version_number}`, `Reverse version v${preview.version_number}`)}</h2><p id="rollback-summary" className="mt-2 text-xs leading-5 text-zinc-400">{uiText("История не удаляется: будет создана новая компенсирующая версия. Перед применением сервер повторно проверит актуальность плана и safety-ограничения.", "History is preserved: a new compensating version will be created. The server rechecks plan freshness and safety before applying.")}</p></div>
+      <div className="grid max-h-[65vh] gap-2 overflow-y-auto p-4">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs sm:grid-cols-[7rem_8rem_1fr_auto_1fr] sm:items-center"><span className="font-mono text-[10px] text-zinc-500">#{change.workout_id}</span><span className="font-medium text-zinc-400">{coachActionChangeLabel(change.field)}</span><span className="min-w-0 break-words text-zinc-500">{readinessChangeValue(change.before)}</span><span className="text-orange-300">→</span><span className="min-w-0 break-words text-white">{readinessChangeValue(change.after)}</span></div>)}{error ? <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p> : null}</div>
+      <div className="flex flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button variant="secondary" disabled={applying} onClick={onClose}>{uiText("Оставить план", "Keep plan")}</Button><Button ref={applyRef} disabled={applying} onClick={onApply}>{applying ? uiText("Проверяем и отменяем...", "Checking and reversing...") : uiText("Создать компенсирующую версию", "Create compensating version")}</Button></div>
     </div>
   </div>
 }
@@ -4371,6 +4413,10 @@ function Planning() {
   const [recommendationPreview, setRecommendationPreview] = useState<PlanRecommendationPreview | null>(null)
   const [recommendationAudits, setRecommendationAudits] = useState<PlanRecommendationAudit[]>([])
   const [planVersions, setPlanVersions] = useState<PlanVersion[]>([])
+  const [rollbackPreview, setRollbackPreview] = useState<PlanRollbackPreview | null>(null)
+  const [previewingRollbackVersionId, setPreviewingRollbackVersionId] = useState<number | null>(null)
+  const [applyingRollback, setApplyingRollback] = useState(false)
+  const [rollbackError, setRollbackError] = useState("")
   const [recommendationError, setRecommendationError] = useState("")
   const [recommendationActionError, setRecommendationActionError] = useState("")
   const [loadingRecommendations, setLoadingRecommendations] = useState(false)
@@ -4678,6 +4724,35 @@ function Planning() {
     }
   }
 
+  async function previewRollback(version: PlanVersion) {
+    if (!result || !version.rollback_supported) return
+    setPreviewingRollbackVersionId(version.id)
+    setRollbackError("")
+    try {
+      setRollbackPreview(await api.previewPlanRollback(result.id, version.id))
+    } catch (error) {
+      setRollbackError(apiErrorMessage(error, uiText("Эту версию нельзя безопасно отменить", "This version cannot be safely reversed")))
+    } finally {
+      setPreviewingRollbackVersionId(null)
+    }
+  }
+
+  async function applyRollback() {
+    if (!rollbackPreview) return
+    setApplyingRollback(true)
+    setRollbackError("")
+    try {
+      const applied = await api.applyPlanRollback(rollbackPreview.preview_id)
+      setRollbackPreview(null)
+      await refreshPlanDetail(applied.plan_id)
+      await loadRecommendationAudits(applied.plan_id)
+    } catch (error) {
+      setRollbackError(apiErrorMessage(error, uiText("Preview устарел или rollback заблокирован safety-правилами", "The preview expired or safety rules blocked the rollback")))
+    } finally {
+      setApplyingRollback(false)
+    }
+  }
+
   async function previewRecommendations(planId: number) {
     setPreviewingRecommendations(true)
     setRecommendationActionError("")
@@ -4748,6 +4823,7 @@ function Planning() {
   const visibleDetailWeeks = currentWeekIndex ? detailWeeks.filter((week) => week.week_index >= currentWeekIndex).slice(0, 4) : detailWeeks.slice(0, 4)
   const remainingDetailWeeks = detailWeeks.filter((week) => !visibleDetailWeeks.some((visible) => visible.week_index === week.week_index))
   return <div className="grid gap-4">
+    {rollbackPreview ? <PlanRollbackDialog preview={rollbackPreview} applying={applyingRollback} error={rollbackError} onApply={applyRollback} onClose={() => { setRollbackPreview(null); setRollbackError("") }} /> : null}
     {missedWorkout ? <MissWorkoutDialog title={coachWorkoutTitle(missedWorkout)} busy={savingMissedWorkout} error={missedWorkoutError} onSubmit={saveMissedWorkout} onClose={() => setMissedWorkout(null)} /> : null}
     {coachAction ? <CoachActionDialog target={coachAction} onApplied={async () => { if (!result) return; await refreshPlanDetail(result.id); if (coachAction.action === "reschedule" && coachAction.targetDate) setRescheduleDrafts((current) => ({ ...current, [coachAction.workoutId]: coachAction.targetDate! })) }} onClose={() => setCoachAction(null)} /> : null}
     <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
@@ -4784,7 +4860,7 @@ function Planning() {
               <CollapsibleSection title="Графики и распределение" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">опционально</Badge>}>
                 <div className="grid gap-3"><PlanVolumeChart weeks={detailWeeks} /><PlanIntensitySplit split={intensitySplit} /></div>
               </CollapsibleSection>
-              <PlanVersions versions={planVersions} />
+              <PlanVersions versions={planVersions} previewingVersionId={previewingRollbackVersionId} error={rollbackPreview ? "" : rollbackError} onPreviewRollback={previewRollback} />
             </div>
           </CollapsibleSection>
         </> : <p>{uiText("Создайте программу, и здесь появятся ближайшая тренировка, недели и простые подсказки.", "Create a program, and the next workout, weeks and simple tips will appear here.")}</p>}
@@ -4949,17 +5025,17 @@ function PlanIntensitySplit({ split }: { split: { key: string; value: number; pe
   </div>
 }
 
-function PlanVersions({ versions }: { versions: PlanVersion[] }) {
+function PlanVersions({ versions, previewingVersionId, error, onPreviewRollback }: { versions: PlanVersion[]; previewingVersionId: number | null; error: string; onPreviewRollback: (version: PlanVersion) => void }) {
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold text-white">История программы</p><p className="mt-1 text-zinc-500">Снимки после создания, ручных правок и адаптаций.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{versions.length}</Badge></div>
-    {versions.length ? <div className="mt-3 grid gap-2">{versions.slice(0, 5).map((version) => {
+    {versions.length ? <div className="mt-3 grid max-h-[32rem] gap-2 overflow-y-auto pr-1">{versions.map((version) => {
       const workoutCount = Array.isArray(version.snapshot_json?.workouts) ? version.snapshot_json.workouts.length : 0
       return <div key={version.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-2 md:grid-cols-[5rem_1fr_auto] md:items-center" translate="no">
         <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">v{version.version_number}</div>
         <div><p className="font-medium text-white">{version.summary || version.reason}</p><p className="mt-1 text-zinc-500">{version.reason} · {workoutCount} workouts · {formatLocalDateTime(version.created_at)}</p></div>
-        <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">snapshot</Badge>
+        <div className="flex items-center justify-end gap-2"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{version.rollback_of_version_id ? "rollback" : "snapshot"}</Badge>{version.rollback_supported ? <Button size="sm" variant="ghost" disabled={previewingVersionId !== null} onClick={() => onPreviewRollback(version)}>{previewingVersionId === version.id ? uiText("Проверяем...", "Checking...") : uiText("Отменить", "Reverse")}</Button> : null}</div>
       </div>
-    })}</div> : <p className="mt-3 text-zinc-500">История появится после создания или правок программы.</p>}
+    })}</div> : <p className="mt-3 text-zinc-500">История появится после создания или правок программы.</p>}{error ? <p role="alert" className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-orange-100">{error}</p> : null}
   </div>
 }
 

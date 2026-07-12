@@ -40,6 +40,17 @@ class CoachActionTests(unittest.TestCase):
         self.assertIn("coaching_event_id", sql)
         self.assertIn("ix_coach_action_previews_expires_at", sql)
 
+    def test_readiness_actions_have_canonical_stage_two_names(self):
+        from app.services.readiness import build_action_preview_snapshot
+
+        workout = make_workout(1, TODAY)
+        plan = make_plan(workout)
+        recommendation = {"action": "shorten_easy", "rule_version": "v1", "rule_id": "low_readiness"}
+        target = {"distance_km": 5.0, "duration_seconds": 2100}
+        preview = build_action_preview_snapshot("token", datetime.now(UTC), TODAY, plan, workout, recommendation, target)
+        self.assertEqual(preview["action"], "shorten_easy")
+        self.assertEqual(preview["action_type"], "shorten")
+
     def test_schema_requires_reason_and_action_specific_date(self):
         with self.assertRaises(ValueError):
             CoachActionPreviewRequest(action="reschedule", reason="schedule_conflict")

@@ -4,10 +4,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models import Activity, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanVersion, TrainingPlanWorkout, User
-from app.schemas.common import CurrentWeekOut, EmptyRequest, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanUpdate, PlanVersionOut, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutMissIn, PlanWorkoutOut, PlanWorkoutUpdate
+from app.schemas.common import CurrentWeekOut, EmptyRequest, PlanActivityMatchCandidateOut, PlanBuilderPreviewOut, PlanGenerateRequest, PlanOut, PlanRecommendationApplyOut, PlanRecommendationApplyRequest, PlanRecommendationAuditOut, PlanRecommendationPreviewOut, PlanRecommendationsOut, PlanRollbackApplyOut, PlanRollbackPreviewOut, PlanUpdate, PlanVersionOut, PlanWeekSummaryOut, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackOut, PlanWorkoutFeedbackPatchIn, PlanWorkoutLinkActivityRequest, PlanWorkoutMatchCandidateOut, PlanWorkoutMissIn, PlanWorkoutOut, PlanWorkoutUpdate
 from app.services.auth import get_current_user
 from app.services.dashboard import current_week_for_user
 from app.services.planning import activity_match_candidates_for_workout, activate_plan, apply_plan_recommendations, complete_workout, delete_plan, duplicate_plan, feedback_to_dict, generate_plan, link_activity_to_workout, mark_workout_missed, patch_workout_feedback, plan_adjustment_recommendations, plan_builder_preview, plan_recommendation_preview_changes, plan_to_dict, plan_week_summaries, save_workout_feedback, unlink_workout_activity, update_plan, update_workout, workout_match_candidates_for_activity, workout_to_dict
+from app.services.plan_rollbacks import PlanRollbackConflict, apply_plan_rollback_preview, create_plan_rollback_preview
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -176,12 +177,54 @@ def list_training_plan_recommendation_audits(plan_id: int, user: User = Depends(
 @router.get("/plans/{plan_id}/versions", response_model=list[PlanVersionOut])
 def list_training_plan_versions(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     get_user_plan(db, user, plan_id)
-    return list(db.scalars(
+    versions = list(db.scalars(
         select(TrainingPlanVersion)
         .where(TrainingPlanVersion.plan_id == plan_id, TrainingPlanVersion.user_id == user.id)
         .order_by(TrainingPlanVersion.version_number.desc(), TrainingPlanVersion.id.desc())
-        .limit(50)
     ))
+    version_ids = [version.id for version in versions]
+    rolled_back_version_ids = set(db.scalars(
+        select(TrainingPlanVersion.rollback_of_version_id)
+        .where(TrainingPlanVersion.rollback_of_version_id.in_(version_ids))
+    )) if version_ids else set()
+    return [
+        {
+            "id": version.id,
+            "plan_id": version.plan_id,
+            "version_number": version.version_number,
+            "reason": version.reason,
+            "summary": version.summary,
+            "snapshot_json": version.snapshot_json,
+            "pre_snapshot_json": version.pre_snapshot_json,
+            "post_snapshot_json": version.post_snapshot_json,
+            "rollback_of_version_id": version.rollback_of_version_id,
+            "rollback_supported": version.id not in rolled_back_version_ids and version.reason in {"auto_adaptation", "daily_readiness_action", "coach_action_skip", "coach_action_reschedule"} and version.pre_snapshot_json is not None and version.post_snapshot_json is not None,
+            "created_at": version.created_at,
+        }
+        for version in versions
+    ]
+
+
+def rollback_conflict(error: PlanRollbackConflict) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": "conflict", "message": str(error), "details": {"reason": error.reason}})
+
+
+@router.post("/plans/{plan_id}/versions/{version_id}/rollback-preview", response_model=PlanRollbackPreviewOut)
+def preview_plan_version_rollback(plan_id: int, version_id: int, _payload: EmptyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return create_plan_rollback_preview(db, user, plan_id, version_id)
+    except PlanRollbackConflict as error:
+        db.rollback()
+        raise rollback_conflict(error) from error
+
+
+@router.post("/rollback-previews/{preview_id}/apply", response_model=PlanRollbackApplyOut)
+def apply_plan_version_rollback(preview_id: str, _payload: EmptyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return apply_plan_rollback_preview(db, user, preview_id)
+    except PlanRollbackConflict as error:
+        db.rollback()
+        raise rollback_conflict(error) from error
 
 
 @router.post("/plans/{plan_id}/activate", response_model=PlanOut)

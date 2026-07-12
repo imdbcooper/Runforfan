@@ -562,6 +562,59 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_coach_action_previews_expires_at ON coach_action_previews (expires_at)",
         ),
     ),
+    (
+        "20260713_0025_plan_rollback_and_recalculation",
+        (
+            "ALTER TABLE plan_versions ADD COLUMN IF NOT EXISTS pre_snapshot_json JSONB",
+            "ALTER TABLE plan_versions ADD COLUMN IF NOT EXISTS post_snapshot_json JSONB",
+            "ALTER TABLE plan_versions ADD COLUMN IF NOT EXISTS rollback_of_version_id INTEGER REFERENCES plan_versions(id) ON DELETE SET NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_versions_rollback_of ON plan_versions (rollback_of_version_id) WHERE rollback_of_version_id IS NOT NULL",
+            """
+            CREATE TABLE IF NOT EXISTS plan_rollback_previews (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                version_id INTEGER NOT NULL REFERENCES plan_versions(id) ON DELETE CASCADE,
+                preview_snapshot JSONB NOT NULL,
+                state_fingerprint VARCHAR(64) NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                applied_at TIMESTAMP WITH TIME ZONE,
+                rollback_version_id INTEGER REFERENCES plan_versions(id) ON DELETE SET NULL,
+                recommendation_audit_id INTEGER REFERENCES training_plan_recommendation_audits(id) ON DELETE SET NULL,
+                audit_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL,
+                coaching_event_id INTEGER REFERENCES coaching_events(id) ON DELETE SET NULL,
+                applied_response_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_plan_rollback_previews_user_id ON plan_rollback_previews (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_rollback_previews_plan_id ON plan_rollback_previews (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_rollback_previews_version_id ON plan_rollback_previews (version_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_rollback_previews_expires_at ON plan_rollback_previews (expires_at)",
+            """
+            CREATE TABLE IF NOT EXISTS plan_recalculation_requests (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER REFERENCES training_plans(id) ON DELETE SET NULL,
+                trigger_type VARCHAR(64) NOT NULL,
+                source_key VARCHAR(160) NOT NULL,
+                source_event_id INTEGER REFERENCES coaching_events(id) ON DELETE SET NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'completed',
+                assessment_json JSONB NOT NULL,
+                requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                completed_at TIMESTAMP WITH TIME ZONE,
+                CONSTRAINT uq_plan_recalculation_user_source UNIQUE (user_id, source_key)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_user_id ON plan_recalculation_requests (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_plan_id ON plan_recalculation_requests (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_trigger_type ON plan_recalculation_requests (trigger_type)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_source_event_id ON plan_recalculation_requests (source_event_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_status ON plan_recalculation_requests (status)",
+            "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_requested_at ON plan_recalculation_requests (requested_at)",
+        ),
+    ),
 )
 
 

@@ -8,9 +8,11 @@ from app.services.plan_versions import json_safe
 
 
 EVENT_TYPES = {
+    "activity_imported",
     "coach_action_applied",
     "illness_reported",
     "pain_reported",
+    "plan_version_rolled_back",
     "readiness_checkin_saved",
     "workout_completed",
     "workout_completion_removed",
@@ -18,7 +20,7 @@ EVENT_TYPES = {
     "workout_missed",
 }
 CATEGORIES = {"fact", "outcome", "user_input"}
-SOURCES = {"activity_import", "coach_action_preview", "daily_readiness", "manual_activity_link", "manual_completion", "post_workout_feedback", "user"}
+SOURCES = {"activity_import", "coach_action_preview", "daily_readiness", "manual_activity_link", "manual_completion", "plan_rollback_preview", "post_workout_feedback", "user"}
 
 
 def record_coaching_event(

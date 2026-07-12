@@ -14,7 +14,7 @@ from app.services.activity_metrics import is_running_activity_type, sync_derived
 from app.services.audit import log_audit_event
 from app.services.coaching_events import record_coaching_event
 from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout
-from app.services.plan_versions import create_plan_version
+from app.services.plan_versions import action_plan_snapshot, create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.training_load import sync_daily_training_loads_for_activity
 from app.services.zones import calculated_zones, zone_type_for_unit
@@ -2183,6 +2183,7 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
     ))
     plan = locked_plan
     preview = plan_recommendation_preview_changes(db, user, plan)
+    pre_snapshot = action_plan_snapshot(plan)
     changes = list(preview["changes"])
     skipped = list(preview["skipped"])
     if not changes:
@@ -2222,7 +2223,14 @@ def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expe
         db.add(audit)
         db.flush()
         audit_id = audit.id
-        version = create_plan_version(db, user, plan, "auto_adaptation", f"Applied {len(changes)} coach recommendation changes")
+        version = create_plan_version(
+            db,
+            user,
+            plan,
+            "auto_adaptation",
+            f"Applied {len(changes)} coach recommendation changes",
+            pre_snapshot=pre_snapshot,
+        )
         db.flush()
         db.commit()
     except Exception:
@@ -3388,10 +3396,10 @@ def record_feedback_events(
     *,
     operation: str,
     pain_was_reported: bool,
-) -> None:
+) -> CoachingEvent:
     db.flush()
     snapshot = feedback_event_snapshot(feedback, workout)
-    record_coaching_event(
+    event = record_coaching_event(
         db,
         user_id=user.id,
         event_type="workout_feedback_saved",
@@ -3420,6 +3428,7 @@ def record_feedback_events(
             feedback_id=feedback.id,
             payload={"pain_level_0_10": feedback.pain_level, "notes": feedback.pain_notes},
         )
+    return event
 
 
 def record_workout_completed_event(
@@ -3473,7 +3482,11 @@ def save_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout,
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     if feedback_event_snapshot(feedback, workout) != previous_snapshot:
-        record_feedback_events(db, user, workout, feedback, operation="replaced" if existed else "created", pain_was_reported=pain_was_reported)
+        event = record_feedback_events(db, user, workout, feedback, operation="replaced" if existed else "created", pain_was_reported=pain_was_reported)
+        db.flush()
+        from app.services.plan_recalculations import request_plan_recalculation
+
+        request_plan_recalculation(db, user, trigger_type="workout_feedback_saved", source_key=f"coaching_event:{event.id}", source_event_id=event.id, plan=workout.plan)
     db.commit()
     db.refresh(feedback)
     return feedback
@@ -3489,7 +3502,11 @@ def patch_workout_feedback(db: Session, user: User, workout: TrainingPlanWorkout
     if workout.completed_activity:
         sync_daily_training_loads_for_activity(db, user, workout.completed_activity)
     if feedback_event_snapshot(feedback, workout) != previous_snapshot:
-        record_feedback_events(db, user, workout, feedback, operation="patched", pain_was_reported=pain_was_reported)
+        event = record_feedback_events(db, user, workout, feedback, operation="patched", pain_was_reported=pain_was_reported)
+        db.flush()
+        from app.services.plan_recalculations import request_plan_recalculation
+
+        request_plan_recalculation(db, user, trigger_type="workout_feedback_saved", source_key=f"coaching_event:{event.id}", source_event_id=event.id, plan=workout.plan)
     db.commit()
     db.refresh(feedback)
     return feedback

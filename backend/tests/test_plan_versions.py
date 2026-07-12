@@ -66,12 +66,17 @@ class PlanVersionTests(unittest.TestCase):
         plan = TrainingPlan(id=10, user_id=1, title="Plan", goal_type="10k", available_days_per_week=4, status="draft")
         plan.workouts = []
 
-        version = create_plan_version(db, user, plan, "manual_edit", "Updated title")
+        before = {"id": 10, "title": "Old plan", "workouts": []}
+        version = create_plan_version(db, user, plan, "manual_edit", "Updated title", pre_snapshot=before)
 
         self.assertTrue(db.flushed)
         self.assertEqual(version.version_number, 3)
         self.assertEqual(version.reason, "manual_edit")
         self.assertEqual(version.summary, "Updated title")
+        self.assertEqual(version.snapshot_json["title"], "Plan")
+        self.assertEqual(version.pre_snapshot_json["title"], "Old plan")
+        self.assertEqual(version.post_snapshot_json["schema_version"], "action-plan-state-v1")
+        self.assertEqual(version.post_snapshot_json["plan_id"], plan.id)
         self.assertEqual(version.snapshot_json["title"], "Plan")
         self.assertEqual(db.added, [version])
 

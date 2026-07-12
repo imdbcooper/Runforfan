@@ -69,6 +69,9 @@ GET /health
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
 - `POST /api/coach-actions/workouts/{workout_id}/preview` — создать server-generated preview для `skip` или `reschedule` со структурированной причиной, календарно-недельным эффектом и проверкой safety constraints.
 - `POST /api/coach-actions/{preview_id}/apply` — явно подтвердить generic coach action; backend блокирует stale/expired preview, повторно проверяет план, сохраняет version/audit/event linkage и поддерживает идемпотентный retry.
+- `POST /api/planning/plans/{plan_id}/versions/{version_id}/rollback-preview` — подготовить server-generated compensating rollback для поддерживаемой action-derived версии; legacy/manual/completion versions не восстанавливаются автоматически.
+- `POST /api/planning/rollback-previews/{preview_id}/apply` — явно подтвердить rollback; backend повторно проверяет current post-state, recovery restrictions и hard-session spacing, затем создаёт новую immutable version/audit/event вместо удаления истории.
+- `GET /api/plan-recalculations/latest` — получить последнюю persisted read-only переоценку плана, созданную после изменившегося post-workout feedback или нового импорта активности. Переоценка никогда не применяет изменения без отдельного preview/confirmation.
 - `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
 - `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot текущего состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил. `as_of_at` отмечает завершение сбора текущих mutable inputs, но не обещает историческую реконструкцию БД.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
@@ -115,6 +118,7 @@ GET /health
 - `POST /api/planning/plans/{id}/recommendations/preview` — preview безопасных автоматических корректировок без изменения плана.
 - `POST /api/planning/plans/{id}/recommendations/apply` — применить preview/apply корректировки к будущим незавершенным workouts и записать audit.
 - `GET /api/planning/plans/{id}/recommendations/audit` — история примененных coach adjustments для плана.
+- `GET /api/planning/plans/{id}/versions` — immutable история версий с pre/post snapshots и признаком доступности compensating rollback.
 - `POST /api/planning/plans/{id}/activate` — сделать программу активной.
 - `GET /api/planning/workouts/{id}` — детальная planned workout card со структурой, feedback и execution score.
 - `PATCH /api/planning/workouts/{id}` — обновить дату, статус или привязанную фактическую тренировку; переход в `missed` выполняется только через отдельный endpoint с причиной.
@@ -199,6 +203,8 @@ API настроек AI:
 - Coach recommendations дают подсказки и безопасный preview/apply: удержать объем, снизить следующую неделю, осторожно перенести ключевую тренировку или не повышать интенсивность при safety gate. Применение меняет будущие незавершенные workouts; исключение — missed/skipped key workout может быть переведен в `rescheduled` на новую дату. Каждое применение сохраняет audit history.
 - Workout feedback сохраняет RPE, fatigue, pain, sleep quality, weather и notes для выполненных/пропущенных workouts; plan output показывает volume score, intensity score, adherence status и subjective risk рядом с workout card.
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
+- Изменившийся feedback и новый импорт активности в той же транзакции создают idempotent read-only recalculation assessment. Он хранит provenance, rule versions и рекомендации, но не мутирует план.
+- Подтверждаемые действия сохраняют immutable pre/post snapshots. Rollback доступен только для action-derived версий, повторно проходит safety/stale checks и создаёт новую компенсирующую версию, не переписывая историю.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Athlete State хранится отдельно от исходных фактов как immutable materialized projection с input fingerprint. Overview явно показывает missing/stale данные, confidence и источники; snapshot не ставит диагнозы и не меняет план.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.

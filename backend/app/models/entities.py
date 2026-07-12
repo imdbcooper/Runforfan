@@ -38,6 +38,8 @@ class User(Base, TimestampMixin):
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coach_action_previews: Mapped[list["CoachActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    plan_rollback_previews: Mapped[list["PlanRollbackPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    plan_recalculation_requests: Mapped[list["PlanRecalculationRequest"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coaching_events: Mapped[list["CoachingEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     athlete_state_snapshots: Mapped[list["AthleteStateSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -376,6 +378,46 @@ class CoachActionPreview(Base):
     user: Mapped[User] = relationship(back_populates="coach_action_previews")
 
 
+class PlanRollbackPreview(Base):
+    __tablename__ = "plan_rollback_previews"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("plan_versions.id", ondelete="CASCADE"), index=True)
+    preview_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    state_fingerprint: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rollback_version_id: Mapped[int | None] = mapped_column(ForeignKey("plan_versions.id", ondelete="SET NULL"))
+    recommendation_audit_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_recommendation_audits.id", ondelete="SET NULL"))
+    audit_log_id: Mapped[int | None] = mapped_column(ForeignKey("audit_log.id", ondelete="SET NULL"))
+    coaching_event_id: Mapped[int | None] = mapped_column(ForeignKey("coaching_events.id", ondelete="SET NULL"))
+    applied_response_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="plan_rollback_previews")
+
+
+class PlanRecalculationRequest(Base):
+    __tablename__ = "plan_recalculation_requests"
+    __table_args__ = (UniqueConstraint("user_id", "source_key", name="uq_plan_recalculation_user_source"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("training_plans.id", ondelete="SET NULL"), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(64), index=True)
+    source_key: Mapped[str] = mapped_column(String(160))
+    source_event_id: Mapped[int | None] = mapped_column(ForeignKey("coaching_events.id", ondelete="SET NULL"), index=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    assessment_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="plan_recalculation_requests")
+
+
 class CoachingEvent(Base):
     __tablename__ = "coaching_events"
 
@@ -592,6 +634,9 @@ class TrainingPlanVersion(Base):
     reason: Mapped[str] = mapped_column(String(64))
     summary: Mapped[str | None] = mapped_column(Text)
     snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    pre_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    post_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    rollback_of_version_id: Mapped[int | None] = mapped_column(ForeignKey("plan_versions.id", ondelete="SET NULL"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="versions")
