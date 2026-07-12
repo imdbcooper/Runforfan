@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -813,6 +813,8 @@ function App() {
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
   const [dailyReadiness, setDailyReadiness] = useState<DailyReadiness | null>(null)
+  const [athleteState, setAthleteState] = useState<AthleteState | null>(null)
+  const [athleteStateError, setAthleteStateError] = useState("")
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [profile, setProfile] = useState<AthleteProfile | null>(null)
   const [completeness, setCompleteness] = useState<ProfileCompleteness | null>(null)
@@ -856,6 +858,16 @@ function App() {
     return authConfig.devLoginEnabled ? "DEMO USER" : "TELEGRAM USER"
   }
 
+  async function refreshAthleteState() {
+    try {
+      setAthleteState(await api.todayAthleteState())
+      setAthleteStateError("")
+    } catch (error) {
+      console.error(error)
+      setAthleteStateError(apiErrorMessage(error, uiText("Сводка состояния временно недоступна.", "Athlete State is temporarily unavailable.")))
+    }
+  }
+
   async function refreshGlobal({ throwOnError = false }: { throwOnError?: boolean } = {}) {
     try {
       await devLogin()
@@ -874,6 +886,7 @@ function App() {
       setDailyReadiness(nextReadiness)
       setProviders(nextProviders)
       setStatus(authenticatedStatus())
+      await refreshAthleteState()
     } catch (error) {
       if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
         clearAuthToken()
@@ -990,7 +1003,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} onReadinessChanged={setDailyReadiness} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} athleteState={athleteState} athleteStateError={athleteStateError} onRetryAthleteState={refreshAthleteState} onReadinessChanged={(value) => { setDailyReadiness(value); void refreshAthleteState() }} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -1146,7 +1159,7 @@ function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onL
   </header>
 }
 
-function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, dashboard, dailyReadiness, athleteState, athleteStateError, onRetryAthleteState, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; athleteState: AthleteState | null; athleteStateError: string; onRetryAthleteState: () => Promise<void>; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
@@ -1156,6 +1169,7 @@ function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, o
   return <div className="grid gap-4">
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
     <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} onActionApplied={onActionApplied} />
+    <AthleteStateCard athleteState={athleteState} error={athleteStateError} onRetry={onRetryAthleteState} />
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       {currentWeek ? <CurrentWeekCoachCard currentWeek={currentWeek} onPlans={onPlans} /> : <Card className="p-4 text-sm text-zinc-400">{uiText("Создайте план, чтобы видеть неделю целиком.", "Create a plan to see the week at a glance.")}</Card>}
       <RecentRunsCard activities={recentActivities.slice(0, 3)} />
@@ -1452,6 +1466,74 @@ function signalStatusLabel(status?: string | null) {
   if (status === "strained") return uiText("перегруз", "strained")
   if (status === "injured") return uiText("травма", "injured")
   return status
+}
+
+function athleteSignalLabel(key: string, fallback: string) {
+  const labels: Record<string, string> = {
+    readiness: uiText("Самочувствие сегодня", "Daily readiness"),
+    profile_safety: uiText("Ограничения профиля", "Profile safety"),
+    recent_safety_reports: uiText("Боль и болезнь", "Pain and illness"),
+    recent_feedback: uiText("Обратная связь", "Post-workout feedback"),
+    execution_quality: uiText("Выполнение плана", "Execution quality"),
+    weekly_adherence: uiText("Текущая неделя", "Weekly adherence"),
+    training_load: uiText("Тренировочная нагрузка", "Training load"),
+  }
+  return labels[key] || fallback
+}
+
+function freshnessLabel(value: string) {
+  const labels: Record<string, string> = {
+    fresh: uiText("сегодня", "fresh"),
+    current: uiText("актуально", "current"),
+    aging: uiText("давность растет", "aging"),
+    stale: uiText("устарело", "stale"),
+    missing: uiText("нет данных", "missing"),
+  }
+  return labels[value] || value
+}
+
+function athleteConfidenceLabel(value: string) {
+  const labels: Record<string, string> = {
+    high: uiText("высокая уверенность", "high confidence"),
+    medium: uiText("средняя уверенность", "medium confidence"),
+    low: uiText("низкая уверенность", "low confidence"),
+    none: uiText("нет оценки", "not assessed"),
+  }
+  return labels[value] || value
+}
+
+function athleteSignalPriority(signal: AthleteStateSignal) {
+  return { risk: 0, watch: 1, unknown: 2, ok: 3 }[signal.status] ?? 4
+}
+
+function AthleteStateCard({ athleteState, error, onRetry }: { athleteState: AthleteState | null; error: string; onRetry: () => Promise<void> }) {
+  if (error && !athleteState) return <Card className="grid gap-3 p-4 text-sm sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="font-medium text-white">{uiText("Сводка состояния недоступна", "Athlete State unavailable")}</p><p className="mt-1 text-xs leading-5 text-zinc-500">{error}</p></div><Button size="sm" variant="secondary" onClick={() => void onRetry()}>{uiText("Повторить", "Retry")}</Button></Card>
+  if (!athleteState) return <Card className="p-4 text-sm text-zinc-500">{uiText("Собираем объяснимую сводку состояния...", "Building your explainable athlete state...")}</Card>
+  const signals = [...athleteState.signals].sort((left, right) => athleteSignalPriority(left) - athleteSignalPriority(right))
+  const visible = signals.slice(0, 4)
+  const evidenceCount = athleteState.signals.reduce((total, item) => total + item.source_refs.length, 0)
+  return <Card className="overflow-hidden">
+    <CardHeader className="border-b border-zinc-800">
+      <div className="min-w-0"><p className="text-xs font-semibold text-orange-200">Athlete state</p><CardTitle className="mt-1">{athleteState.headline}</CardTitle><p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">{athleteState.summary}</p></div>
+      <Badge className={signalClass(athleteState.status)}>{signalStatusLabel(athleteState.status)}</Badge>
+    </CardHeader>
+    <div className="grid gap-3 p-4">
+      {error ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-xs text-orange-100"><span>{error} {uiText("Показан предыдущий снимок.", "Showing the previous snapshot.")}</span><Button size="sm" variant="secondary" onClick={() => void onRetry()}>{uiText("Повторить", "Retry")}</Button></div> : null}
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {visible.map((item) => <div key={item.key} className={cn("min-w-0 rounded-xl border p-3", signalClass(item.status))}>
+          <div className="flex flex-wrap items-start justify-between gap-2"><p className="text-xs font-semibold">{athleteSignalLabel(item.key, item.label)}</p><span className="font-mono text-[9px] uppercase tracking-[0.12em] opacity-70">{signalStatusLabel(item.status)}</span></div>
+          <p className="mt-2 text-xs leading-5 text-zinc-300">{item.summary}</p>
+          <p className="mt-2 text-[10px] leading-4 text-zinc-500">{freshnessLabel(item.freshness)} · {athleteConfidenceLabel(item.confidence)}</p>
+        </div>)}
+      </div>
+      <CollapsibleSection title={uiText("Источники и ограничения", "Evidence and limitations")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{evidenceCount} {uiText("источников", "sources")}</Badge>}>
+        <div className="grid gap-2 text-xs sm:grid-cols-2">
+          {signals.map((item) => <div key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{athleteSignalLabel(item.key, item.label)}</p><span className="text-zinc-600">{item.source_refs.length} source refs</span></div><p className="mt-1 leading-5 text-zinc-500">{item.limitations[0] || uiText("Дополнительных ограничений нет.", "No additional limitation recorded.")}</p></div>)}
+        </div>
+        <p className="mt-3 text-[11px] leading-5 text-zinc-600">{athleteState.disclaimer} · {uiText("Снимок", "Snapshot")} #{athleteState.snapshot_id} · {athleteState.rule_version}</p>
+      </CollapsibleSection>
+    </div>
+  </Card>
 }
 
 function formatDate(value?: string | null) {

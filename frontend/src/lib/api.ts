@@ -786,6 +786,44 @@ export type DailyReadinessActionApplyResult = {
   summary: string
 }
 
+export type AthleteStateSourceRef = {
+  model: string
+  id: number | string
+  field: string | null
+}
+
+export type AthleteStateSignal = {
+  key: string
+  label: string
+  status: "ok" | "watch" | "risk" | "unknown" | string
+  freshness: "fresh" | "current" | "aging" | "stale" | "missing" | string
+  confidence: "high" | "medium" | "low" | "none" | string
+  value: unknown
+  summary: string
+  observed_at: string | null
+  source_refs: AthleteStateSourceRef[]
+  limitations: string[]
+}
+
+export type AthleteState = {
+  snapshot_id: number
+  local_date: string
+  timezone: string
+  state_version: string
+  rule_version: string
+  input_fingerprint: string
+  as_of_at: string
+  computed_at: string
+  status: "ok" | "watch" | "risk" | "unknown" | string
+  headline: string
+  summary: string
+  signals: AthleteStateSignal[]
+  trends: Record<string, unknown>
+  weekly: Record<string, unknown>
+  limitations: string[]
+  disclaimer: string
+}
+
 export type DashboardPlanSummary = {
   id: number
   title: string
@@ -1384,6 +1422,7 @@ export const api = {
   completeGoal: (id: number, payload: Record<string, unknown> = {}) => request<RunningGoal>(`/goals/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   deleteGoal: (id: number) => request<{ deleted: boolean; id: number }>(`/goals/${id}`, { method: "DELETE" }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
+  todayAthleteState: () => request<AthleteState>("/athlete-state/today"),
   todayReadiness: () => request<DailyReadiness>("/readiness/today"),
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
   previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),

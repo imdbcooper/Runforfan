@@ -63,7 +63,14 @@ def measurement_local_date(measurement: AthleteMeasurement, timezone: ZoneInfo =
     return measured_at.astimezone(timezone).date()
 
 
-def load_activities(db: Session, user: User, from_date: date | None = None, to_date: date | None = None, timezone: ZoneInfo = ZoneInfo("UTC")) -> list[Activity]:
+def load_activities(
+    db: Session,
+    user: User,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    timezone: ZoneInfo = ZoneInfo("UTC"),
+    as_of_at: datetime | None = None,
+) -> list[Activity]:
     query = (
         select(Activity)
         .where(Activity.user_id == user.id)
@@ -75,6 +82,9 @@ def load_activities(db: Session, user: User, from_date: date | None = None, to_d
         query = query.where(Activity.started_at >= start - timedelta(days=1))
     if end:
         query = query.where(Activity.started_at < end + timedelta(days=1))
+    if as_of_at is not None:
+        cutoff = as_of_at if as_of_at.tzinfo else as_of_at.replace(tzinfo=UTC)
+        query = query.where(Activity.started_at <= cutoff.astimezone(UTC))
     activities = list(db.scalars(query))
     if from_date or to_date:
         return [activity for activity in activities if (activity_date := activity_local_date(activity, timezone)) and (from_date is None or activity_date >= from_date) and (to_date is None or activity_date <= to_date)]

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 try:
     from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlanWorkout, TrainingPlanWorkoutFeedback
     from app.services import training_load as training_load_service
+    from app.services.analytics import load_activities
     from app.services.training_load import daily_training_load_row_matches_point, load_warnings, load_planned_workouts_with_feedback, sync_daily_training_loads, training_load_from_data
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "pydantic_core", "sqlalchemy"}:
@@ -104,6 +105,40 @@ def import_analytics_route_dependencies(test_case: unittest.TestCase):
 
 
 class TrainingLoadTests(unittest.TestCase):
+    def test_activity_loader_applies_as_of_upper_bound(self):
+        class FakeDb:
+            def __init__(self):
+                self.query = None
+
+            def scalars(self, query):
+                self.query = query
+                return []
+
+        db = FakeDb()
+        cutoff = datetime(2026, 7, 12, 8, tzinfo=UTC)
+
+        load_activities(db, type("UserStub", (), {"id": 42})(), timezone=ZoneInfo("UTC"), as_of_at=cutoff)
+
+        sql = str(db.query.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("activities.user_id = 42", sql)
+        self.assertIn("activities.started_at <= '2026-07-12 08:00:00+00:00'", sql)
+
+    def test_feedback_cutoff_refreshes_preloaded_relationships(self):
+        class FakeDb:
+            def __init__(self):
+                self.query = None
+
+            def scalars(self, query):
+                self.query = query
+                return []
+
+        db = FakeDb()
+        cutoff = datetime(2026, 7, 12, 8, tzinfo=UTC)
+
+        load_planned_workouts_with_feedback(db, type("UserStub", (), {"id": 42})(), [7], as_of_at=cutoff)
+
+        self.assertTrue(db.query.get_execution_options().get("populate_existing"))
+
     def test_workout_query_uses_activity_ids_not_scheduled_date_window(self):
         class FakeScalarResult:
             def __iter__(self):

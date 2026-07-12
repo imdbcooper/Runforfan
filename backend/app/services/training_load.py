@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlan, TrainingPlanWorkout, User
+from app.models import Activity, AthleteProfile, DailyTrainingLoad, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
 from app.services.analytics import activity_local_date, date_range_label, load_activities, profile_timezone
 from app.services.calculations import BANISTER_REF, CalculationResult, FOSTER_REF, calculate_hr_trimp, calculate_monotony_strain, calculate_srpe_load, ewma_load
 
@@ -55,18 +55,33 @@ def primary_method(methods: set[str]) -> str:
     return "mixed"
 
 
-def load_planned_workouts_with_feedback(db: Session, user: User, activity_ids: list[int]) -> list[TrainingPlanWorkout]:
+def load_planned_workouts_with_feedback(
+    db: Session,
+    user: User,
+    activity_ids: list[int],
+    as_of_at: datetime | None = None,
+) -> list[TrainingPlanWorkout]:
     if not activity_ids:
         return []
-    return list(db.scalars(
+    feedback_loader = selectinload(TrainingPlanWorkout.feedback)
+    if as_of_at is not None:
+        cutoff = as_of_at if as_of_at.tzinfo else as_of_at.replace(tzinfo=UTC)
+        feedback_loader = selectinload(TrainingPlanWorkout.feedback.and_(
+            TrainingPlanWorkoutFeedback.created_at <= cutoff.astimezone(UTC),
+            TrainingPlanWorkoutFeedback.updated_at <= cutoff.astimezone(UTC),
+        ))
+    query = (
         select(TrainingPlanWorkout)
         .join(TrainingPlan)
         .where(
             TrainingPlan.user_id == user.id,
             TrainingPlanWorkout.completed_activity_id.in_(activity_ids),
         )
-        .options(selectinload(TrainingPlanWorkout.feedback), selectinload(TrainingPlanWorkout.completed_activity))
-    ))
+        .options(feedback_loader, selectinload(TrainingPlanWorkout.completed_activity))
+    )
+    if as_of_at is not None:
+        query = query.execution_options(populate_existing=True)
+    return list(db.scalars(query))
 
 
 def hr_trimp_load(activity: Activity, profile: AthleteProfile | None) -> float | None:
@@ -371,15 +386,23 @@ def training_load_from_data(activities: list[Activity], workouts: list[TrainingP
     }
 
 
-def training_load_context(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:
-    timezone = profile_timezone(db, user)
-    end_date = to_date or datetime.now(timezone).date()
+def training_load_context(
+    db: Session,
+    user: User,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    as_of_at: datetime | None = None,
+    profile: AthleteProfile | None = None,
+    timezone: ZoneInfo | None = None,
+) -> dict[str, object]:
+    resolved_timezone = timezone or profile_timezone(db, user)
+    end_date = to_date or datetime.now(resolved_timezone).date()
     start_date = from_date or end_date - timedelta(days=DEFAULT_PERIOD_DAYS - 1)
     warmup_start = start_date - timedelta(days=LOAD_LOOKBACK_DAYS)
-    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
-    activities = load_activities(db, user, warmup_start, end_date, timezone)
-    workouts = load_planned_workouts_with_feedback(db, user, [activity.id for activity in activities])
-    return training_load_from_data(activities, workouts, profile, start_date, end_date, timezone)
+    resolved_profile = profile if profile is not None else db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    activities = load_activities(db, user, warmup_start, end_date, resolved_timezone, as_of_at=as_of_at)
+    workouts = load_planned_workouts_with_feedback(db, user, [activity.id for activity in activities], as_of_at=as_of_at)
+    return training_load_from_data(activities, workouts, resolved_profile, start_date, end_date, resolved_timezone)
 
 
 def training_load_daily(db: Session, user: User, from_date: date | None = None, to_date: date | None = None) -> dict[str, object]:

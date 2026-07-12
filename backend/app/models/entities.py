@@ -38,6 +38,7 @@ class User(Base, TimestampMixin):
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coaching_events: Mapped[list["CoachingEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    athlete_state_snapshots: Mapped[list["AthleteStateSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -370,6 +371,33 @@ class CoachingEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="coaching_events")
+
+
+class AthleteStateSnapshot(Base):
+    __tablename__ = "athlete_state_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "local_date",
+            "state_version",
+            "input_fingerprint",
+            name="uq_athlete_state_snapshot_input",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    timezone: Mapped[str] = mapped_column(String(100))
+    state_version: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    as_of_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(64), default="on_read")
+
+    user: Mapped[User] = relationship(back_populates="athlete_state_snapshots")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):

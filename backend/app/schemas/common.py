@@ -1172,6 +1172,44 @@ class DailyReadinessActionApplyOut(BaseModel):
     summary: str
 
 
+class AthleteStateSourceRefOut(BaseModel):
+    model: str
+    id: int | str
+    field: str | None = None
+
+
+class AthleteStateSignalOut(BaseModel):
+    key: str
+    label: str
+    status: str
+    freshness: str
+    confidence: str
+    value: object | None = None
+    summary: str
+    observed_at: date | datetime | None = None
+    source_refs: list[AthleteStateSourceRefOut] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class AthleteStateOut(BaseModel):
+    snapshot_id: int
+    local_date: date
+    timezone: str
+    state_version: str
+    rule_version: str
+    input_fingerprint: str
+    as_of_at: datetime
+    computed_at: datetime
+    status: str
+    headline: str
+    summary: str
+    signals: list[AthleteStateSignalOut]
+    trends: dict[str, object]
+    weekly: dict[str, object]
+    limitations: list[str] = Field(default_factory=list)
+    disclaimer: str
+
+
 class PlanWeekSummaryOut(BaseModel):
     week_index: int
     planned_distance_km: float

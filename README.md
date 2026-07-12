@@ -68,6 +68,7 @@ GET /health
 - `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
 - `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
+- `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
@@ -197,6 +198,7 @@ API настроек AI:
 - Workout feedback сохраняет RPE, fatigue, pain, sleep quality, weather и notes для выполненных/пропущенных workouts; plan output показывает volume score, intensity score, adherence status и subjective risk рядом с workout card.
 - High pain/fatigue/RPE feedback за последние 14 дней усиливает coach recommendations и может дать `reduce_intensity` для следующей hard workout.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
+- Athlete State хранится отдельно от исходных фактов как immutable materialized projection с input fingerprint. Overview явно показывает missing/stale данные, confidence и источники; snapshot не ставит диагнозы и не меняет план.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
 - Training Load & Recovery показывает daily/weekly load, CTL/ATL/TSB, monotony/strain, hard-session spacing, recovery days и explainable load alerts.

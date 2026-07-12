@@ -507,6 +507,31 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_coaching_events_correlation_id ON coaching_events (correlation_id)",
         ),
     ),
+    (
+        "20260712_0023_athlete_state_snapshots",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS athlete_state_snapshots (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                local_date DATE NOT NULL,
+                timezone VARCHAR(100) NOT NULL,
+                state_version VARCHAR(64) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                snapshot_json JSONB NOT NULL,
+                as_of_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                computed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                trigger_type VARCHAR(64) NOT NULL DEFAULT 'on_read',
+                CONSTRAINT uq_athlete_state_snapshot_input UNIQUE (user_id, local_date, state_version, input_fingerprint)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_athlete_state_snapshots_user_id ON athlete_state_snapshots (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_athlete_state_snapshots_local_date ON athlete_state_snapshots (local_date)",
+            "CREATE INDEX IF NOT EXISTS ix_athlete_state_snapshots_computed_at ON athlete_state_snapshots (computed_at)",
+            "CREATE INDEX IF NOT EXISTS ix_athlete_state_snapshots_user_date ON athlete_state_snapshots (user_id, local_date DESC, id DESC)",
+        ),
+    ),
 )
 
 
