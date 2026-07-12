@@ -440,6 +440,39 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_daily_readiness_checkins_user_date ON daily_readiness_checkins (user_id, checkin_date)",
         ),
     ),
+    (
+        "20260712_0021_daily_readiness_action_previews",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS daily_readiness_action_previews (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                workout_id INTEGER NOT NULL REFERENCES training_plan_workouts(id) ON DELETE CASCADE,
+                checkin_id INTEGER NOT NULL REFERENCES daily_readiness_checkins(id) ON DELETE CASCADE,
+                checkin_date DATE NOT NULL,
+                action VARCHAR(64) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                recommendation_snapshot JSONB NOT NULL,
+                preview_snapshot JSONB NOT NULL,
+                state_fingerprint VARCHAR(64) NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                applied_at TIMESTAMP WITH TIME ZONE,
+                recommendation_audit_id INTEGER REFERENCES training_plan_recommendation_audits(id) ON DELETE SET NULL,
+                plan_version_id INTEGER REFERENCES plan_versions(id) ON DELETE SET NULL,
+                audit_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL,
+                applied_response_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_user_id ON daily_readiness_action_previews (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_plan_id ON daily_readiness_action_previews (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_workout_id ON daily_readiness_action_previews (workout_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_checkin_id ON daily_readiness_action_previews (checkin_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_checkin_date ON daily_readiness_action_previews (checkin_date)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_action_previews_expires_at ON daily_readiness_action_previews (expires_at)",
+        ),
+    ),
 )
 
 

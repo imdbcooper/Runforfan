@@ -95,8 +95,14 @@ class FakeDb:
     def refresh(self, _item):
         return None
 
-    def scalar(self, _query):
+    def scalar(self, query):
+        text = str(query)
+        if "FROM training_plans" in text:
+            return self.plan
         return None
+
+    def scalars(self, _query):
+        return self.plan.workouts
 
 
 class PlanAdjustmentRecommendationTests(unittest.TestCase):
@@ -113,6 +119,7 @@ class PlanAdjustmentRecommendationTests(unittest.TestCase):
 
     def apply(self, plan: TrainingPlan, db: FakeDb | None = None, expected_changes: list[dict[str, object]] | None = None) -> tuple[dict[str, object], FakeDb]:
         fake_db = db or FakeDb()
+        fake_db.plan = plan
         with patch("app.services.planning.today_for_user", return_value=TODAY):
             result = apply_plan_recommendations(fake_db, make_user(), plan, expected_changes)
         return result, fake_db

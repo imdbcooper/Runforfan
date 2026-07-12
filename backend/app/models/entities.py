@@ -36,6 +36,7 @@ class User(Base, TimestampMixin):
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -321,6 +322,31 @@ class DailyReadinessCheckIn(Base, TimestampMixin):
     recommendation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     user: Mapped[User] = relationship(back_populates="daily_readiness_checkins")
+
+
+class DailyReadinessActionPreview(Base):
+    __tablename__ = "daily_readiness_action_previews"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="CASCADE"), index=True)
+    checkin_id: Mapped[int] = mapped_column(ForeignKey("daily_readiness_checkins.id", ondelete="CASCADE"), index=True)
+    checkin_date: Mapped[date] = mapped_column(Date, index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    recommendation_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    preview_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    state_fingerprint: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recommendation_audit_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_recommendation_audits.id", ondelete="SET NULL"))
+    plan_version_id: Mapped[int | None] = mapped_column(ForeignKey("plan_versions.id", ondelete="SET NULL"))
+    audit_log_id: Mapped[int | None] = mapped_column(ForeignKey("audit_log.id", ondelete="SET NULL"))
+    applied_response_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="daily_readiness_action_previews")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):

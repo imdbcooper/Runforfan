@@ -2154,6 +2154,33 @@ def normalize_preview_changes(changes: list[Any] | None) -> list[dict[str, objec
 
 
 def apply_plan_recommendations(db: Session, user: User, plan: TrainingPlan, expected_changes: list[Any] | None = None) -> dict[str, object]:
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    locked_plan = db.scalar(
+        select(TrainingPlan)
+        .where(TrainingPlan.id == plan.id, TrainingPlan.user_id == user.id)
+        .options(
+            selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.completed_activity),
+            selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.feedback),
+            selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_plan is None:
+        raise ValueError("Plan not found")
+    list(db.scalars(
+        select(TrainingPlanWorkout)
+        .where(TrainingPlanWorkout.plan_id == locked_plan.id)
+        .options(
+            selectinload(TrainingPlanWorkout.completed_activity),
+            selectinload(TrainingPlanWorkout.feedback),
+            selectinload(TrainingPlanWorkout.blocks),
+        )
+        .order_by(TrainingPlanWorkout.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ))
+    plan = locked_plan
     preview = plan_recommendation_preview_changes(db, user, plan)
     changes = list(preview["changes"])
     skipped = list(preview["skipped"])
@@ -3211,7 +3238,10 @@ def update_workout(db: Session, user: User, workout: TrainingPlanWorkout, payloa
             "training_age_level": "intermediate",
             "target_race_pace_seconds_per_km": None,
         }
-        workout.blocks.clear()
+        for block in list(workout.blocks):
+            workout.blocks.remove(block)
+            db.delete(block)
+        db.flush()
         for block in planned_workout_blocks_for_preview(preview_workout, zones):
             workout.blocks.append(create_workout_block_from_dict(block))
         version_summary = f"Edited workout #{workout.id} target"

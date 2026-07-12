@@ -65,6 +65,8 @@ GET /health
 - `GET /api/dashboard/summary` — агрегированный Dashboard: активный план, текущая неделя, readiness, alerts, recent activities.
 - `GET /api/readiness/today` — сегодняшний check-in и безопасная детерминированная рекомендация для запланированной тренировки.
 - `PUT /api/readiness/today` — создать или заменить check-in на локальную дату пользователя без автоматического изменения плана.
+- `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
+- `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.

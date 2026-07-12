@@ -21,19 +21,36 @@ def plan_options():
     )
 
 
-def get_user_plan(db: Session, user: User, plan_id: int) -> TrainingPlan:
-    plan = db.scalar(
+def get_user_plan(db: Session, user: User, plan_id: int, *, lock: bool = False) -> TrainingPlan:
+    if lock:
+        db.scalar(select(User).where(User.id == user.id).with_for_update())
+    query = (
         select(TrainingPlan)
         .where(TrainingPlan.id == plan_id, TrainingPlan.user_id == user.id)
         .options(*plan_options())
+    )
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    plan = db.scalar(
+        query
     )
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
     return plan
 
 
-def get_user_workout(db: Session, user: User, workout_id: int) -> TrainingPlanWorkout:
-    workout = db.scalar(
+def get_user_workout(db: Session, user: User, workout_id: int, *, lock: bool = False) -> TrainingPlanWorkout:
+    if lock:
+        db.scalar(select(User).where(User.id == user.id).with_for_update())
+        plan_id = db.scalar(
+            select(TrainingPlan.id)
+            .join(TrainingPlanWorkout)
+            .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
+        )
+        if plan_id is None:
+            raise HTTPException(status_code=404, detail="Workout not found")
+        db.scalar(select(TrainingPlan.id).where(TrainingPlan.id == plan_id).with_for_update())
+    query = (
         select(TrainingPlanWorkout)
         .join(TrainingPlan)
         .where(TrainingPlanWorkout.id == workout_id, TrainingPlan.user_id == user.id)
@@ -44,6 +61,9 @@ def get_user_workout(db: Session, user: User, workout_id: int) -> TrainingPlanWo
             selectinload(TrainingPlanWorkout.plan).selectinload(TrainingPlan.workouts).selectinload(TrainingPlanWorkout.blocks),
         )
     )
+    if lock:
+        query = query.with_for_update(of=TrainingPlanWorkout).execution_options(populate_existing=True)
+    workout = db.scalar(query)
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
     return workout
@@ -199,7 +219,7 @@ def delete_training_plan(plan_id: int, user: User = Depends(get_current_user), d
 
 @router.patch("/workouts/{workout_id}", response_model=PlanWorkoutOut)
 def update_training_plan_workout(workout_id: int, payload: PlanWorkoutUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workout = get_user_workout(db, user, workout_id)
+    workout = get_user_workout(db, user, workout_id, lock=True)
     try:
         updated = update_workout(db, user, workout, payload)
     except ValueError as error:
@@ -216,7 +236,7 @@ def get_training_plan_workout(workout_id: int, user: User = Depends(get_current_
 @router.post("/workouts/{workout_id}/complete", response_model=PlanWorkoutOut)
 def complete_training_plan_workout(workout_id: int, payload: PlanWorkoutCompleteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        completed = complete_workout(db, user, get_user_workout(db, user, workout_id), payload)
+        completed = complete_workout(db, user, get_user_workout(db, user, workout_id, lock=True), payload)
     except ValueError as error:
         status_code = 404 if "not found" in str(error).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(error)) from error
@@ -255,7 +275,7 @@ def get_workout_match_candidates(workout_id: int, user: User = Depends(get_curre
 
 @router.post("/workouts/{workout_id}/link-activity", response_model=PlanWorkoutOut)
 def link_training_plan_workout_activity(workout_id: int, payload: PlanWorkoutLinkActivityRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workout = get_user_workout(db, user, workout_id)
+    workout = get_user_workout(db, user, workout_id, lock=True)
     try:
         linked = link_activity_to_workout(db, user, workout, payload.activity_id)
     except ValueError as error:

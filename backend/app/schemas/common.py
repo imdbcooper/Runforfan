@@ -1122,6 +1122,50 @@ class DailyReadinessOut(BaseModel):
     saved_recommendation: DailyReadinessRecommendationOut | None = None
 
 
+class EmptyRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+
+class DailyReadinessActionChangeOut(BaseModel):
+    field: str
+    before: object | None = None
+    after: object | None = None
+
+
+class DailyReadinessWeeklyEffectOut(BaseModel):
+    planned_distance_km_before: float
+    planned_distance_km_after: float
+    planned_duration_seconds_before: int
+    planned_duration_seconds_after: int
+
+
+class DailyReadinessActionPreviewOut(BaseModel):
+    preview_id: str
+    expires_at: datetime
+    date: date
+    action: str
+    rule_version: str
+    rule_id: str
+    workout: PlanWorkoutOut
+    changes: list[DailyReadinessActionChangeOut]
+    weekly_effect: DailyReadinessWeeklyEffectOut
+    summary: str
+    disclaimer: str
+
+
+class DailyReadinessActionApplyOut(BaseModel):
+    status: str
+    preview_id: str
+    action: str
+    date: date
+    workout: PlanWorkoutOut
+    plan_version_id: int
+    plan_version_number: int
+    recommendation_audit_id: int
+    audit_log_id: int
+    summary: str
+
+
 class PlanWeekSummaryOut(BaseModel):
     week_index: int
     planned_distance_km: float

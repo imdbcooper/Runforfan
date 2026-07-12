@@ -2,7 +2,7 @@ import unittest
 from datetime import UTC, date, datetime
 
 try:
-    from app.models import TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutFeedback, User
+    from app.models import TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutCompleteIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
     from app.services.planning import complete_workout, feedback_to_dict, patch_workout_feedback, update_workout, workout_execution_score
 except ModuleNotFoundError as exc:
@@ -45,6 +45,7 @@ def make_workout(*, status: str = "planned", distance_km: float | None = 10.0, w
 class FakeDb:
     def __init__(self):
         self.added = []
+        self.deleted = []
         self.committed = False
 
     def add(self, item):
@@ -54,6 +55,9 @@ class FakeDb:
         for index, item in enumerate(self.added, start=100):
             if getattr(item, "id", None) is None:
                 item.id = index
+
+    def delete(self, item):
+        self.deleted.append(item)
 
     def scalar(self, _query):
         return None
@@ -158,6 +162,8 @@ class WorkoutCompletionTests(unittest.TestCase):
 
     def test_update_workout_can_edit_target_and_regenerate_blocks(self):
         workout = make_workout()
+        existing_block = TrainingPlanWorkoutBlock(id=99, workout_id=workout.id, block_index=1, block_type="work", repeat_count=1, target_distance_km=10.0)
+        workout.blocks = [existing_block]
         db = FakeDb()
 
         updated = update_workout(db, make_user(), workout, PlanWorkoutUpdate(workout_type="interval", title="Интервалы", distance_km=8.0, duration_seconds=3000, intensity="interval", description="4 x work"))
@@ -167,6 +173,8 @@ class WorkoutCompletionTests(unittest.TestCase):
         self.assertEqual(updated.distance_km, 8.0)
         self.assertEqual(updated.duration_seconds, 3000)
         self.assertTrue(updated.blocks)
+        self.assertNotIn(existing_block, updated.blocks)
+        self.assertEqual(db.deleted, [existing_block])
         self.assertTrue(db.committed)
 
     def test_execution_score_marks_overdone_volume(self):

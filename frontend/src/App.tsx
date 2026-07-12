@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -856,7 +856,7 @@ function App() {
     return authConfig.devLoginEnabled ? "DEMO USER" : "TELEGRAM USER"
   }
 
-  async function refreshGlobal() {
+  async function refreshGlobal({ throwOnError = false }: { throwOnError?: boolean } = {}) {
     try {
       await devLogin()
       const [nextUser, nextActivities, nextAnalytics, nextDashboard, nextReadiness, nextProviders] = await Promise.all([
@@ -880,10 +880,12 @@ function App() {
         setCurrentUser(null)
         setAuthReady(false)
         setStatus("LOGIN REQUIRED")
+        if (throwOnError) throw error
         return
       }
       setStatus("API ERROR")
       console.error(error)
+      if (throwOnError) throw error
     }
   }
 
@@ -988,7 +990,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} onReadinessChanged={setDailyReadiness} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} onReadinessChanged={setDailyReadiness} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -1144,7 +1146,7 @@ function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onL
   </header>
 }
 
-function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; onReadinessChanged: (value: DailyReadiness) => void; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
@@ -1153,7 +1155,7 @@ function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, o
   const showSignals = Boolean(visibleAlertCount || (readiness?.status && readiness.status !== "ok"))
   return <div className="grid gap-4">
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
-    <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} />
+    <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} onActionApplied={onActionApplied} />
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       {currentWeek ? <CurrentWeekCoachCard currentWeek={currentWeek} onPlans={onPlans} /> : <Card className="p-4 text-sm text-zinc-400">{uiText("Создайте план, чтобы видеть неделю целиком.", "Create a plan to see the week at a glance.")}</Card>}
       <RecentRunsCard activities={recentActivities.slice(0, 3)} />
@@ -1202,11 +1204,82 @@ function dailyStatusLabel(status?: string) {
   return uiText("нужен check-in", "check-in needed")
 }
 
-function DailyCoachCheckIn({ readiness, onChanged }: { readiness: DailyReadiness | null; onChanged: (value: DailyReadiness) => void }) {
+function readinessChangeValue(value: unknown) {
+  if (value === null || value === undefined) return "--"
+  if (Array.isArray(value)) return `${value.length} ${uiText("блоков", "blocks")}`
+  if (typeof value === "object") return JSON.stringify(value)
+  return String(value)
+}
+
+function readinessChangeLabel(field: string) {
+  const labels: Record<string, string> = {
+    workout_type: uiText("Тип", "Type"),
+    title: uiText("Название", "Title"),
+    distance_km: uiText("Дистанция, км", "Distance, km"),
+    duration_seconds: uiText("Длительность, сек", "Duration, sec"),
+    intensity: uiText("Интенсивность", "Intensity"),
+    description: uiText("Инструкция", "Instructions"),
+    blocks: uiText("Структура", "Structure"),
+  }
+  return labels[field] || field
+}
+
+function ReadinessActionDialog({ preview, applying, error, onApply, onClose }: { preview: DailyReadinessActionPreview; applying: boolean; error: string; onApply: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const applyButtonRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef(onClose)
+  const applyingRef = useRef(applying)
+  closeRef.current = onClose
+  applyingRef.current = applying
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    applyButtonRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !applyingRef.current) closeRef.current()
+      if (event.key !== "Tab" || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      previousFocus?.focus()
+    }
+  }, [])
+
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/80 p-3" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !applying) onClose() }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="readiness-action-title" aria-describedby="readiness-action-summary" className="my-auto w-full max-w-2xl rounded-2xl border border-orange-400/30 bg-[#111] shadow-2xl shadow-black/50">
+      <div className="border-b border-zinc-800 p-4"><p className="text-xs font-semibold text-orange-200">Daily coach</p><h3 id="readiness-action-title" className="mt-1 text-xl font-semibold text-white">{uiText("Подтвердите изменение тренировки", "Confirm workout change")}</h3><p id="readiness-action-summary" className="mt-2 text-sm leading-6 text-zinc-400">{preview.summary}</p></div>
+      <div className="grid max-h-[65vh] gap-4 overflow-y-auto p-4">
+        <div className="grid gap-2">{preview.changes.map((change) => <div key={change.field} className="grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs sm:grid-cols-[8rem_1fr_auto_1fr] sm:items-center"><span className="font-medium text-zinc-400">{readinessChangeLabel(change.field)}</span><span className="min-w-0 break-words text-zinc-500">{readinessChangeValue(change.before)}</span><span className="text-orange-300">→</span><span className="min-w-0 break-words text-white">{readinessChangeValue(change.after)}</span></div>)}</div>
+        <div className="grid gap-2 rounded-xl border border-zinc-800 p-3 text-xs sm:grid-cols-2"><div><p className="text-zinc-500">{uiText("Неделя: дистанция", "Week: distance")}</p><p className="mt-1 text-white">{formatDistance(preview.weekly_effect.planned_distance_km_before)} → {formatDistance(preview.weekly_effect.planned_distance_km_after)}</p></div><div><p className="text-zinc-500">{uiText("Неделя: время", "Week: duration")}</p><p className="mt-1 text-white">{formatDuration(preview.weekly_effect.planned_duration_seconds_before)} → {formatDuration(preview.weekly_effect.planned_duration_seconds_after)}</p></div></div>
+        <p className="text-[11px] leading-5 text-zinc-600">{preview.disclaimer}</p>
+        {error ? <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p> : null}
+      </div>
+      <div className="flex flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button variant="secondary" disabled={applying} onClick={onClose}>{uiText("Оставить как есть", "Keep original")}</Button><Button ref={applyButtonRef} disabled={applying} onClick={onApply}>{applying ? uiText("Применяем...", "Applying...") : uiText("Применить изменение", "Apply change")}</Button></div>
+    </div>
+  </div>
+}
+
+function DailyCoachCheckIn({ readiness, onChanged, onActionApplied }: { readiness: DailyReadiness | null; onChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void> }) {
   const [draft, setDraft] = useState<DailyCheckInDraft>(() => dailyDraft(readiness))
   const [editing, setEditing] = useState(() => !readiness?.checkin)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [actionPreview, setActionPreview] = useState<DailyReadinessActionPreview | null>(null)
+  const [previewingAction, setPreviewingAction] = useState(false)
+  const [applyingAction, setApplyingAction] = useState(false)
+  const [actionError, setActionError] = useState("")
 
   useEffect(() => {
     setDraft(dailyDraft(readiness))
@@ -1240,6 +1313,44 @@ function DailyCoachCheckIn({ readiness, onChanged }: { readiness: DailyReadiness
     }
   }
 
+  async function previewAction() {
+    setPreviewingAction(true)
+    setActionError("")
+    try {
+      setActionPreview(await api.previewTodayReadinessAction())
+    } catch (caught) {
+      setActionError(apiErrorMessage(caught, uiText("Рекомендация изменилась. Обновите check-in и попробуйте снова.", "The guidance changed. Refresh your check-in and try again.")))
+    } finally {
+      setPreviewingAction(false)
+    }
+  }
+
+  async function applyAction() {
+    if (!actionPreview) return
+    setApplyingAction(true)
+    setActionError("")
+    try {
+      await api.applyTodayReadinessAction(actionPreview.preview_id)
+      setActionPreview(null)
+    } catch (caught) {
+      setActionError(apiErrorMessage(caught, uiText("Preview устарел или изменился. Закройте окно и создайте новый preview.", "The preview expired or changed. Close it and create a new preview.")))
+      setApplyingAction(false)
+      return
+    }
+    try {
+      await onActionApplied()
+    } catch {
+      try {
+        onChanged(await api.todayReadiness())
+        setActionError(uiText("Изменение применено, но часть данных экрана не обновилась. Перезагрузите страницу позже.", "The change was applied, but some screen data could not refresh. Reload the page later."))
+      } catch {
+        setActionError(uiText("Изменение применено. Не удалось обновить экран; данные появятся после перезагрузки.", "The change was applied. The screen could not refresh; the new data will appear after reload."))
+      }
+    } finally {
+      setApplyingAction(false)
+    }
+  }
+
   const recommendation = readiness?.recommendation
   const scoreOptions = Array.from({ length: 11 }, (_, value) => value)
   return <Card className="overflow-hidden">
@@ -1262,8 +1373,9 @@ function DailyCoachCheckIn({ readiness, onChanged }: { readiness: DailyReadiness
       <div className="flex flex-wrap gap-2"><Button type="submit" disabled={saving}>{saving ? uiText("Сохраняем...", "Saving...") : uiText("Получить рекомендацию", "Get guidance")}</Button>{readiness?.checkin ? <Button type="button" variant="secondary" onClick={() => { setDraft(dailyDraft(readiness)); setEditing(false) }}>{uiText("Отмена", "Cancel")}</Button> : null}</div>
     </form> : recommendation ? <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
       <div className="min-w-0"><h3 className="text-lg font-semibold text-white">{recommendation.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">{recommendation.message}</p>{recommendation.prescribed_workout ? <p className="mt-3 rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-sm text-orange-100">{recommendation.prescribed_workout.duration_seconds ? `${formatDuration(recommendation.prescribed_workout.duration_seconds)} · ` : ""}RPE {recommendation.prescribed_workout.rpe_range.join("-")} · {workoutIntensityLabel(recommendation.prescribed_workout.intensity)}</p> : null}<div className="mt-3 grid gap-1">{recommendation.reasons.map((reason) => <p key={reason} className="text-xs leading-5 text-zinc-500">• {reason}</p>)}</div><p className="mt-3 text-[11px] leading-5 text-zinc-600">{recommendation.disclaimer}</p></div>
-      <Button variant="secondary" onClick={() => setEditing(true)}>{uiText("Изменить check-in", "Edit check-in")}</Button>
+      <div className="grid gap-2">{["shorten_easy", "easy_replacement"].includes(recommendation.action) && recommendation.workout_id === readiness?.today_workout?.id ? <Button disabled={previewingAction} onClick={previewAction}>{previewingAction ? uiText("Готовим preview...", "Preparing preview...") : uiText("Изменить тренировку", "Change workout")}</Button> : null}<Button variant="secondary" onClick={() => setEditing(true)}>{uiText("Изменить check-in", "Edit check-in")}</Button>{actionError && !actionPreview ? <p className="max-w-xs text-xs leading-5 text-rose-300">{actionError}</p> : null}</div>
     </div> : <div className="p-4 text-sm text-zinc-500">{uiText("Загружаем рекомендацию...", "Loading guidance...")}</div>}
+    {actionPreview ? <ReadinessActionDialog preview={actionPreview} applying={applyingAction} error={actionError} onApply={applyAction} onClose={() => { setActionPreview(null); setActionError("") }} /> : null}
   </Card>
 }
 

@@ -60,6 +60,7 @@ def get_profile(user: User = Depends(get_current_user), db: Session = Depends(ge
 
 @router.put("", response_model=AthleteProfileOut)
 def update_profile(payload: AthleteProfileUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
     profile = get_or_create_profile(db, user)
     updates = payload.model_dump(exclude_unset=True)
     weight_changed = "weight_kg" in updates and updates["weight_kg"] != profile.weight_kg
@@ -112,6 +113,7 @@ def list_measurements(
 
 @router.post("/measurements", response_model=AthleteMeasurementTimelineOut)
 def create_measurement(payload: AthleteMeasurementCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
     measurement = AthleteMeasurement(
         user_id=user.id,
         measurement_type=payload.measurement_type,

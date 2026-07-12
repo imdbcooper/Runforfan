@@ -746,6 +746,44 @@ export type DailyReadiness = {
   saved_recommendation: DailyReadinessRecommendation | null
 }
 
+export type DailyReadinessActionChange = {
+  field: string
+  before: unknown
+  after: unknown
+}
+
+export type DailyReadinessActionPreview = {
+  preview_id: string
+  expires_at: string
+  date: string
+  action: string
+  rule_version: string
+  rule_id: string
+  workout: PlanWorkout
+  changes: DailyReadinessActionChange[]
+  weekly_effect: {
+    planned_distance_km_before: number
+    planned_distance_km_after: number
+    planned_duration_seconds_before: number
+    planned_duration_seconds_after: number
+  }
+  summary: string
+  disclaimer: string
+}
+
+export type DailyReadinessActionApplyResult = {
+  status: "applied" | "already_applied" | string
+  preview_id: string
+  action: string
+  date: string
+  workout: PlanWorkout
+  plan_version_id: number
+  plan_version_number: number
+  recommendation_audit_id: number
+  audit_log_id: number
+  summary: string
+}
+
 export type DashboardPlanSummary = {
   id: number
   title: string
@@ -1346,6 +1384,8 @@ export const api = {
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   todayReadiness: () => request<DailyReadiness>("/readiness/today"),
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
+  previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),
+  applyTodayReadinessAction: (previewId: string) => request<DailyReadinessActionApplyResult>(`/readiness/today/actions/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),

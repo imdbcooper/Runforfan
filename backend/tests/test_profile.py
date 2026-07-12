@@ -89,7 +89,7 @@ class ProfileServiceTests(unittest.TestCase):
         profile = AthleteProfile(id=10, user_id=42, weight_kg=70, sex="unspecified", conservative_mode=False)
         profile.created_at = datetime(2026, 6, 8, tzinfo=UTC)
         profile.updated_at = datetime(2026, 6, 8, tzinfo=UTC)
-        db = SimpleNamespace(commit=Mock(), refresh=Mock())
+        db = SimpleNamespace(scalar=Mock(), commit=Mock(), refresh=Mock())
         app = FastAPI()
         app.include_router(profile_routes.router, prefix="/api")
 
@@ -110,7 +110,7 @@ class ProfileServiceTests(unittest.TestCase):
 
     def test_weight_measurement_repairs_profile_dependent_metrics(self):
         profile = AthleteProfile(id=10, user_id=42, weight_kg=70)
-        db = SimpleNamespace(add=Mock(), commit=Mock(), refresh=Mock())
+        db = SimpleNamespace(scalar=Mock(), add=Mock(), commit=Mock(), refresh=Mock())
         payload = AthleteMeasurementCreate(measurement_type="weight", value_numeric=72, source="manual")
 
         with (
