@@ -12,10 +12,11 @@ try:
     from app.db.base import Base
     from app.db.migrations.runner import run_migrations
     from app.models import Activity, AthleteProfile, CoachingEvent, PlanRecalculationRequest, PlanRollbackPreview, TrainingPlan, TrainingPlanVersion, TrainingPlanWorkout, User
-    from app.schemas.common import CoachActionPreviewRequest
+    from app.schemas.common import CoachActionPreviewRequest, PlanWorkoutCompleteIn
     from app.services.coach_actions import apply_coach_action_preview, create_coach_action_preview
     from app.services.plan_recalculations import record_activity_import_recalculation, request_plan_recalculation
     from app.services.plan_rollbacks import apply_plan_rollback_preview, create_plan_rollback_preview
+    from app.services.planning import complete_workout
 except ModuleNotFoundError as exc:
     if exc.name in {"psycopg", "sqlalchemy"}:
         raise unittest.SkipTest("PostgreSQL dependencies are required for stage 2 integration tests") from exc
@@ -168,6 +169,46 @@ class Stage2PostgresTests(unittest.TestCase):
         with self.SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(PlanRecalculationRequest).where(PlanRecalculationRequest.source_key == "import:concurrent")), 1)
             self.assertEqual(db.scalar(select(func.count()).select_from(CoachingEvent).where(CoachingEvent.correlation_id == "import:concurrent")), 1)
+
+    def test_concurrent_manual_completion_creates_one_side_effect_set(self):
+        barrier = threading.Barrier(2)
+        statuses = []
+        errors = []
+
+        def complete_in_session():
+            try:
+                with self.SessionLocal() as db:
+                    user = db.get(User, self.user_id)
+                    workout = db.get(TrainingPlanWorkout, self.workout_id)
+                    barrier.wait(timeout=5)
+                    try:
+                        complete_workout(db, user, workout, PlanWorkoutCompleteIn(actual_distance_km=8.0, actual_duration_seconds=2880, rpe=5))
+                        statuses.append("completed")
+                    except ValueError as error:
+                        statuses.append(str(error))
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=complete_in_session) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(statuses), ["Workout already has a linked activity; unlink it before manual completion", "completed"])
+        with self.SessionLocal() as db:
+            workout = db.get(TrainingPlanWorkout, self.workout_id)
+            feedback_event = db.scalar(select(CoachingEvent).where(CoachingEvent.event_type == "workout_feedback_saved"))
+            recalculation = db.scalar(select(PlanRecalculationRequest))
+            self.assertEqual(workout.status, "done")
+            self.assertIsNotNone(workout.completed_activity_id)
+            self.assertEqual(db.scalar(select(func.count()).select_from(Activity).where(Activity.source_note == "manual workout completion")), 1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CoachingEvent).where(CoachingEvent.event_type == "workout_completed")), 1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CoachingEvent).where(CoachingEvent.event_type == "workout_feedback_saved")), 1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PlanRecalculationRequest)), 1)
+            self.assertEqual(recalculation.source_event_id, feedback_event.id)
+            self.assertFalse(recalculation.assessment_json["mutation_applied"])
 
     def test_migration_runner_applies_stage_two_schema(self):
         run_migrations(self.engine)

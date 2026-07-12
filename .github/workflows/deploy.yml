@@ -19,6 +19,9 @@ jobs:
   build:
     name: Build and push images
     runs-on: ubuntu-latest
+    outputs:
+      backend_digest: ${{ steps.backend.outputs.digest }}
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +37,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build and push backend image
+        id: backend
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -45,6 +49,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and push frontend image
+        id: frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -114,8 +119,8 @@ jobs:
           umask 077
           cat > runforfan.env <<EOF
           RUNFORFAN_DOMAIN=$RUNFORFAN_DOMAIN
-          RUNFORFAN_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:latest
-          RUNFORFAN_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:latest
+          RUNFORFAN_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}@${{ needs.build.outputs.backend_digest }}
+          RUNFORFAN_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}@${{ needs.build.outputs.frontend_digest }}
           RUNFORFAN_BACKEND_PORT=$RUNFORFAN_BACKEND_PORT
           RUNFORFAN_FRONTEND_PORT=$RUNFORFAN_FRONTEND_PORT
           RUNFORFAN_POSTGRES_PASSWORD=$RUNFORFAN_POSTGRES_PASSWORD

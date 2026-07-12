@@ -2,7 +2,7 @@ import unittest
 from datetime import UTC, date, datetime
 
 try:
-    from app.models import CoachingEvent, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
+    from app.models import CoachingEvent, PlanRecalculationRequest, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, User
     from app.schemas.common import PlanWorkoutCompleteIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
     from app.services.planning import complete_workout, feedback_to_dict, patch_workout_feedback, update_workout, workout_execution_score
 except ModuleNotFoundError as exc:
@@ -68,7 +68,7 @@ class FakeDb:
     def commit(self):
         self.committed = True
 
-    def refresh(self, _item):
+    def refresh(self, _item, **_kwargs):
         return None
 
 
@@ -108,6 +108,12 @@ class WorkoutCompletionTests(unittest.TestCase):
         events = [item for item in db.added if isinstance(item, CoachingEvent)]
         self.assertEqual([item.event_type for item in events], ["workout_completed", "workout_feedback_saved"])
         self.assertEqual(events[0].activity_id, workout.completed_activity_id)
+        recalculations = [item for item in db.added if isinstance(item, PlanRecalculationRequest)]
+        self.assertEqual(len(recalculations), 1)
+        self.assertEqual(recalculations[0].trigger_type, "workout_feedback_saved")
+        self.assertEqual(recalculations[0].source_event_id, events[1].id)
+        self.assertEqual(recalculations[0].source_key, f"coaching_event:{events[1].id}")
+        self.assertFalse(recalculations[0].assessment_json["mutation_applied"])
         self.assertTrue(db.committed)
 
     def test_patch_feedback_preserves_unset_values(self):

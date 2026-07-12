@@ -3520,6 +3520,8 @@ def manual_activity_type_for_workout(workout: TrainingPlanWorkout) -> str:
 
 
 def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payload: PlanWorkoutCompleteIn) -> TrainingPlanWorkout:
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    db.refresh(workout, with_for_update=True)
     if workout.plan.user_id != user.id:
         raise ValueError("Workout not found")
     if workout.completed_activity_id is not None:
@@ -3566,7 +3568,11 @@ def complete_workout(db: Session, user: User, workout: TrainingPlanWorkout, payl
         feedback = upsert_workout_feedback(db, user, workout, feedback_updates, feedback_fields_set)
     record_workout_completed_event(db, user, workout, activity, "manual_completion")
     if feedback is not None:
-        record_feedback_events(db, user, workout, feedback, operation="replaced" if feedback_existed else "created", pain_was_reported=pain_was_reported)
+        event = record_feedback_events(db, user, workout, feedback, operation="replaced" if feedback_existed else "created", pain_was_reported=pain_was_reported)
+        db.flush()
+        from app.services.plan_recalculations import request_plan_recalculation
+
+        request_plan_recalculation(db, user, trigger_type="workout_feedback_saved", source_key=f"coaching_event:{event.id}", source_event_id=event.id, plan=workout.plan)
     sync_daily_training_loads_for_activity(db, user, activity)
     try:
         db.commit()
