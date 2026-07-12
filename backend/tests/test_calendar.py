@@ -126,6 +126,13 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0]["planned_workout_ids"], [1, 2])
 
+    def test_hard_sessions_three_days_apart_do_not_raise_warning(self):
+        first = make_workout(1, date(2026, 6, 3), workout_type="interval")
+        second = make_workout(2, date(2026, 6, 6), workout_type="tempo", day_index=2)
+        make_plan(first, second)
+
+        self.assertEqual(calendar_warnings([first, second]), [])
+
 
 if __name__ == "__main__":
     unittest.main()

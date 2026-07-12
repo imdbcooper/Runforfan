@@ -5,11 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanWorkout, User
+from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout
 from app.services.planning import workout_execution_score, workout_to_dict
 
 
 HARD_WORKOUT_TYPES = {"interval", "tempo", "threshold", "race_pace", "hill", "long"}
 HARD_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
+CALENDAR_HARD_POLICY = HardWorkoutPolicy(frozenset(HARD_WORKOUT_TYPES), frozenset(HARD_INTENSITIES))
 MAX_CALENDAR_RANGE_DAYS = 42
 
 
@@ -37,7 +39,7 @@ def activity_calendar_date(activity: Activity, timezone: tzinfo) -> date | None:
 
 
 def hard_workout(workout: TrainingPlanWorkout) -> bool:
-    return (workout.workout_type or "") in HARD_WORKOUT_TYPES or (workout.intensity or "") in HARD_INTENSITIES
+    return is_hard_workout(workout.workout_type, workout.intensity, policy=CALENDAR_HARD_POLICY)
 
 
 def calendar_warnings(workouts: list[TrainingPlanWorkout]) -> list[dict[str, object]]:
@@ -50,8 +52,7 @@ def calendar_warnings(workouts: list[TrainingPlanWorkout]) -> list[dict[str, obj
         for other in hard_workouts[index + 1:]:
             if not workout.scheduled_date or not other.scheduled_date:
                 continue
-            delta_days = (other.scheduled_date - workout.scheduled_date).days
-            if delta_days > 2:
+            if not dates_within_days(workout.scheduled_date, other.scheduled_date, max_days=2):
                 break
             title = "Hard workouts are close together"
             message = "Two hard sessions are scheduled within 48 hours. Keep the second one easier or reschedule if recovery is poor."

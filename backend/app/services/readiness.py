@@ -10,6 +10,7 @@ from app.models import AthleteProfile, DailyReadinessActionPreview, DailyReadine
 from app.schemas.common import DailyReadinessCheckInUpsert
 from app.services.audit import log_audit_event
 from app.services.coaching_events import record_coaching_event
+from app.services.constraint_engine import HardWorkoutPolicy, is_hard_workout, validate_readiness_action_target
 from app.services.dashboard import active_training_plan
 from app.services.plan_versions import create_plan_version, json_safe, workout_snapshot
 from app.services.planning import today_for_user, workout_to_dict
@@ -20,6 +21,7 @@ RULE_VERSION = "daily-readiness-v1"
 DISCLAIMER = "Runforfan не является медицинским устройством. При боли, головокружении, одышке или ухудшении самочувствия прекратите нагрузку и обратитесь к специалисту."
 HARD_WORKOUT_TYPES = {"interval", "intervals", "tempo", "threshold", "race", "fartlek", "hills", "hill_repeats"}
 HARD_INTENSITIES = {"hard", "tempo", "threshold", "interval", "race", "vo2max"}
+READINESS_HARD_POLICY = HardWorkoutPolicy(frozenset(HARD_WORKOUT_TYPES), frozenset(HARD_INTENSITIES), normalize_case=True)
 APPLICABLE_ACTIONS = {"shorten_easy", "easy_replacement"}
 ACTION_PREVIEW_TTL_MINUTES = 10
 READINESS_ADJUSTMENT_MARKER = "Readiness adjustment:"
@@ -34,7 +36,7 @@ class ReadinessActionConflict(ValueError):
 def workout_is_hard(workout: TrainingPlanWorkout | None) -> bool:
     if workout is None:
         return False
-    return workout.workout_type.lower() in HARD_WORKOUT_TYPES or (workout.intensity or "").lower() in HARD_INTENSITIES
+    return is_hard_workout(workout.workout_type, workout.intensity, policy=READINESS_HARD_POLICY)
 
 
 def easy_replacement(workout: TrainingPlanWorkout) -> dict[str, object]:
@@ -518,15 +520,18 @@ def preview_block(block: TrainingPlanWorkoutBlock, *, scale: float = 1.0) -> dic
 def action_target(workout: TrainingPlanWorkout, current_recommendation: dict[str, object]) -> dict[str, object]:
     action = str(current_recommendation.get("action") or "")
     prescription = current_recommendation.get("prescribed_workout")
-    if action not in APPLICABLE_ACTIONS or not isinstance(prescription, dict):
-        raise ReadinessActionConflict("Today's readiness recommendation cannot be applied", "action_not_applicable")
-    if workout.completed_activity_id is not None or workout.status not in {"planned", "rescheduled"}:
-        raise ReadinessActionConflict("Today's workout is no longer mutable", "workout_not_mutable")
-    if action == "shorten_easy":
-        if workout_is_hard(workout) or any((block.target_rpe_max or 0) > 5 for block in workout.blocks):
-            raise ReadinessActionConflict("Today's workout cannot be safely shortened automatically", "safety_blocks_action")
-        if prescription.get("distance_km") is None and prescription.get("duration_seconds") is None:
-            raise ReadinessActionConflict("Today's workout has no measurable target to shorten", "safety_blocks_action")
+    validation = validate_readiness_action_target(
+        action=action,
+        prescription=prescription,
+        applicable_actions=APPLICABLE_ACTIONS,
+        completed_activity_id=workout.completed_activity_id,
+        status=workout.status,
+        workout_is_hard=workout_is_hard(workout),
+        block_target_rpe_maxes=(block.target_rpe_max for block in workout.blocks),
+    )
+    if not validation.allowed:
+        raise ReadinessActionConflict(validation.message or "Today's readiness recommendation cannot be applied", validation.reason or "action_not_applicable")
+    if action == "shorten_easy" and isinstance(prescription, dict):
         blocks = [preview_block(block, scale=0.7) for block in sorted(workout.blocks, key=lambda item: (item.block_index, item.id or 0))]
         return {
             "workout_type": workout.workout_type,
@@ -537,6 +542,8 @@ def action_target(workout: TrainingPlanWorkout, current_recommendation: dict[str
             "description": appended_adjustment_description(workout, action),
             "blocks": blocks,
         }
+    if not isinstance(prescription, dict):
+        raise ReadinessActionConflict("Today's readiness recommendation cannot be applied", "action_not_applicable")
     duration = prescription.get("duration_seconds")
     return {
         "workout_type": "easy",

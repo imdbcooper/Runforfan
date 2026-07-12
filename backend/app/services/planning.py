@@ -12,6 +12,7 @@ from app.models import Activity, AthleteProfile, CoachingEvent, TrainingPlan, Tr
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutMissIn, PlanWorkoutUpdate
 from app.services.activity_metrics import is_running_activity_type, sync_derived_activity_metrics
 from app.services.coaching_events import record_coaching_event
+from app.services.constraint_engine import HardWorkoutPolicy, dates_within_days, is_hard_workout
 from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.training_load import sync_daily_training_loads_for_activity
@@ -39,6 +40,8 @@ HILL_WORK_CAP_SECONDS = {"beginner": 12 * 60, "intermediate": 16 * 60, "advanced
 HARD_PLAN_WORKOUT_TYPES = {"interval", "tempo", "threshold", "hill", "race_pace"}
 HARD_PLAN_INTENSITIES = {"interval", "tempo", "threshold", "race_pace", "hard"}
 LOW_PLAN_INTENSITIES = {"easy", "recovery", "strides"}
+PLANNING_HARD_POLICY = HardWorkoutPolicy(frozenset(HARD_PLAN_WORKOUT_TYPES), frozenset(HARD_PLAN_INTENSITIES), frozenset(LOW_PLAN_INTENSITIES))
+PLANNING_PREVIEW_HARD_POLICY = HardWorkoutPolicy(frozenset(HARD_PLAN_WORKOUT_TYPES), frozenset(HARD_PLAN_INTENSITIES))
 SKIP_MISSED_WORKOUT_NOTE = "Coach adjustment: skip this missed workout; do not stack it into the next training window."
 SUPPORT_WORKOUT_TYPES = {"strength", "ofp", "mobility", "prehab", "core", "cross_training"}
 STRENGTH_WORKOUT_TYPES = {"strength", "ofp", "core"}
@@ -1463,9 +1466,7 @@ def format_duration_label(seconds: int | None) -> str:
 
 
 def workout_is_hard(workout: TrainingPlanWorkout) -> bool:
-    if (workout.intensity or "") in LOW_PLAN_INTENSITIES:
-        return False
-    return (workout.workout_type or "") in HARD_PLAN_WORKOUT_TYPES or (workout.intensity or "") in HARD_PLAN_INTENSITIES
+    return is_hard_workout(workout.workout_type, workout.intensity, policy=PLANNING_HARD_POLICY)
 
 
 def workout_is_easy_run(workout: TrainingPlanWorkout) -> bool:
@@ -1479,7 +1480,7 @@ def hard_workout_near_date(workouts: list[TrainingPlanWorkout], target_date: dat
     for workout in workouts:
         if exclude_id is not None and workout.id == exclude_id:
             continue
-        if workout.scheduled_date and workout_is_hard(workout) and abs((workout.scheduled_date - target_date).days) <= days:
+        if workout.scheduled_date and workout_is_hard(workout) and dates_within_days(target_date, workout.scheduled_date, max_days=days, absolute=True):
             return workout
     return None
 
@@ -1980,9 +1981,7 @@ def plan_recommendation_preview_changes(db: Session, user: User, plan: TrainingP
     def preview_workout_is_hard(workout: TrainingPlanWorkout) -> bool:
         intensity = str(current_value(workout, "intensity") or "")
         workout_type = str(current_value(workout, "workout_type") or workout.workout_type or "")
-        if intensity in LOW_PLAN_INTENSITIES:
-            return False
-        return workout_type in HARD_PLAN_WORKOUT_TYPES or intensity in HARD_PLAN_INTENSITIES
+        return is_hard_workout(workout_type, intensity, policy=PLANNING_HARD_POLICY)
 
     def add_change(workout: TrainingPlanWorkout, field: str, after: Any, reason: str) -> bool:
         before = current_value(workout, field)
@@ -2554,7 +2553,7 @@ def plan_to_dict(plan: TrainingPlan) -> dict[str, object]:
 
 
 def preview_workout_is_hard(workout: dict[str, object]) -> bool:
-    return str(workout.get("workout_type") or "") in HARD_PLAN_WORKOUT_TYPES or str(workout.get("intensity") or "") in HARD_PLAN_INTENSITIES
+    return is_hard_workout(str(workout.get("workout_type") or ""), str(workout.get("intensity") or ""), policy=PLANNING_PREVIEW_HARD_POLICY)
 
 
 def preview_intensity_category(workout: dict[str, object]) -> str:

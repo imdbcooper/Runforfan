@@ -103,6 +103,26 @@ class ReadinessActionTests(unittest.TestCase):
 
         self.assertEqual(context.exception.reason, "safety_blocks_action")
 
+    def test_completed_workout_is_not_mutable(self):
+        workout = make_workout(hard=True)
+        workout.completed_activity_id = 10
+        recommendation = daily_readiness_recommendation(make_checkin(fatigue_0_10=7), make_profile(), workout)
+
+        with self.assertRaises(ReadinessActionConflict) as context:
+            action_target(workout, recommendation)
+
+        self.assertEqual(context.exception.reason, "workout_not_mutable")
+
+    def test_high_rpe_block_cannot_be_automatically_shortened(self):
+        workout = make_workout()
+        workout.blocks[0].target_rpe_max = 6
+        recommendation = daily_readiness_recommendation(make_checkin(fatigue_0_10=6), make_profile(), workout)
+
+        with self.assertRaises(ReadinessActionConflict) as context:
+            action_target(workout, recommendation)
+
+        self.assertEqual(context.exception.reason, "safety_blocks_action")
+
     def test_fingerprint_is_stable_for_dictionary_key_order(self):
         self.assertEqual(action_state_fingerprint({"b": 2, "a": 1}), action_state_fingerprint({"a": 1, "b": 2}))
 
