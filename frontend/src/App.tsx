@@ -12,6 +12,7 @@ import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
 import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
+import { createLatestRequestGate } from "@/lib/latest-request"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -827,6 +828,7 @@ function App() {
   const [authExchangePending, setAuthExchangePending] = useState(() => new URLSearchParams(window.location.search).has("telegram_login_code"))
   const [authError, setAuthError] = useState("")
   const [status, setStatus] = useState("LOADING")
+  const athleteStateRequests = useRef(createLatestRequestGate())
 
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
@@ -859,10 +861,14 @@ function App() {
   }
 
   async function refreshAthleteState() {
+    const requestId = athleteStateRequests.current.begin()
     try {
-      setAthleteState(await api.todayAthleteState())
+      const nextAthleteState = await api.todayAthleteState()
+      if (!athleteStateRequests.current.isLatest(requestId)) return
+      setAthleteState(nextAthleteState)
       setAthleteStateError("")
     } catch (error) {
+      if (!athleteStateRequests.current.isLatest(requestId)) return
       console.error(error)
       setAthleteStateError(apiErrorMessage(error, uiText("Сводка состояния временно недоступна.", "Athlete State is temporarily unavailable.")))
     }

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 5173"
+    "preview": "vite preview --host 127.0.0.1 --port 5173",
+    "test": "vitest run"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -43,6 +44,7 @@
     "globals": "^17.6.0",
     "postcss": "^8.4.49",
     "typescript": "^5.7.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^3.2.4"
   }
 }

@@ -1,6 +1,7 @@
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import ANY, patch
 
 try:
     from app.db.migrations.runner import MIGRATIONS
@@ -337,6 +338,46 @@ class AthleteStateTests(unittest.TestCase):
         self.assertEqual(result["snapshot_id"], 15)
         self.assertEqual(db.added, [])
         self.assertFalse(db.committed)
+
+    def test_materialization_timestamps_follow_input_collection(self):
+        inputs = base_inputs()
+        observation_cutoff = datetime(2026, 7, 12, 9, 0, tzinfo=UTC)
+        inputs_collected_at = datetime(2026, 7, 12, 9, 0, 1, tzinfo=UTC)
+        computed_at = datetime(2026, 7, 12, 9, 0, 2, tzinfo=UTC)
+
+        class CreateDb:
+            def __init__(self):
+                self.scalar_calls = 0
+                self.added = []
+
+            def scalar(self, _query):
+                self.scalar_calls += 1
+                return None
+
+            def add(self, item):
+                item.id = 16
+                self.added.append(item)
+
+            def flush(self):
+                pass
+
+            def commit(self):
+                pass
+
+            def refresh(self, _item):
+                pass
+
+        db = CreateDb()
+        with (
+            patch("app.services.athlete_state.build_athlete_state_inputs", return_value=inputs) as builder,
+            patch("app.services.athlete_state._utcnow", side_effect=[observation_cutoff, inputs_collected_at, computed_at]),
+        ):
+            result = materialize_athlete_state(db, User(id=1, display_name="Runner"))
+
+        builder.assert_called_once_with(db, ANY, observation_cutoff)
+        self.assertEqual(result["as_of_at"], inputs_collected_at)
+        self.assertEqual(result["computed_at"], computed_at)
+        self.assertLessEqual(result["as_of_at"], result["computed_at"])
 
 
 if __name__ == "__main__":

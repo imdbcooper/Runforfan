@@ -1198,8 +1198,8 @@ class AthleteStateOut(BaseModel):
     state_version: str
     rule_version: str
     input_fingerprint: str
-    as_of_at: datetime
-    computed_at: datetime
+    as_of_at: datetime = Field(description="Time when collection of the current mutable inputs completed; not a historical database reconstruction boundary.")
+    computed_at: datetime = Field(description="Time when this immutable projection was computed from the collected inputs.")
     status: str
     headline: str
     summary: str

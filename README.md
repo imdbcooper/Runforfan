@@ -68,7 +68,7 @@ GET /health
 - `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
 - `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
-- `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил.
+- `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot текущего состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил. `as_of_at` отмечает завершение сбора текущих mutable inputs, но не обещает историческую реконструкцию БД.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.

@@ -508,21 +508,21 @@ def _checkin_input(checkin: DailyReadinessCheckIn) -> dict[str, object]:
     }
 
 
-def fact_available(observed_at: datetime | None, as_of_at: datetime) -> bool:
+def fact_available(observed_at: datetime | None, observation_cutoff: datetime) -> bool:
     if observed_at is None:
         return True
     value = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=UTC)
-    cutoff = as_of_at if as_of_at.tzinfo else as_of_at.replace(tzinfo=UTC)
+    cutoff = observation_cutoff if observation_cutoff.tzinfo else observation_cutoff.replace(tzinfo=UTC)
     return value.astimezone(UTC) <= cutoff.astimezone(UTC)
 
 
-def _workout_input(workout: TrainingPlanWorkout, as_of_at: datetime, timezone: ZoneInfo = ZoneInfo("UTC")) -> dict[str, object]:
+def _workout_input(workout: TrainingPlanWorkout, observation_cutoff: datetime, timezone: ZoneInfo = ZoneInfo("UTC")) -> dict[str, object]:
     raw_activity = workout.completed_activity
     activity_time = (raw_activity.started_at or raw_activity.created_at) if raw_activity else None
-    activity = raw_activity if raw_activity and fact_available(activity_time, as_of_at) else None
+    activity = raw_activity if raw_activity and fact_available(activity_time, observation_cutoff) else None
     raw_feedback = workout.feedback
     feedback_time = (raw_feedback.updated_at or raw_feedback.created_at) if raw_feedback else None
-    feedback = raw_feedback if raw_feedback and fact_available(feedback_time, as_of_at) else None
+    feedback = raw_feedback if raw_feedback and fact_available(feedback_time, observation_cutoff) else None
     effective_status = "planned" if workout.status == "done" and raw_activity is not None and activity is None else workout.status
     execution = workout_execution_score(SimpleNamespace(
         completed_activity=activity,
@@ -596,8 +596,8 @@ def _event_input(event: CoachingEvent, timezone: ZoneInfo) -> dict[str, object]:
     }
 
 
-def build_athlete_state_inputs(db: Session, user: User, as_of_at: datetime) -> dict[str, object]:
-    cutoff = as_of_at if as_of_at.tzinfo else as_of_at.replace(tzinfo=UTC)
+def build_athlete_state_inputs(db: Session, user: User, observation_cutoff: datetime) -> dict[str, object]:
+    cutoff = observation_cutoff if observation_cutoff.tzinfo else observation_cutoff.replace(tzinfo=UTC)
     cutoff = cutoff.astimezone(UTC)
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id, AthleteProfile.created_at <= cutoff))
     local_date, timezone_name = local_date_for(profile, cutoff)
@@ -684,10 +684,15 @@ def build_athlete_state_inputs(db: Session, user: User, as_of_at: datetime) -> d
     return inputs
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 def materialize_athlete_state(db: Session, user: User) -> dict[str, object]:
-    computed_at = datetime.now(UTC)
     db.scalar(select(User).where(User.id == user.id).with_for_update())
-    inputs = build_athlete_state_inputs(db, user, computed_at)
+    observation_cutoff = _utcnow()
+    inputs = build_athlete_state_inputs(db, user, observation_cutoff)
+    inputs_collected_at = _utcnow()
     fingerprint = canonical_fingerprint(inputs)
     existing = db.scalar(
         select(AthleteStateSnapshot).where(
@@ -699,6 +704,7 @@ def materialize_athlete_state(db: Session, user: User) -> dict[str, object]:
     )
     if existing is None:
         state = compute_athlete_state(inputs)
+        computed_at = _utcnow()
         existing = AthleteStateSnapshot(
             user_id=user.id,
             local_date=inputs["local_date"],
@@ -707,7 +713,7 @@ def materialize_athlete_state(db: Session, user: User) -> dict[str, object]:
             rule_version=RULE_VERSION,
             input_fingerprint=fingerprint,
             snapshot_json=json_safe(state),
-            as_of_at=computed_at,
+            as_of_at=inputs_collected_at,
             computed_at=computed_at,
             trigger_type="on_read",
         )

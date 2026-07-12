@@ -78,7 +78,7 @@
 
 ## Этап 3. Athlete State и Weekly Review
 
-Статус: в работе. Read-only Athlete State snapshot с evidence, freshness/confidence и deterministic fixture replay реализован 12 июля 2026 года. Историческая реконструкция из БД требует отдельного version ledger; Weekly Review и недельные adaptation actions остаются в scope этапа.
+Статус: в работе. Read-only Athlete State snapshot с evidence, freshness/confidence и deterministic fixture replay реализован 12 июля 2026 года. Поле `as_of_at` обозначает завершение сбора текущих inputs, а не snapshot-isolated исторический cutoff. Историческая реконструкция из БД требует отдельного version ledger; Weekly Review и недельные adaptation actions остаются в scope этапа.
 
 ### Результат
 
