@@ -165,8 +165,25 @@ class ImportRecognitionWorkerTests(unittest.TestCase):
 
                 self.assertTrue(processed)
                 batch = db.get(ImportBatch, batch_id)
-                self.assertEqual(batch.status, "validation_failed")
+                self.assertEqual(batch.status, "recognition_failed")
                 self.assertIsNone(batch.recognition_retry_at)
+
+    def test_unexpected_error_fails_without_blind_retry(self):
+        SessionLocal = self.make_session()
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"fake image")
+            image.flush()
+            with SessionLocal() as db:
+                batch_id = self.seed_batch(db, image.name, attempt_count=1, max_attempts=3)
+
+            with SessionLocal() as db, patch("app.services.import_recognition_worker.llm_or_template_recognize", side_effect=RuntimeError("programming bug")):
+                processed = process_import_batch(db, batch_id, SimpleNamespace(llm_timeout=10))
+
+                self.assertTrue(processed)
+                batch = db.get(ImportBatch, batch_id)
+                self.assertEqual(batch.status, "recognition_failed")
+                self.assertIsNone(batch.recognition_retry_at)
+                self.assertEqual(batch.recognition_attempt_count, 1)
 
 
 if __name__ == "__main__":

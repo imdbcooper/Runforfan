@@ -3,6 +3,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
+import { languageLocale } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 export type DataTableColumn<T> = {
@@ -55,6 +56,10 @@ export function DataTable<T>({ rows, columns, getSearchText, getRowKey, pageSize
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
   const pageRows = filteredRows.slice(currentPage * pageSize, currentPage * pageSize + pageSize)
+  const english = languageLocale() === "en-US"
+  const labels = english
+    ? { sort: "Sort cards", asc: "ascending", desc: "descending", rows: "rows", page: "Page", prev: "Prev", next: "Next" }
+    : { sort: "Сортировка карточек", asc: "по возр.", desc: "по убыв.", rows: "строк", page: "Страница", prev: "Назад", next: "Вперед" }
 
   function toggleSort(column: DataTableColumn<T>) {
     if (!column.sortValue) return
@@ -70,12 +75,12 @@ export function DataTable<T>({ rows, columns, getSearchText, getRowKey, pageSize
     <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 text-xs">
       <Input className="w-full sm:max-w-xs" value={filter} placeholder={filterPlaceholder} onChange={(event) => setFilter(event.target.value)} />
       {mobileCard && sortableColumns.length ? <div className="flex w-full items-center gap-2 md:hidden">
-        <Select aria-label="Sort mobile cards" value={sortKey} onChange={(event) => { setSortKey(event.target.value); setSortDirection("desc") }}>
+        <Select aria-label={labels.sort} value={sortKey} onChange={(event) => { setSortKey(event.target.value); setSortDirection("desc") }}>
           {sortableColumns.map((column) => <option key={column.key} value={column.key}>{column.header}</option>)}
         </Select>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}>{sortDirection}</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? labels.asc : labels.desc}</Button>
       </div> : null}
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{filteredRows.length} rows</span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{filteredRows.length} {labels.rows}</span>
     </div>
     {mobileCard ? <div className="grid gap-2 px-4 md:hidden">
       {pageRows.map((row) => <React.Fragment key={getRowKey(row)}>{mobileCard(row)}</React.Fragment>)}
@@ -89,8 +94,8 @@ export function DataTable<T>({ rows, columns, getSearchText, getRowKey, pageSize
       {!pageRows.length ? <div className="p-4 text-xs text-zinc-500">{emptyState}</div> : null}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 text-xs text-zinc-500">
-      <span>Page {currentPage + 1} / {pageCount}</span>
-      <div className="flex gap-2"><Button type="button" size="sm" variant="secondary" disabled={currentPage <= 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Prev</Button><Button type="button" size="sm" variant="secondary" disabled={currentPage >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Next</Button></div>
+      <span>{labels.page} {currentPage + 1} / {pageCount}</span>
+      <div className="flex gap-2"><Button type="button" size="sm" variant="secondary" disabled={currentPage <= 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>{labels.prev}</Button><Button type="button" size="sm" variant="secondary" disabled={currentPage >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>{labels.next}</Button></div>
     </div>
   </div>
 }

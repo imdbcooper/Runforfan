@@ -1266,6 +1266,7 @@ export const api = {
     return request<ImportUploadResult>("/imports/screenshots", { method: "POST", body: data })
   },
   confirmImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/confirm`, { method: "POST", body: "{}" }),
+  retryImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/retry`, { method: "POST", body: "{}" }),
   rejectImport: (id: number) => request<ImportUploadResult>(`/imports/${id}/reject`, { method: "POST", body: "{}" }),
   updateImportCandidate: (id: number, payload: Record<string, unknown>) => request<ImportUploadResult>(`/imports/${id}/candidate`, { method: "PATCH", body: JSON.stringify(payload) }),
   uploadCsv: (file: File, sourceApp = "csv") => {

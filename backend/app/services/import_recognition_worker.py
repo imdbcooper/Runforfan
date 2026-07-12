@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,9 @@ from app.services.planning import auto_match_activity_to_plan
 from app.services.recognition import RecognitionValidationError, llm_or_template_recognize
 from app.services.training_load import sync_daily_training_loads_for_activity
 
+
+logger = logging.getLogger(__name__)
+PROVIDER_FAILURE_CLASSES = {"timeout", "request", "http_status", "provider_response", "unsupported_provider"}
 
 ACTIVE_RECOGNITION_STATUSES = {"queued", "retry_scheduled", "recognizing"}
 TERMINAL_RECOGNITION_STATUSES = {
@@ -193,7 +197,12 @@ def process_import_batch(db: Session, batch_id: int, settings: Settings | None =
         if can_retry:
             _schedule_retry(batch, settings, f"{message} Повтор будет выполнен автоматически.")
         else:
-            status = "rejected_no_llm_template" if exc.failure_class == "no_provider" else "validation_failed"
+            if exc.failure_class == "no_provider":
+                status = "rejected_no_llm_template"
+            elif exc.failure_class in PROVIDER_FAILURE_CLASSES:
+                status = "recognition_failed"
+            else:
+                status = "validation_failed"
             _finish_failure(batch, status, "llm", message)
         log_audit_event(db, user.id, "import.recognition.failed", "import_batch", batch.id, {
             "status": batch.status,
@@ -204,12 +213,14 @@ def process_import_batch(db: Session, batch_id: int, settings: Settings | None =
         db.commit()
         return True
     except Exception as exc:
+        logger.exception("Unexpected import recognition failure for batch %s", batch_id)
+        db.rollback()
+        batch = db.get(ImportBatch, batch_id)
+        user = db.get(User, batch.user_id) if batch else None
+        if not batch or not user:
+            return False
         message = "Recognition failed unexpectedly. Check provider settings or uploaded screenshots."
-        can_retry = int(batch.recognition_attempt_count or 0) < int(batch.recognition_max_attempts or 1)
-        if can_retry:
-            _schedule_retry(batch, settings, f"{message} Повтор будет выполнен автоматически.")
-        else:
-            _finish_failure(batch, "recognition_failed", "unknown", message)
+        _finish_failure(batch, "recognition_failed", "unknown", message)
         log_audit_event(db, user.id, "import.recognition.error", "import_batch", batch.id, {
             "status": batch.status,
             "attempt_count": batch.recognition_attempt_count,
@@ -236,6 +247,7 @@ def _run_loop(settings: Settings) -> None:
         try:
             processed = run_import_recognition_once(settings=settings, worker_id=_worker_id)
         except Exception:
+            logger.exception("Import recognition worker iteration failed")
             processed = False
         if not processed:
             _stop_event.wait(poll_seconds)

@@ -1,6 +1,6 @@
 # Runforfan
 
-Runforfan - персональная система для хранения беговых активностей, импорта тренировок из скриншотов и CSV, построения тренировочных планов, анализа нагрузки, зон, performance, goals и readiness. Проект находится в alpha-стадии: основной UI расположен в React/Vite admin frontend, backend построен на FastAPI/PostgreSQL, старый локальный прототип в `app/` сохранен как legacy.
+Runforfan - персональная система для хранения тренировок, добавления данных из скриншотов и CSV, построения тренировочных планов, анализа нагрузки, зон, результатов, целей и готовности. Проект находится в alpha-стадии: основной пользовательский интерфейс реализован на React/Vite, backend построен на FastAPI/PostgreSQL, старый локальный прототип в `app/` сохранен как legacy.
 
 ## Документация
 
@@ -66,6 +66,7 @@ GET /health
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
+- `POST /api/imports/{id}/retry` — повторно поставить неудавшуюся обработку скриншотов в очередь.
 - `GET /api/goals` — цели пользователя.
 - `POST /api/goals` — создание цели.
 - `DELETE /api/goals/{id}` — удаление цели.
@@ -142,12 +143,15 @@ API настроек AI:
 
 Импорт скриншотов в новом backend:
 
-- Если настроен LLM с vision-моделью, backend отправляет скрины на распознавание.
+- Загрузка создает batch и ставит обработку в фоновую очередь.
+- Если настроен LLM с vision-моделью, backend отправляет скриншоты на распознавание.
 - После LLM выполняются sanity-checks: дистанция, длительность, темп, пульс, сумма сегментов.
 - Если данные проходят проверку, создается тренировка.
 - Если LLM не настроен, backend принимает только поддержанные template fallback-сценарии. Сейчас поддержан Huawei interval template для `scrins/training3`; неизвестные скрины возвращают `rejected_no_llm_template`.
 - Это сделано специально, чтобы не загрязнять аналитику ошибочными тренировками.
-- Новый frontend содержит страницу `Imports`: загрузка нескольких скриншотов, результат recognition, auto-match с активным планом и ручной match review, если уверенной авто-привязки нет.
+- Известные временные ошибки provider автоматически повторяются. Batch получает `retry_scheduled`, а worker выполняет до трех попыток по умолчанию.
+- Для `retry_scheduled`, `validation_failed`, `recognition_failed` и `rejected_no_llm_template` пользователь может нажать `Повторить сейчас`; endpoint `POST /api/imports/{id}/retry` очищает состояние ошибки и возвращает batch в `queued`.
+- Страница `Добавить тренировку` показывает понятный статус и следующий шаг; IDs, engine, confidence и raw provider errors находятся только в закрытых технических деталях.
 
 Профиль, расчеты и зоны:
 
@@ -242,36 +246,28 @@ PWA-режим frontend:
 - Без сети приложение показывает понятное offline-сообщение; Telegram login, профиль, планы, импорт, расчеты, LLM providers и export требуют backend-соединения.
 - Для проверки после production deploy: открыть `https://run.slavx.ru/app/`, установить через браузер/Add to Home Screen, убедиться, что standalone-окно запускается и что offline mode не обещает работу с данными.
 
-Страницы нового frontend:
+Навигация frontend построена вокруг задач пользователя:
 
-- Панель: today/next workout, current week, readiness alerts и recent activities.
-- Тренировки.
-- Imports.
-- Calendar: week/month range view до 42 дней для плана и факта по дням.
-- Аналитика.
-- Load & Recovery: daily/weekly load, CTL/ATL/TSB, monotony, strain, hard spacing и recovery alerts.
-- Zones Analytics: HR/pace/RPE distribution, Seiler 3-zone split, time-in-zones buckets и planned-vs-actual intensity split.
-- Performance: race/time trial results, VDOT, Riegel predictions, PBs, threshold trend и pace zones.
-- Profile & zones.
-- Планы: Plan Builder wizard preview/generate, create draft/create active, Plan Detail, список программ, actions и workout execution/matching.
-- AI настройки.
+- `Сегодня` — `/app/`: ближайшая тренировка, текущая неделя, последние тренировки и полезные предупреждения.
+- `План` — `/app/planning`: активная программа, ближайшая тренировка, недели плана и создание другой программы.
+- `Добавить тренировку` — `/app/imports`: скриншоты, проверка данных, повторная обработка, CSV и история загрузок.
+- `Прогресс` — `/app/analytics`: понятная сводка, тренды и продвинутые показатели во втором уровне.
+- `Профиль` — `/app/profile`: доступность, физиология, ограничения, безопасность и расширенные зоны.
 
-Страница `AI настройки` позволяет пользователю добавить OpenAI-compatible или Anthropic provider, выбрать модель, указать base URL и сохранить API key.
-
-Страница `Profile & zones` позволяет редактировать физиологические параметры, видеть полноту профиля, safety warnings, расчетные HR/pace зоны с method/source/confidence metadata и добавлять измерения.
-
-Страница `Imports` позволяет загрузить до 6 скриншотов одной тренировки, увидеть статус recognition, созданную activity, auto-linked planned workout или кандидатов для ручной привязки.
+В группе `Еще` доступны `/app/calendar`, `/app/activities`, `/app/goals`, `/app/load`, `/app/zones`, `/app/performance` и `/app/settings`. Навигация URL-based через `BrowserRouter` с basename `/app`: direct links, refresh и Back/Forward сохраняют текущий раздел. `/app/dashboard` и `/app/overview` являются compatibility aliases для `Сегодня`.
 
 UI-стиль frontend:
 
-- compact dark-first admin shell.
+- спокойный dark-first интерфейс персонального тренера;
 - Desktop sidebar 14rem.
 - Mobile burger menu/sheet.
 - Sticky topbar высотой около 48px.
 - Черный/zinc фон и orange primary/accent.
 - OKLCH CSS tokens.
 - Тонкие borders, почти без shadows.
-- Плотные таблицы и карточки в стиле shadcn/ui `new-york`.
+- технические таблицы и метаданные доступны только во вторичных разделах.
+
+Production deployment выполняет `.github/workflows/deploy.yml` при push в `master` или через `workflow_dispatch`. Workflow собирает и публикует backend/frontend images, обновляет production compose/Caddy и проверяет `/health`, redirects, app shell, alpha guide, manifest, service worker и Telegram bot link.
 
 ## Что уже обработано
 

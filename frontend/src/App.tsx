@@ -1,5 +1,6 @@
 import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -40,34 +41,94 @@ type CalendarDayProps = {
 }
 
 const ACTIVE_IMPORT_STATUSES = new Set(["queued", "retry_scheduled", "recognizing", "uploaded", "processing", "confirming"])
+const RETRYABLE_IMPORT_STATUSES = new Set(["retry_scheduled", "validation_failed", "recognition_failed", "rejected_no_llm_template"])
 
 function importStatusLabel(status: string) {
   switch (status) {
     case "queued":
-      return "Queued"
+      return uiText("ждет обработки", "waiting")
     case "retry_scheduled":
-      return "Retry scheduled"
+      return uiText("повторим", "will retry")
     case "recognizing":
-      return "Recognizing"
+      return uiText("читаем скриншоты", "reading screenshots")
+    case "uploaded":
+      return uiText("загружено", "uploaded")
+    case "processing":
+      return uiText("готовим тренировку", "preparing workout")
+    case "confirming":
+      return uiText("сохраняем", "saving")
     case "pending_confirmation":
-      return "Review needed"
+      return uiText("нужна проверка", "review needed")
     case "recognized":
-      return "Recognized"
+      return uiText("данные готовы", "data ready")
     case "validation_failed":
-      return "Validation failed"
+      return uiText("нужна повторная попытка", "retry needed")
     case "recognition_failed":
-      return "Recognition failed"
+      return uiText("не удалось прочитать", "could not read")
+    case "duplicate":
+      return uiText("дубликат", "duplicate")
+    case "rejected_no_llm_template":
+      return uiText("не удалось прочитать", "could not read")
+    case "rejected_by_user":
+      return uiText("отклонено", "rejected")
+    case "imported":
+      return uiText("добавлено", "added")
+    case "partial_failed":
+      return uiText("добавлено частично", "partially added")
+    case "failed":
+      return uiText("нужна повторная попытка", "retry needed")
     default:
-      return status
+      return uiText("проверяем", "checking")
   }
 }
 
 function importStatusClass(batch: Pick<ImportBatch, "status" | "requires_confirmation">) {
   if (batch.requires_confirmation) return "border-orange-400/40 bg-orange-400/15 text-orange-100"
+  if (batch.status === "retry_scheduled") return "border-orange-400/40 bg-orange-400/15 text-orange-100"
   if (ACTIVE_IMPORT_STATUSES.has(batch.status)) return "border-sky-400/40 bg-sky-400/15 text-sky-100"
-  if (["validation_failed", "recognition_failed"].includes(batch.status)) return "border-red-400/40 bg-red-400/15 text-red-100"
-  if (["recognized", "duplicate"].includes(batch.status)) return "border-emerald-400/40 bg-emerald-400/15 text-emerald-100"
+  if (["validation_failed", "recognition_failed", "rejected_no_llm_template", "failed"].includes(batch.status)) return "border-red-400/40 bg-red-400/15 text-red-100"
+  if (["recognized", "duplicate", "imported"].includes(batch.status)) return "border-emerald-400/40 bg-emerald-400/15 text-emerald-100"
+  if (batch.status === "partial_failed") return "border-orange-400/40 bg-orange-400/15 text-orange-100"
   return "border-zinc-700 bg-zinc-900 text-zinc-300"
+}
+
+function importNextAction(batch: Pick<ImportBatch, "status" | "requires_confirmation" | "created_activity_id" | "matched_workout_id">) {
+  if (batch.requires_confirmation) return uiText("Проверьте данные", "Review recognized data")
+  if (ACTIVE_IMPORT_STATUSES.has(batch.status)) return batch.status === "retry_scheduled" ? uiText("Попробуем еще раз автоматически", "Trying again automatically") : uiText("Готовим тренировку", "Preparing your workout")
+  if (RETRYABLE_IMPORT_STATUSES.has(batch.status) || batch.status === "failed") return uiText("Можно попробовать еще раз", "You can try again")
+  if (batch.status === "duplicate") return uiText("Похоже, это дубликат", "Looks like a duplicate")
+  if (batch.created_activity_id && batch.matched_workout_id) return uiText("Тренировка добавлена в план", "Workout added to the plan")
+  if (batch.created_activity_id) return uiText("Тренировка добавлена", "Workout added")
+  if (batch.status === "recognized") return uiText("Данные готовы", "Data is ready")
+  return importStatusLabel(batch.status)
+}
+
+function importNextActionDescription(batch: Pick<ImportBatch, "status" | "requires_confirmation" | "created_activity_id" | "matched_workout_id" | "recognition_retry_at">) {
+  if (batch.requires_confirmation) return uiText("Проверьте основные данные и подтвердите тренировку.", "Review the main details, then confirm the workout.")
+  if (ACTIVE_IMPORT_STATUSES.has(batch.status)) return batch.status === "retry_scheduled"
+    ? uiText(`Еще одна попытка запланирована${batch.recognition_retry_at ? `: ${formatLocalDateTime(batch.recognition_retry_at)}` : "."}`, `Another attempt is scheduled${batch.recognition_retry_at ? `: ${formatLocalDateTime(batch.recognition_retry_at)}` : "."}`)
+    : uiText("Скриншоты можно закрыть: статус обновится сам.", "You can leave this page: the status will update automatically.")
+  if (RETRYABLE_IMPORT_STATUSES.has(batch.status) || batch.status === "failed") return uiText("Нажмите «Повторить сейчас». Если не получится, технические детали останутся ниже.", "Press Retry now. If it still fails, technical details stay below.")
+  if (batch.created_activity_id && batch.matched_workout_id) return uiText("Она уже учтена в истории и текущем плане.", "It is already counted in your history and current plan.")
+  if (batch.created_activity_id) return uiText("Если тренировка была запланирована, выберите ее ниже.", "If this workout was planned, select it below.")
+  return uiText("Статус появится здесь после загрузки скриншотов.", "Status will appear here after screenshot upload.")
+}
+
+function importQueuedMessage() {
+  return uiText("Скриншоты загружены. Runforfan проверит данные и обновит статус здесь.", "Screenshots uploaded. Runforfan will check the details and update the status here.")
+}
+
+function csvImportDoneMessage(result?: CsvImportResult | null) {
+  if (!result) return uiText("Тренировки из CSV добавлены.", "Workouts from CSV were added.")
+  return uiText(`Добавлено тренировок: ${result.created_activities}. Отмечено в плане: ${result.matched_workouts}.`, `Workouts added: ${result.created_activities}. Marked in the plan: ${result.matched_workouts}.`)
+}
+
+function uploadCountLabel(count: number) {
+  if (isEnglishLanguage()) return `${count} ${count === 1 ? "upload" : "uploads"}`
+  const remainder100 = count % 100
+  const remainder10 = count % 10
+  const noun = remainder100 >= 11 && remainder100 <= 14 ? "загрузок" : remainder10 === 1 ? "загрузка" : remainder10 >= 2 && remainder10 <= 4 ? "загрузки" : "загрузок"
+  return `${count} ${noun}`
 }
 
 type CalendarEventCardProps = Omit<CalendarDayProps, "day" | "events" | "load" | "maxLoad"> & {
@@ -114,20 +175,45 @@ function guideHref() {
   return `${import.meta.env.BASE_URL || "/app/"}alpha-tester-guide.html`
 }
 
-const nav = [
-  ["overview", "Dashboard", Zap],
-  ["activities", "Activities", Activity],
-  ["imports", "Imports", Upload],
-  ["calendar", "Calendar", CalendarDays],
-  ["analytics", "Analytics", ChartSpline],
-  ["load", "Load & Recovery", BatteryCharging],
-  ["zones", "Zones Analytics", Shield],
-  ["performance", "Performance", Trophy],
-  ["goals", "Goals & races", Goal],
-  ["profile", "Profile & zones", HeartPulse],
-  ["planning", "Plans", Goal],
-  ["settings", "Settings & data", Settings],
+const primaryNav = [
+  ["overview", "Сегодня", "Today", Zap],
+  ["planning", "План", "Plan", Goal],
+  ["imports", "Добавить тренировку", "Add workout", Upload],
+  ["analytics", "Прогресс", "Progress", ChartSpline],
+  ["profile", "Профиль", "Profile", HeartPulse],
 ] as const
+
+const secondaryNav = [
+  ["calendar", "Календарь", "Calendar", CalendarDays],
+  ["activities", "Тренировки", "Workouts", Activity],
+  ["goals", "Цели", "Goals", Goal],
+  ["load", "Нагрузка", "Load", BatteryCharging],
+  ["zones", "Зоны", "Zones", Shield],
+  ["performance", "Форма", "Performance", Trophy],
+  ["settings", "Настройки", "Settings", Settings],
+] as const
+
+const PAGE_PATHS: Record<Page, string> = {
+  overview: "/",
+  activities: "/activities",
+  imports: "/imports",
+  calendar: "/calendar",
+  analytics: "/analytics",
+  load: "/load",
+  zones: "/zones",
+  performance: "/performance",
+  goals: "/goals",
+  profile: "/profile",
+  planning: "/planning",
+  settings: "/settings",
+}
+
+function pageFromPathname(pathname: string): { page: Page; known: boolean } {
+  const segment = pathname.replace(/^\/+|\/+$/g, "").split("/")[0]
+  if (!segment || segment === "dashboard" || segment === "overview") return { page: "overview", known: true }
+  if (Object.prototype.hasOwnProperty.call(PAGE_PATHS, segment)) return { page: segment as Page, known: true }
+  return { page: "overview", known: false }
+}
 
 function formatPace(seconds?: number | null) {
   if (!seconds) return "--"
@@ -136,6 +222,32 @@ function formatPace(seconds?: number | null) {
 
 function isEnglishLanguage() {
   return languageLocale() === "en-US"
+}
+
+function uiText(ru: string, en: string) {
+  return isEnglishLanguage() ? en : ru
+}
+
+function pageTitle(page: Page) {
+  const item = [...primaryNav, ...secondaryNav].find(([key]) => key === page)
+  return item ? uiText(item[1], item[2]) : "Runforfan"
+}
+
+function appStatusLabel(status: string) {
+  switch (status) {
+    case "LOADING":
+      return uiText("загружаем", "loading")
+    case "LOGIN REQUIRED":
+      return uiText("нужен вход", "login needed")
+    case "API ERROR":
+      return uiText("нет связи", "connection issue")
+    case "DEMO USER":
+      return uiText("демо", "demo")
+    case "TELEGRAM USER":
+      return uiText("вход выполнен", "signed in")
+    default:
+      return uiText("статус", "status")
+  }
 }
 
 function kmUnit() {
@@ -152,6 +264,20 @@ function perKmUnit() {
 
 function noDateLabel() {
   return isEnglishLanguage() ? "no date" : "без даты"
+}
+
+function sentenceCase(value: string) {
+  if (!value) return value
+  return value.charAt(0).toLocaleUpperCase(languageLocale()) + value.slice(1)
+}
+
+function periodPresetLabel(preset: string) {
+  if (preset === "7d") return uiText("7 дней", "7 days")
+  if (preset === "28d") return uiText("28 дней", "28 days")
+  if (preset === "90d") return uiText("90 дней", "90 days")
+  if (preset === "year") return uiText("год", "year")
+  if (preset === "all") return uiText("все время", "all time")
+  return uiText("свой период", "custom range")
 }
 
 function splitCountLabel(count: number) {
@@ -230,6 +356,41 @@ function formatWorkoutActual(workout: { actual_distance_km?: number | null; actu
   if (distance !== "--" && duration !== "--") return `${distance} · ${duration}`
   if (distance !== "--") return distance
   return durationMinutes !== "--" ? durationMinutes : duration
+}
+
+function coachWorkoutTitle(workout?: PlanWorkout | null) {
+  if (!workout) return uiText("Свободный день", "Open day")
+  const target = formatWorkoutTarget(workout)
+  return `${sentenceCase(workoutTypeLabel(workout.workout_type))}${target !== "--" ? ` · ${target}` : ""}`
+}
+
+function coachPreviewWorkoutTitle(workout: { workout_type?: string | null; distance_km?: number | null; duration_seconds?: number | null }) {
+  const target = formatWorkoutTarget(workout)
+  return `${sentenceCase(workoutTypeLabel(workout.workout_type))}${target !== "--" ? ` · ${target}` : ""}`
+}
+
+function runKindLabel(activity: Pick<ActivityType, "activity_type">) {
+  if (activity.activity_type.includes("strength")) return uiText("ОФП", "Strength")
+  if (activity.activity_type.includes("walk")) return uiText("Ходьба", "Walk")
+  if (activity.activity_type.includes("run")) return uiText("Пробежка", "Run")
+  if (activity.activity_type.includes("workout")) return uiText("Тренировка", "Workout")
+  return uiText("Тренировка", "Workout")
+}
+
+function readinessCoachMessage(readiness?: DashboardSummary["readiness"] | null) {
+  if (!readiness) return uiText("Сверяем план и последние тренировки.", "Checking your plan and recent workouts.")
+  if (["risk", "critical", "at_risk"].includes(readiness.status)) return uiText("Сегодня лучше снизить нагрузку или заменить тренировку легким движением, если есть боль или сильная усталость.", "Today is a day to reduce load or switch to easy movement if pain or heavy fatigue is present.")
+  if (["watch", "warning", "adjust"].includes(readiness.status)) return uiText("Перед стартом проверьте сон, усталость и самочувствие. Тренировку можно сократить без чувства вины.", "Before starting, check sleep, fatigue and how you feel. Shortening the workout is acceptable.")
+  return uiText("Серьезных ограничений не видно. Держите тренировку контролируемой.", "No major constraints are visible. Keep the workout controlled.")
+}
+
+function profileZoneReadinessLabels(completeness?: ProfileCompleteness | null) {
+  if (!completeness) return []
+  return [
+    completeness.can_calculate_hr_zones ? uiText("Пульсовые зоны готовы", "Heart-rate zones are ready") : uiText("Для пульсовых зон нужен максимальный пульс или возраст", "Heart-rate zones need maximum heart rate or age"),
+    completeness.can_calculate_hrr_zones ? uiText("Зоны по резерву пульса готовы", "Heart-rate reserve zones are ready") : uiText("Для точных пульсовых зон нужен пульс покоя", "More precise heart-rate zones need resting heart rate"),
+    completeness.can_calculate_pace_zones ? uiText("Темповые зоны готовы", "Pace zones are ready") : uiText("Для темповых зон нужен пороговый темп", "Pace zones need threshold pace"),
+  ]
 }
 
 function calendarEventLoad(event: CalendarEvent) {
@@ -375,10 +536,10 @@ function feedbackNumber(value: string) {
 }
 
 function feedbackValidationError(draft: FeedbackDraft) {
-  const fields: [keyof FeedbackDraft, string][] = [["rpe", "RPE"], ["soreness_0_10", "soreness"], ["pain_level", "pain"], ["sleep_quality_0_10", "sleep"]]
+  const fields: [keyof FeedbackDraft, string][] = [["rpe", "RPE"], ["soreness_0_10", uiText("забитость", "soreness")], ["pain_level", uiText("боль", "pain")], ["sleep_quality_0_10", uiText("сон", "sleep")]]
   for (const [field, label] of fields) {
     const value = feedbackNumber(String(draft[field]))
-    if (value !== null && (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 10)) return `${label} должен быть целым числом 0-10`
+    if (value !== null && (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 10)) return uiText(`${label} должен быть целым числом 0-10`, `${label} must be an integer from 0 to 10`)
   }
   return ""
 }
@@ -405,10 +566,10 @@ function feedbackPayload(draft: FeedbackDraft) {
 function completionValidationError(draft: CompletionDraft) {
   const distance = feedbackNumber(draft.actual_distance_km)
   const duration = feedbackNumber(draft.actual_duration_minutes)
-  if (distance !== null && (!Number.isFinite(distance) || distance < 0 || distance > 250)) return "Фактическая дистанция должна быть 0-250 км"
-  if (duration === null || !Number.isFinite(duration) || duration <= 0 || duration > 2880) return "Фактическое время должно быть 1-2880 минут"
+  if (distance !== null && (!Number.isFinite(distance) || distance < 0 || distance > 250)) return uiText("Фактическая дистанция должна быть 0-250 км", "Actual distance must be 0-250 km")
+  if (duration === null || !Number.isFinite(duration) || duration <= 0 || duration > 2880) return uiText("Фактическое время должно быть 1-2880 минут", "Actual time must be 1-2880 minutes")
   const hr = feedbackNumber(draft.average_heart_rate_bpm)
-  if (hr !== null && (!Number.isFinite(hr) || !Number.isInteger(hr) || hr < 30 || hr > 240)) return "Средний HR должен быть целым числом 30-240"
+  if (hr !== null && (!Number.isFinite(hr) || !Number.isInteger(hr) || hr < 30 || hr > 240)) return uiText("Средний HR должен быть целым числом 30-240", "Average HR must be an integer from 30 to 240")
   return feedbackValidationError(draft)
 }
 
@@ -432,7 +593,7 @@ function activityWritePayload(form: HTMLFormElement) {
   const parsedStartedAt = startedAt ? new Date(startedAt) : null
   return {
     activity_type: stringOrNull(data.get("activity_type")) || "manual_workout",
-    title: stringOrNull(data.get("title")) || "Manual activity",
+    title: stringOrNull(data.get("title")) || uiText("Тренировка", "Workout"),
     started_at: parsedStartedAt && !Number.isNaN(parsedStartedAt.getTime()) ? parsedStartedAt.toISOString() : null,
     distance_km: numberOrNull(data.get("distance_km")),
     duration_seconds: durationSeconds === null ? durationMinutes === null ? null : Math.round(durationMinutes * 60) : Math.round(durationSeconds),
@@ -456,7 +617,7 @@ function datetimeLocalValue(value?: string | null) {
 function formatZoneValue(zone: Zone, value: number | null) {
   if (value === null) return "--"
   if (zone.unit === "seconds_per_km") return `${formatPace(Math.round(value))}${perKmUnit()}`
-  if (zone.unit === "bpm") return `${Math.round(value)} bpm`
+  if (zone.unit === "bpm") return `${Math.round(value)} ${uiText("уд/мин", "bpm")}`
   return `${value}`
 }
 
@@ -480,7 +641,7 @@ function missingLabel(field: string) {
   const labelsRu: Record<string, string> = {
     date_of_birth: "дата рождения",
     resting_heart_rate_bpm: "пульс покоя",
-    max_heart_rate_bpm_or_birthdate: "HRmax или дата рождения",
+    max_heart_rate_bpm_or_birthdate: "максимальный пульс или возраст",
     lactate_threshold_pace_seconds_per_km: "пороговый темп",
     lactate_threshold_hr_bpm: "пороговый пульс",
     weight_kg: "вес",
@@ -491,7 +652,7 @@ function missingLabel(field: string) {
   const labelsEn: Record<string, string> = {
     date_of_birth: "date of birth",
     resting_heart_rate_bpm: "resting heart rate",
-    max_heart_rate_bpm_or_birthdate: "HRmax or date of birth",
+    max_heart_rate_bpm_or_birthdate: "maximum heart rate or age",
     lactate_threshold_pace_seconds_per_km: "threshold pace",
     lactate_threshold_hr_bpm: "threshold heart rate",
     weight_kg: "weight",
@@ -501,6 +662,28 @@ function missingLabel(field: string) {
   }
   const labels = languageLocale() === "en-US" ? labelsEn : labelsRu
   return labels[field] || field
+}
+
+function safetyMessageLabel(message?: string | null) {
+  if (!message) return "--"
+  if (message.includes("не является медицинским устройством")) {
+    return uiText(
+      "Runforfan не является медицинским устройством; при боли, головокружении или ухудшении самочувствия нужно прекратить тренировку и обратиться к специалисту.",
+      "Runforfan is not a medical device. If you feel pain, dizziness or worsening well-being, stop the workout and consult a professional."
+    )
+  }
+  if (/safe|ok|normal|норм/i.test(message)) return uiText("Серьезных ограничений не видно. Все равно ориентируйтесь на самочувствие.", "No major constraints are visible. Still use how you feel as the final guide.")
+  return uiText("Есть факторы, из-за которых план стоит держать осторожнее.", "There are factors that should keep the plan more conservative.")
+}
+
+function safetyWarningLabel(warning: string) {
+  if (warning.includes("Keep the next workouts controlled")) return uiText("Следующие тренировки держите спокойнее и проверьте самочувствие перед увеличением нагрузки.", "Keep the next workouts calmer and check how you feel before adding load.")
+  if (warning.includes("Указаны травмы")) return uiText("Указаны травмы или ограничения: планировщик будет осторожнее.", "Injuries or constraints are listed: the planner will stay more conservative.")
+  if (warning.includes("Указаны медицинские состояния")) return uiText("Указаны медицинские состояния: спорные нагрузки требуют консультации специалиста.", "Health conditions are listed: uncertain workloads require professional advice.")
+  if (warning.includes("Recovery status:")) return uiText("Восстановление сейчас не идеальное: снизьте интенсивность и длительность до нормального самочувствия.", "Recovery is not ideal right now: reduce intensity and duration until you feel normal.")
+  if (warning.includes("Нет HRmax")) return uiText("Для пульсовых подсказок нужен максимальный пульс или возраст.", "Heart-rate guidance needs maximum heart rate or age.")
+  if (warning.includes("Нет порогового темпа")) return uiText("Нет порогового темпа: темповые зоны будут недоступны.", "No threshold pace: pace zones will be unavailable.")
+  return uiText("Проверьте самочувствие и при необходимости сделайте тренировку легче.", "Check how you feel and make the workout easier if needed.")
 }
 
 function weekdayLabel(value?: number | null) {
@@ -518,7 +701,7 @@ function measurementValueLabel(measurement: AthleteMeasurement) {
   if (value === null || value === undefined) return "--"
   if (measurement.measurement_type === "weight") return `${value.toFixed(1)} ${kgUnit()}`
   if (measurement.measurement_type === "vo2max") return `${value.toFixed(1)} ml/kg/min`
-  if (["resting_hr", "max_hr", "lactate_threshold"].includes(measurement.measurement_type)) return `${Math.round(value)} bpm`
+  if (["resting_hr", "max_hr", "lactate_threshold"].includes(measurement.measurement_type)) return `${Math.round(value)} ${uiText("уд/мин", "bpm")}`
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
@@ -562,7 +745,7 @@ function formatValidationValue(value?: number | null, unit?: string | null) {
   if (unit === "seconds_per_km") return `${formatPace(Math.round(value))}${perKmUnit()}`
   if (unit === "seconds") return formatDuration(Math.round(value))
   if (unit === "km") return `${value.toFixed(2)} ${kmUnit()}`
-  if (unit === "bpm") return `${Math.round(value)} bpm`
+  if (unit === "bpm") return `${Math.round(value)} ${uiText("уд/мин", "bpm")}`
   if (unit === "spm") return `${Math.round(value)} spm`
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
@@ -619,7 +802,10 @@ function trainingLoadMethodMetadata(method?: string | null, methods?: string[] |
 }
 
 function App() {
-  const [page, setPage] = useState<Page>("overview")
+  const location = useLocation()
+  const navigate = useNavigate()
+  const route = pageFromPathname(location.pathname)
+  const page = route.page
   const [mobileOpen, setMobileOpen] = useState(false)
   const [theme, setTheme] = useState<Theme>(() => getInitialTheme())
   const [language, setLanguage] = useState<Language>(() => getInitialLanguage())
@@ -642,6 +828,10 @@ function App() {
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
     setOnboardingDismissed(true)
+  }
+
+  function setPage(nextPage: Page, options?: { replace?: boolean }) {
+    navigate(PAGE_PATHS[nextPage], { replace: options?.replace })
   }
 
   function changeLanguage(nextLanguage: Language) {
@@ -728,6 +918,9 @@ function App() {
   const onboardingRequired = Boolean(effectiveCompleteness && effectiveCompleteness.score < ONBOARDING_READY_SCORE && !onboardingDismissed)
 
   useEffect(() => {
+    if (!route.known) navigate(PAGE_PATHS.overview, { replace: true })
+  }, [route.known, navigate])
+  useEffect(() => {
     if (authReady) void refreshGlobal()
   }, [authReady])
   useEffect(() => {
@@ -771,8 +964,8 @@ function App() {
     if (authReady && page === "profile") void refreshProfileData()
   }, [authReady, page])
   useEffect(() => {
-    if (onboardingRequired && page !== "profile") setPage("profile")
-  }, [onboardingRequired, page])
+    if (onboardingRequired && page !== "profile") navigate(PAGE_PATHS.profile, { replace: true })
+  }, [onboardingRequired, page, navigate])
   useDomTranslations(language)
 
   if (!authReady) return <TelegramLoginGate theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} initialError={authError} loading={authExchangePending} />
@@ -782,17 +975,17 @@ function App() {
       <div className="grid min-h-screen lg:grid-cols-[14rem_1fr]">
         <Sidebar page={page} setPage={setPage} className="hidden lg:block" />
         {mobileOpen && <>
-          <button aria-label="Close menu overlay" className="fixed inset-0 z-40 bg-black/70" onClick={() => setMobileOpen(false)} />
-          <aside className="fixed inset-y-0 left-0 z-50 w-56 border-r border-zinc-800 bg-[#111] lg:hidden">
+          <button aria-label={uiText("Закрыть меню", "Close menu overlay")} className="fixed inset-0 z-40 bg-black/70" onClick={() => setMobileOpen(false)} />
+          <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[86vw] overflow-y-auto border-r border-zinc-800 bg-[#111] lg:hidden">
             <div className="flex h-12 items-center justify-end border-b border-zinc-800 px-2"><Button variant="ghost" size="icon" onClick={() => setMobileOpen(false)}><X /></Button></div>
             <Sidebar page={page} setPage={(next) => { setPage(next); setMobileOpen(false) }} />
           </aside>
         </>}
 
         <div className="min-w-0 max-w-full">
-          <Topbar status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
+          <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} analytics={analytics} dashboard={dashboard} providers={providers} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -860,17 +1053,17 @@ function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, o
     <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl place-items-center">
       <Card className="w-full max-w-xl border-orange-400/30 bg-zinc-950 p-6">
         <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · AUTH</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200">RUNFORFAN · {uiText("ВХОД", "LOGIN")}</p>
           <div className="flex items-center gap-2">
             <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
             <Button type="button" variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
           </div>
         </div>
-        <h1 className="mt-3 text-2xl font-semibold text-white">Sign in with Telegram</h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-400">Open the Telegram bot, press Start, then return through the one-time link the bot sends you. The backend registers your Telegram account and issues a short-lived login code.</p>
+        <h1 className="mt-3 text-2xl font-semibold text-white">{uiText("Вход через Telegram", "Sign in with Telegram")}</h1>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">{uiText("Откройте бота в Telegram, нажмите Start и вернитесь по ссылке из сообщения.", "Open the Telegram bot, press Start, then return through the link from the bot message.")}</p>
         <div className="mt-5 space-y-3 rounded-lg border border-zinc-800 bg-black/30 p-4">
-          {loading ? <p className="text-sm text-orange-100">Finishing Telegram bot login...</p> : null}
-          {botUrl ? <a className="inline-flex h-10 items-center justify-center rounded-md bg-orange-400 px-4 text-sm font-semibold text-black transition-colors hover:bg-orange-300" href={botUrl} target="_blank" rel="noreferrer">Open Telegram bot</a> : <p className="text-sm text-orange-100">Telegram bot link is unavailable until backend bot settings are configured.</p>}
+          {loading ? <p className="text-sm text-orange-100">{uiText("Завершаем вход через Telegram...", "Finishing Telegram login...")}</p> : null}
+          {botUrl ? <a className="inline-flex h-11 items-center justify-center rounded-md bg-orange-400 px-4 text-sm font-semibold text-black transition-colors hover:bg-orange-300 md:h-10" href={botUrl} target="_blank" rel="noreferrer">{uiText("Открыть Telegram-бота", "Open Telegram bot")}</a> : <p className="text-sm text-orange-100">{uiText("Бот временно недоступен. Попробуйте позже.", "Telegram bot is temporarily unavailable. Try again later.")}</p>}
           {botUsername ? <div ref={containerRef} className="min-h-10" /> : null}
           {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
         </div>
@@ -880,21 +1073,27 @@ function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, o
 }
 
 function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Page) => void; className?: string }) {
-  return <div className={cn("sticky top-0 h-screen border-r border-zinc-800 bg-[#111] text-zinc-300", className)}>
+  const navButton = ([key, ruLabel, enLabel, Icon]: (typeof primaryNav | typeof secondaryNav)[number]) => {
+    const active = page === key
+    return <button key={key} onClick={() => setPage(key)} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors lg:min-h-9 lg:px-2 lg:text-xs", active ? "bg-zinc-800 text-white before:absolute before:left-0 before:top-2 before:h-7 before:w-0.5 before:bg-orange-400 lg:before:top-1 lg:before:h-7" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")}><Icon className="h-4 w-4" />{uiText(ruLabel, enLabel)}</button>
+  }
+
+  return <div className={cn("sticky top-0 h-screen overflow-y-auto border-r border-zinc-800 bg-[#111] pb-4 text-zinc-300", className)}>
     <div className="border-b border-zinc-800 px-3 py-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN · ADMIN</p>
-      <h1 className="mt-1 text-sm font-semibold text-white">Training Lab</h1>
+      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN</p>
+      <h1 className="mt-1 text-sm font-semibold text-white">{uiText("Мои тренировки", "My training")}</h1>
     </div>
-    <nav className="space-y-1 p-2">
-      {nav.map(([key, label, Icon]) => {
-        const active = page === key
-        return <button key={key} onClick={() => setPage(key)} className={cn("relative flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-medium transition-colors", active ? "bg-zinc-800 text-white before:absolute before:left-0 before:top-1 before:h-5 before:w-0.5 before:bg-orange-400" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")}><Icon className="h-4 w-4" />{label}</button>
-      })}
+    <nav className="space-y-1 p-2" aria-label={uiText("Основная навигация", "Primary navigation")}>
+      {primaryNav.map(navButton)}
+      <details className="group pt-2" open={secondaryNav.some(([key]) => key === page)}>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md px-3 text-xs font-semibold text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 lg:min-h-9 lg:px-2 [&::-webkit-details-marker]:hidden"><span>{uiText("Еще", "More")}</span><span className="text-orange-300 group-open:hidden">+</span><span className="hidden text-zinc-500 group-open:inline">-</span></summary>
+        <div className="mt-1 space-y-1 pl-1">{secondaryNav.map(navButton)}</div>
+      </details>
     </nav>
     <div className="mt-4 border-t border-zinc-800 p-2">
-      <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Shield className="h-4 w-4" /> Telegram auth</div>
-      <div className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500"><Bot className="h-4 w-4" /> User LLM keys</div>
-      <a href={guideHref()} className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100"><BookOpen className="h-4 w-4" /> Alpha guide</a>
+      <div className="flex h-11 items-center gap-2 rounded-md px-3 text-xs text-zinc-500 lg:h-8 lg:px-2"><Shield className="h-4 w-4" /> {uiText("Вход через Telegram", "Telegram login")}</div>
+      <div className="flex h-11 items-center gap-2 rounded-md px-3 text-xs text-zinc-500 lg:h-8 lg:px-2"><Bot className="h-4 w-4" /> {uiText("Ключи тренера", "Coach keys")}</div>
+      <a href={guideHref()} className="flex h-11 items-center gap-2 rounded-md px-3 text-xs text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100 lg:h-8 lg:px-2"><BookOpen className="h-4 w-4" /> {uiText("Гид тестера", "Tester guide")}</a>
     </div>
   </div>
 }
@@ -922,65 +1121,40 @@ function AuthUserPill({ user, className }: { user: AuthUser | null; className?: 
   </div>
 }
 
-function Topbar({ status, currentUser, theme, onThemeToggle, language, onLanguageChange, onMenu }: { status: string; currentUser: AuthUser | null; theme: Theme; onThemeToggle: () => void; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
+function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onLanguageChange, onMenu }: { page: Page; status: string; currentUser: AuthUser | null; theme: Theme; onThemeToggle: () => void; language: Language; onLanguageChange: (language: Language) => void; onMenu: () => void }) {
   return <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#090909]/95 backdrop-blur">
     <div className="flex h-12 items-center justify-between px-3">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={onMenu}><Menu /></Button>
-        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">RUNFORFAN · ADMIN</p>
+      <div className="flex min-w-0 items-center gap-2">
+        <Button variant="ghost" size="icon" className="lg:hidden" aria-label={uiText("Открыть меню", "Open menu")} onClick={onMenu}><Menu /></Button>
+        <div className="min-w-0">
+          <p className="hidden font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500 sm:block">RUNFORFAN</p>
+          <h2 className="truncate text-sm font-semibold text-white sm:text-base">{pageTitle(page)}</h2>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <LanguageToggle language={language} onLanguageChange={onLanguageChange} />
         <AuthUserPill user={currentUser} className="hidden max-w-[18rem] sm:flex [&>span:nth-child(2)]:max-w-[9rem] [&>span:nth-child(3)]:max-w-[7rem]" />
-        <Badge>{status}</Badge>
+        <Badge className="hidden sm:inline-flex">{appStatusLabel(status)}</Badge>
         <Button variant="ghost" size="icon" aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"} aria-pressed={theme === "light"} onClick={onThemeToggle}>{theme === "light" ? <Moon /> : <Sun />}</Button>
       </div>
-    </div>
-    <div className="border-t border-zinc-900 px-3 py-1.5 sm:hidden">
-      <AuthUserPill user={currentUser} className="flex w-full [&>span:nth-child(2)]:max-w-[55%] [&>span:nth-child(3)]:max-w-[35%]" />
     </div>
   </header>
 }
 
-function Overview({ activities, analytics, dashboard, providers, onImport, onPlans }: { activities: ActivityType[]; analytics: AnalyticsSummary | null; dashboard: DashboardSummary | null; providers: LlmProvider[]; onImport: () => void; onPlans: () => void }) {
-  const metrics = dashboard?.analytics || analytics
+function Overview({ activities, dashboard, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
-  const weekly = dashboard?.weekly_snapshot
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
   const readiness = dashboard?.readiness
-  const providerCount = dashboard?.provider_count ?? providers.length
+  const visibleAlertCount = (dashboard?.alerts || []).filter((alert) => !/provider|llm|import|profile|engine|template/i.test(`${alert.title} ${alert.message} ${alert.action || ""}`)).length
+  const showSignals = Boolean(visibleAlertCount || (readiness?.status && readiness.status !== "ok"))
   return <div className="grid gap-4">
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[1fr_1.35fr]">
-      <Card className="min-w-0 overflow-hidden p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Dashboard</p>
-            <h2 className="mt-2 text-lg font-semibold text-white">Today, plan and readiness</h2>
-            {currentWeek?.message ? <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500" translate="no">{currentWeek.message}</p> : <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Loading the active plan, weekly adherence and import alerts.</p>}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge className={cn("border-zinc-700 bg-zinc-900 text-zinc-300", signalClass(readiness?.status))}>{readiness?.status || "loading"}</Badge>
-            {plan ? <Badge translate="no">{plan.title}</Badge> : <Badge className="border-orange-400/30 bg-orange-400/10 text-orange-200">no active plan</Badge>}
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={onImport}>+ Add screenshots</Button><Button size="sm" variant="secondary" onClick={onPlans}>Open plans</Button></div>
-      </Card>
-      <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
-        <Stat label="activities" value={metrics?.activity_count ?? activities.length} />
-        <Stat label="distance" value={Number(metrics?.total_distance_km || 0).toFixed(1)} suffix={kmUnit()} />
-        <Stat label="week done" value={`${Math.round((weekly?.completion_rate || 0) * 100)}%`} />
-        <Stat label="providers" value={providerCount} />
-      </Card>
+    <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
+    <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      {currentWeek ? <CurrentWeekCoachCard currentWeek={currentWeek} onPlans={onPlans} /> : <Card className="p-4 text-sm text-zinc-400">{uiText("Создайте план, чтобы видеть неделю целиком.", "Create a plan to see the week at a glance.")}</Card>}
+      <RecentRunsCard activities={recentActivities.slice(0, 3)} />
     </div>
-
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-      <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} onPlans={onPlans} />
-      <DashboardSignals dashboard={dashboard} />
-    </div>
-
-    {currentWeek ? <CurrentWeekCard currentWeek={currentWeek} onPlans={onPlans} /> : null}
-    <Activities activities={recentActivities} compact onImport={onImport} />
+    {showSignals ? <CollapsibleSection title={uiText("Перед тренировкой", "Before your workout")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("если нужно", "if needed")}</Badge>}><DashboardSignals dashboard={dashboard} /></CollapsibleSection> : null}
   </div>
 }
 
@@ -989,6 +1163,24 @@ function signalClass(status?: string) {
   if (status === "watch" || status === "warning" || status === "tired" || status === "below" || status === "above") return "border-orange-400/30 bg-orange-400/10 text-orange-200"
   if (status === "ok" || status === "active" || status === "done" || status === "on_track" || status === "completed" || status === "fresh" || status === "normal" || status === "within") return "border-zinc-700 bg-zinc-900 text-zinc-200"
   return "border-zinc-700 bg-zinc-900 text-zinc-400"
+}
+
+function signalStatusLabel(status?: string | null) {
+  if (!status) return uiText("загрузка", "loading")
+  if (status === "watch") return uiText("внимание", "watch")
+  if (status === "warning") return uiText("предупреждение", "warning")
+  if (status === "risk" || status === "critical" || status === "at_risk") return uiText("риск", "risk")
+  if (status === "adjust") return uiText("нужна правка", "adjust")
+  if (status === "ok" || status === "normal" || status === "within") return uiText("норма", "ok")
+  if (status === "active") return uiText("активно", "active")
+  if (status === "done" || status === "completed") return uiText("готово", "done")
+  if (status === "missed") return uiText("пропущено", "missed")
+  if (status === "planned") return uiText("запланировано", "planned")
+  if (status === "fresh") return uiText("свежий", "fresh")
+  if (status === "tired") return uiText("усталость", "tired")
+  if (status === "strained") return uiText("перегруз", "strained")
+  if (status === "injured") return uiText("травма", "injured")
+  return status
 }
 
 function formatDate(value?: string | null) {
@@ -1047,37 +1239,80 @@ function dateRange(fromDate: string, toDate: string) {
   return days
 }
 
-function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, onPlans }: { todayWorkout: PlanWorkout | null; nextWorkout: PlanWorkout | null; currentWeek: DashboardSummary["current_week"] | null; onPlans: () => void }) {
+function WorkoutFocus({ todayWorkout, nextWorkout, currentWeek, activePlanTitle, onPlans, onImport }: { todayWorkout: PlanWorkout | null; nextWorkout: PlanWorkout | null; currentWeek: DashboardSummary["current_week"] | null; activePlanTitle: string | null; onPlans: () => void; onImport: () => void }) {
   const focus = todayWorkout || nextWorkout
-  return <Card>
-    <CardHeader><div><CardTitle>{todayWorkout ? "Today workout" : "Next workout"}</CardTitle><p className="text-xs text-zinc-500">{currentWeek ? `${formatDate(currentWeek.week_start)} - ${formatDate(currentWeek.week_end)}` : "Active plan focus"}</p></div>{focus ? <Badge className={signalClass(focus.status)} translate="no">{focus.status}</Badge> : null}</CardHeader>
-    {focus ? <div className="grid gap-3 p-4 text-xs md:grid-cols-[1fr_auto] md:items-end">
-      <div className="min-w-0" translate="no">
-        <p className="text-base font-semibold text-white">{focus.title}</p>
-        <p className="mt-1 text-zinc-500">{formatDate(focus.scheduled_date)} · week {focus.week_index} · {focus.workout_type} · target: {formatWorkoutTarget(focus)}</p>
-        <p className="mt-2 max-w-3xl leading-5 text-zinc-400">{focus.description || "No target description"}</p>
-        {focus.execution_score?.flags?.length ? <p className="mt-2 text-orange-200">{focus.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
+  const isToday = Boolean(todayWorkout)
+  return <Card className="overflow-hidden border-orange-400/30 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.18),transparent_34%),#0b0b0b]">
+    <CardHeader className="border-orange-400/20 bg-orange-400/10"><div><CardTitle className="text-base">{isToday ? uiText("Карточка на сегодня", "Today's coach card") : uiText("Ближайший шаг", "Next step")}</CardTitle><p className="text-xs text-orange-100/80">{activePlanTitle ? uiText("Смотрите только то, что нужно сделать дальше.", "See only what to do next.") : uiText("План еще не выбран.", "No active plan yet.")}</p></div></CardHeader>
+    {focus ? <div className="grid gap-4 p-4 text-sm md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
+      <div className="min-w-0">
+        <p className="text-2xl font-semibold tracking-tight text-white md:text-3xl">{coachWorkoutTitle(focus)}</p>
+        <p className="mt-2 text-sm text-orange-100">{focus.scheduled_date ? formatLocalDate(focus.scheduled_date) : noDateLabel()} · {workoutIntensityLabel(focus.intensity)}</p>
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          <div className="rounded-xl border border-orange-400/20 bg-black/20 p-3"><p className="text-[11px] font-semibold text-orange-100/70">{uiText("Зачем сегодня", "Why today")}</p><p className="mt-1 leading-6 text-zinc-200">{workoutPurpose(focus)}</p></div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><p className="text-[11px] font-semibold text-zinc-500">{uiText("Как не переборщить", "How to keep it easy enough")}</p><p className="mt-1 leading-6 text-zinc-300">{workoutSafetyNote(focus)}</p></div>
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-2 md:w-64">
-        <Stat label="score" value={focus.execution_score?.score === null || focus.execution_score?.score === undefined ? "--" : `${Math.round(focus.execution_score.score * 100)}%`} />
-        <Stat label="risk" value={focus.execution_score?.subjective_risk || "--"} />
-        <Stat label="actual" value={formatWorkoutActual(focus)} />
+      <div className="grid gap-2">
+        <Button className="w-full" onClick={onPlans}>{uiText("Открыть план", "Open plan")}</Button>
+        <Button className="w-full" variant="secondary" onClick={onImport}>{uiText("Добавить выполненную тренировку", "Add completed workout")}</Button>
       </div>
-    </div> : <div className="p-4 text-xs text-zinc-500"><p>No active workout is scheduled yet.</p><Button className="mt-3" size="sm" variant="secondary" onClick={onPlans}>Create or activate plan</Button></div>}
+    </div> : <div className="grid gap-3 p-4 text-sm text-zinc-400 md:grid-cols-[1fr_auto] md:items-center"><div><p className="font-semibold text-white">{uiText("Сегодня нет активной тренировки", "No active workout today")}</p><p className="mt-1 text-xs leading-5 text-zinc-500">{currentWeek?.message || uiText("Создайте программу или добавьте тренировку, чтобы Runforfan начал подсказывать следующий шаг.", "Create a plan or add a workout so Runforfan can suggest the next step.")}</p></div><div className="grid gap-2 sm:grid-cols-2 md:grid-cols-1"><Button onClick={onPlans}>{uiText("Создать план", "Create plan")}</Button><Button variant="secondary" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button></div></div>}
   </Card>
 }
 
 function DashboardSignals({ dashboard }: { dashboard: DashboardSummary | null }) {
-  const alerts = dashboard?.alerts || []
+  const alerts = (dashboard?.alerts || []).filter((alert) => !/provider|llm|import|profile|engine|template/i.test(`${alert.title} ${alert.message} ${alert.action || ""}`)).slice(0, 2)
   const factors = dashboard?.readiness.factors || []
+  const showSignals = alerts.length || (dashboard?.readiness.status && dashboard.readiness.status !== "ok")
+  if (!showSignals) return null
   return <Card>
-    <CardHeader><div><CardTitle>Readiness signals</CardTitle><p className="text-xs text-zinc-500">Profile, imports, feedback and coach alerts.</p></div><Badge className={signalClass(dashboard?.readiness.status)} translate="no">{dashboard?.readiness.status || "loading"}</Badge></CardHeader>
+    <CardHeader><div><CardTitle>{uiText("Перед тренировкой", "Before your workout")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Подсказки, которые помогут выбрать нагрузку или вовремя отдохнуть.", "Guidance to help you choose the right load or take a rest day.")}</p></div><Badge className={signalClass(dashboard?.readiness.status)}>{signalStatusLabel(dashboard?.readiness.status)}</Badge></CardHeader>
     <div className="grid gap-3 p-4 text-xs">
-      {dashboard?.readiness.message ? <p className="leading-5 text-zinc-400" translate="no">{dashboard.readiness.message}</p> : <p className="leading-5 text-zinc-400">Summary is loading.</p>}
-      {factors.length ? <div className="grid gap-1" translate="no">{factors.map((factor) => <p key={factor} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300">{factor}</p>)}</div> : null}
+      <p className="leading-5 text-zinc-300">{readinessCoachMessage(dashboard?.readiness)}</p>
       <div className="grid gap-2">
-        {alerts.length ? alerts.map((alert) => <div key={`${alert.title}-${alert.message}`} className={cn("rounded-md border px-3 py-2", signalClass(alert.severity))} translate="no"><p className="font-medium">{alert.title}</p><p className="mt-1 leading-5 text-zinc-300/90">{alert.message}</p></div>) : <p className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">No dashboard alerts.</p>}
+        {alerts.map((alert) => <div key={`${alert.title}-${alert.message}`} className={cn("rounded-md border px-3 py-2", signalClass(alert.severity))}><p className="font-medium">{alert.severity === "critical" ? uiText("Лучше снизить нагрузку", "Reduce load") : uiText("Проверьте самочувствие", "Check how you feel")}</p><p className="mt-1 leading-5 text-zinc-300/90">{uiText("Если ощущение не обычное, сократите тренировку или перенесите ее.", "If things feel unusual, shorten or move the workout.")}</p></div>)}
       </div>
+      {factors.length ? <CollapsibleSection title={uiText("Почему показали предупреждение", "Why this appeared")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}><div className="grid gap-1">{factors.slice(0, 3).map((factor) => <p key={factor} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-400">{safetyWarningLabel(factor)}</p>)}</div></CollapsibleSection> : null}
+    </div>
+  </Card>
+}
+
+function CurrentWeekCoachCard({ currentWeek, onPlans }: { currentWeek: DashboardSummary["current_week"]; onPlans: () => void }) {
+  const adherence = currentWeek.adherence
+  const total = adherence?.total_workouts ?? currentWeek.workouts.length
+  const done = adherence?.done_workouts ?? currentWeek.workouts.filter((workout) => workout.status === "done").length
+  const plannedDistance = adherence?.planned_distance_km ?? currentWeek.workouts.reduce((sum, workout) => sum + (workout.distance_km || 0), 0)
+  const completedDistance = adherence?.completed_distance_km ?? currentWeek.workouts.reduce((sum, workout) => sum + (workout.actual_distance_km || 0), 0)
+  const percent = Math.round((adherence?.completion_rate ?? (total ? done / total : 0)) * 100)
+  const next = currentWeek.workouts.find((workout) => ["planned", "rescheduled"].includes(workout.status)) || currentWeek.workouts[0]
+  return <Card className="p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="text-xs font-semibold text-orange-200">{uiText("Неделя", "Week")}</p><h3 className="mt-1 text-lg font-semibold text-white">{uiText("Как идет текущая неделя", "How this week is going")}</h3><p className="mt-1 text-xs text-zinc-500">{formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div>
+      <Button size="sm" variant="secondary" onClick={onPlans}>{uiText("В план", "Open plan")}</Button>
+    </div>
+    <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-900"><div className="h-full rounded-full bg-orange-400" style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></div>
+    <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+      <Stat label={uiText("сделано", "done")} value={`${done}/${total}`} />
+      <Stat label={uiText("план", "planned")} value={formatDistance(plannedDistance)} />
+      <Stat label={uiText("факт", "actual")} value={formatDistance(completedDistance)} />
+    </div>
+    {next ? <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs"><p className="font-medium text-white">{uiText("Следующий шаг", "Next step")}: {coachWorkoutTitle(next)}</p><p className="mt-1 text-zinc-500">{next.scheduled_date ? formatLocalDate(next.scheduled_date) : noDateLabel()} · {workoutPurpose(next)}</p></div> : <p className="mt-3 text-xs text-zinc-500">{uiText("На этой неделе нет запланированных тренировок.", "There are no planned workouts this week.")}</p>}
+  </Card>
+}
+
+function RecentRunsCard({ activities, onImport }: { activities: ActivityType[]; onImport?: () => void }) {
+  return <Card className="p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="text-xs font-semibold text-orange-200">{uiText("История", "History")}</p><h3 className="mt-1 text-lg font-semibold text-white">{uiText("Последние тренировки", "Recent workouts")}</h3><p className="mt-1 text-xs text-zinc-500">{uiText("Дата, длительность и основные показатели.", "Date, duration and key metrics.")}</p></div>
+      {onImport ? <Button size="sm" variant="secondary" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button> : null}
+    </div>
+    <div className="mt-4 grid gap-2">
+      {activities.slice(0, 3).map((activity) => <div key={activity.id} className="grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs md:grid-cols-[1fr_auto] md:items-center">
+        <div><p className="font-medium text-white">{runKindLabel(activity)} · {activity.started_at ? formatLocalDate(activity.started_at) : noDateLabel()}</p><p className="mt-1 text-zinc-500">{formatDistance(activity.distance_km)} · {formatDuration(activity.duration_seconds)} · {formatPace(activity.average_pace_seconds_per_km)}{perKmUnit()}</p></div>
+        {activity.average_heart_rate_bpm ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{activity.average_heart_rate_bpm} {uiText("уд/мин", "bpm")}</Badge> : <Badge className="border-zinc-800 bg-zinc-950 text-zinc-500">{uiText("без пульса", "no heart rate")}</Badge>}
+      </div>)}
+      {!activities.length ? <p className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-500">{uiText("Тренировок пока нет. Добавьте первую со скриншотов или вручную.", "No workouts yet. Add the first one from screenshots or manually.")}</p> : null}
     </div>
   </Card>
 }
@@ -1085,41 +1320,36 @@ function DashboardSignals({ dashboard }: { dashboard: DashboardSummary | null })
 function CurrentWeekCard({ currentWeek, onPlans }: { currentWeek: DashboardSummary["current_week"]; onPlans: () => void }) {
   const adherence = currentWeek.adherence
   return <Card>
-    <CardHeader><div><CardTitle>Current week</CardTitle><p className="text-xs text-zinc-500" translate="no">{currentWeek.plan_title || "No active plan"} · {formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div><div className="flex items-center gap-2"><Badge className={signalClass(currentWeek.status)} translate="no">{currentWeek.status}</Badge><Button size="sm" variant="secondary" onClick={onPlans}>Plans</Button></div></CardHeader>
+    <CardHeader><div><CardTitle>{uiText("Неделя в плане", "Plan this week")}</CardTitle><p className="text-xs text-zinc-500" translate="no">{currentWeek.plan_title || uiText("Нет активного плана", "No active plan")} · {formatDate(currentWeek.week_start)} - {formatDate(currentWeek.week_end)}</p></div><div className="flex items-center gap-2"><Badge className={signalClass(currentWeek.status)}>{signalStatusLabel(currentWeek.status)}</Badge><Button size="sm" variant="secondary" onClick={onPlans}>{uiText("План", "Plan")}</Button></div></CardHeader>
     <div className="grid gap-3 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
-      <Stat label="workouts" value={adherence?.total_workouts ?? 0} />
-      <Stat label="done" value={adherence?.done_workouts ?? 0} />
-      <Stat label="planned" value={formatDistance(adherence?.planned_distance_km)} />
-      <Stat label="actual" value={formatDistance(adherence?.completed_distance_km)} />
+      <Stat label={uiText("тренировок", "workouts")} value={adherence?.total_workouts ?? 0} />
+      <Stat label={uiText("сделано", "done")} value={adherence?.done_workouts ?? 0} />
+      <Stat label={uiText("план", "planned")} value={formatDistance(adherence?.planned_distance_km)} />
+      <Stat label={uiText("факт", "actual")} value={formatDistance(adherence?.completed_distance_km)} />
     </div>
-    <div className="grid gap-2 p-4 md:hidden">
+    <div className="grid gap-2 p-4">
       {currentWeek.workouts.map((workout) => <div key={`mobile-${workout.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
-        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{workout.title}</p><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workout.workout_type} · {workout.intensity || "--"}</p></div><Badge className={signalClass(workout.status)}>{workout.status}</Badge></div>
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="plan" value={formatWorkoutTarget(workout)} /><Stat label="actual" value={formatWorkoutActual(workout)} /><Stat label="score" value={workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`} /></div>
+        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{workout.title}</p><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {workoutTypeLabel(workout.workout_type)} · {workoutIntensityLabel(workout.intensity)}</p></div><Badge className={signalClass(workout.status)}>{workoutStatusLabel(workout.status)}</Badge></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center"><Stat label={uiText("цель", "target")} value={formatWorkoutTarget(workout)} /><Stat label={uiText("факт", "actual")} value={formatWorkoutActual(workout)} /></div>
+        <p className="mt-2 rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1.5 text-[11px] leading-5 text-zinc-400">{workoutPurpose(workout)}</p>
       </div>)}
       {!currentWeek.workouts.length && <p className="text-xs text-zinc-500">No workouts in the current calendar week.</p>}
-    </div>
-    <div className="hidden overflow-x-auto md:block">
-      <table className="w-full min-w-[760px] text-left text-xs">
-        <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Workout</th><th>Date</th><th>Type</th><th>Plan</th><th>Actual</th><th>Score</th><th>Status</th></tr></thead>
-        <tbody>{currentWeek.workouts.map((workout) => <tr key={workout.id} className="border-b border-zinc-900 last:border-0 align-top hover:bg-zinc-900/60"><td className="px-4 py-3 font-medium text-white">{workout.title}<div className="text-[11px] text-zinc-500">#{workout.id} · week {workout.week_index}</div></td><td>{formatDate(workout.scheduled_date)}</td><td>{workout.workout_type}<div className="text-[11px] text-zinc-500">{workout.intensity || "--"}</div></td><td>{formatWorkoutTarget(workout)}</td><td>{formatWorkoutActual(workout)}</td><td>{workout.execution_score?.score === null || workout.execution_score?.score === undefined ? "--" : `${Math.round(workout.execution_score.score * 100)}%`}<div className="text-[11px] text-zinc-500">{workout.execution_score?.subjective_risk || "--"}</div></td><td><Badge className={signalClass(workout.status)}>{workout.status}</Badge></td></tr>)}</tbody>
-      </table>
-      {!currentWeek.workouts.length && <p className="p-4 text-xs text-zinc-500">No workouts in the current calendar week.</p>}
     </div>
   </Card>
 }
 
 function Stat({ label, value, suffix }: { label: string; value: string | number; suffix?: string }) {
-  return <div className="px-4 py-3 text-center"><strong className="block text-lg text-white" translate="no">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500" data-i18n-ui>{label}</span></div>
+  return <div className="px-4 py-3 text-center"><strong className="block text-base leading-tight text-white md:text-lg" translate="no">{value}{suffix ? ` ${suffix}` : ""}</strong><span className="text-[11px] font-medium text-zinc-500" data-i18n-ui>{label}</span></div>
 }
 
 function CollapsibleSection({ title, summary, defaultOpen = false, children, className }: { title: string; summary?: ReactNode; defaultOpen?: boolean; children: ReactNode; className?: string }) {
   const [isOpen, setIsOpen] = useState(defaultOpen)
+  useEffect(() => { if (defaultOpen) setIsOpen(true) }, [defaultOpen])
 
   return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className={cn("group rounded-md border border-zinc-800 bg-zinc-950/70", className)}>
-    <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-white [&::-webkit-details-marker]:hidden">
+    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-white [&::-webkit-details-marker]:hidden">
       <span>{title}</span>
-      <span className="flex items-center gap-2 text-[10px] font-normal uppercase tracking-[0.14em] text-zinc-500">{summary}<span className="text-orange-300 group-open:hidden">открыть</span><span className="hidden text-zinc-500 group-open:inline">скрыть</span></span>
+      <span className="flex items-center gap-2 text-[10px] font-normal uppercase tracking-[0.14em] text-zinc-500">{summary}<span className="text-orange-300 group-open:hidden">{uiText("открыть", "open")}</span><span className="hidden text-zinc-500 group-open:inline">{uiText("скрыть", "hide")}</span></span>
     </summary>
     <div hidden={!isOpen} className="border-t border-zinc-800 p-3">{children}</div>
   </details>
@@ -1128,7 +1358,7 @@ function CollapsibleSection({ title, summary, defaultOpen = false, children, cla
 function ResponsiveDetailPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return <div className="fixed inset-0 z-50 bg-black/80 p-2 md:static md:bg-transparent md:p-0">
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-orange-400/30 bg-zinc-950 md:block md:h-auto md:overflow-visible md:rounded-none md:border-0 md:bg-transparent">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 md:hidden"><p className="text-sm font-semibold text-white">{title}</p><Button size="sm" variant="ghost" onClick={onClose}>Close</Button></div>
+      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 md:hidden"><p className="text-sm font-semibold text-white">{title}</p><Button size="sm" variant="ghost" onClick={onClose}>{uiText("Закрыть", "Close")}</Button></div>
       <div className="min-h-0 overflow-y-auto p-2 md:overflow-visible md:p-0">{children}</div>
     </div>
   </div>
@@ -1219,35 +1449,35 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
 
   if (!compact) {
     const activityColumns: DataTableColumn<ActivityType>[] = [
-      { key: "name", header: "Name", sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
+      { key: "name", header: uiText("Тренировка", "Workout"), sortValue: (activity) => activity.started_at ? Date.parse(activity.started_at) : 0, cell: (activity) => {
         const summary = workoutBlockSummary(activity)
         return <div className="font-medium text-white">{activity.title}<div className="text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</div>{summary && <div className="mt-1 flex items-center gap-2"><Badge>interval</Badge><span className="text-[11px] text-orange-300">{summary}</span></div>}</div>
       } },
-      { key: "distance", header: "Distance", sortValue: (activity) => activity.distance_km || 0, cell: (activity) => <>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></> },
-      { key: "pace", header: "Pace", sortValue: (activity) => activity.average_pace_seconds_per_km || 99999, cell: (activity) => {
+      { key: "distance", header: uiText("Дистанция", "Distance"), sortValue: (activity) => activity.distance_km || 0, cell: (activity) => <>{formatDistance(activity.distance_km)}<div className="text-[11px] text-zinc-500">{formatDuration(activity.duration_seconds)}</div></> },
+      { key: "pace", header: uiText("Темп", "Pace"), sortValue: (activity) => activity.average_pace_seconds_per_km || 99999, cell: (activity) => {
         const derived = primaryActivityMetrics(activity)
         return <>{formatPace(activity.average_pace_seconds_per_km)}{perKmUnit()}{derived.length ? <div className="mt-1 flex flex-wrap gap-1">{derived.slice(0, 2).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div> : null}</>
       } },
-      { key: "hr", header: "HR", sortValue: (activity) => activity.average_heart_rate_bpm || 0, cell: (activity) => activity.average_heart_rate_bpm || "--" },
-      { key: "structure", header: "Structure", sortValue: (activity) => activity.workout_blocks?.length || activity.segments.length || 0, cell: (activity) => {
+      { key: "hr", header: uiText("Пульс", "Heart rate"), sortValue: (activity) => activity.average_heart_rate_bpm || 0, cell: (activity) => activity.average_heart_rate_bpm || "--" },
+      { key: "structure", header: uiText("Состав", "Structure"), sortValue: (activity) => activity.workout_blocks?.length || activity.segments.length || 0, cell: (activity) => {
         const summary = workoutBlockSummary(activity)
         return <>{summary || splitCountLabel(activity.segments.length)}{activity.workout_blocks?.length ? <div className="mt-1 text-[11px] text-zinc-500">{blockCountLabel(activity.workout_blocks.length)}</div> : null}{activity.derived_metrics?.length ? <div className="mt-1 text-[11px] text-orange-300">{derivedMetricCountLabel(activity.derived_metrics.length)}</div> : null}</>
       } },
       { key: "id", header: "ID", sortValue: (activity) => activity.id, cell: (activity) => <span className="font-mono text-zinc-500">#{activity.id}</span> },
-      { key: "detail", header: "Detail", cell: (activity) => <Button size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>Inspect</Button> },
+      { key: "detail", header: uiText("Подробнее", "Details"), cell: (activity) => <Button size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>{uiText("Открыть", "Open")}</Button> },
     ]
     return <Card>
-      <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total · sortable, filterable, paginated</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
-      <CollapsibleSection title="Manual activity" summary={<Badge>manual</Badge>} className="mx-4 mt-4 md:mx-0 md:mt-0 md:rounded-none md:border-x-0 md:border-b-0">
+      <CardHeader><div><CardTitle>{uiText("История тренировок", "Workout history")}</CardTitle><p className="text-xs text-zinc-500">{activities.length} {uiText("всего", "total")}</p></div><Button size="sm" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button></CardHeader>
+      <CollapsibleSection title={uiText("Добавить вручную", "Add manually")} summary={<Badge>{uiText("без скриншотов", "without screenshots")}</Badge>} className="mx-4 mt-4 md:mx-0 md:mt-0 md:rounded-none md:border-x-0 md:border-b-0">
       <form onSubmit={createManualActivity} className="grid gap-3 text-xs md:grid-cols-6">
-        <Field label="Title"><Input name="title" placeholder="Manual run" /></Field>
-        <Field label="Started"><Input name="started_at" type="datetime-local" /></Field>
-        <Field label="Type"><Select name="activity_type"><option value="manual_workout">manual workout</option><option value="outdoor_run">outdoor run</option><option value="treadmill_run">treadmill run</option><option value="manual_strength">strength</option></Select></Field>
-        <Field label="Distance km"><Input name="distance_km" type="number" step="0.01" placeholder="5.0" /></Field>
-        <Field label="Duration min"><Input name="duration_minutes" type="number" step="1" min="1" required placeholder="30" /></Field>
-        <Field label="Avg HR"><Input name="average_heart_rate_bpm" type="number" step="1" placeholder="145" /></Field>
-        <div className="md:col-span-5"><Field label="Source note"><Input name="source_note" placeholder="Manual correction, watch missing, treadmill entry..." /></Field></div>
-        <div className="flex items-end"><Button type="submit" size="sm" disabled={manualBusy}>+ Manual</Button></div>
+        <Field label={uiText("Название", "Title")}><Input name="title" placeholder={uiText("Например, утренняя тренировка", "For example, morning workout")} /></Field>
+        <Field label={uiText("Дата и время", "Date and time")}><Input name="started_at" type="datetime-local" /></Field>
+        <Field label={uiText("Тип", "Type")}><Select name="activity_type"><option value="manual_workout">{uiText("тренировка", "workout")}</option><option value="outdoor_run">{uiText("бег на улице", "outdoor run")}</option><option value="treadmill_run">{uiText("беговая дорожка", "treadmill run")}</option><option value="manual_strength">{uiText("силовая тренировка", "strength workout")}</option></Select></Field>
+        <Field label={uiText("Дистанция, км", "Distance, km")}><Input name="distance_km" type="number" step="0.01" placeholder="5.0" /></Field>
+        <Field label={uiText("Длительность, мин", "Duration, min")}><Input name="duration_minutes" type="number" step="1" min="1" required placeholder="30" /></Field>
+        <Field label={uiText("Средний пульс", "Average heart rate")}><Input name="average_heart_rate_bpm" type="number" step="1" placeholder="145" /></Field>
+        <div className="md:col-span-5"><Field label={uiText("Комментарий", "Note")}><Input name="source_note" placeholder={uiText("Например, часы не записали тренировку", "For example, the watch did not record it")} /></Field></div>
+        <div className="flex items-end"><Button type="submit" size="sm" disabled={manualBusy}>{uiText("Добавить", "Add")}</Button></div>
         {manualMessage ? <p className="md:col-span-6 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300" translate="no">{manualMessage}</p> : null}
       </form>
       </CollapsibleSection>
@@ -1256,8 +1486,8 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
         columns={activityColumns}
         getRowKey={(activity) => activity.id}
         getSearchText={(activity) => `${activity.title} ${activity.id} ${activity.started_at || ""}`}
-        filterPlaceholder="Filter by title, date, id"
-        emptyState={<div className="flex flex-wrap items-center gap-3"><span>No activities match this filter.</span><Button size="sm" variant="secondary" onClick={onImport}>Import activity</Button></div>}
+        filterPlaceholder={uiText("Поиск по названию или дате", "Search by title or date")}
+        emptyState={<div className="flex flex-wrap items-center gap-3"><span>{uiText("Тренировки не найдены.", "No workouts found.")}</span><Button size="sm" variant="secondary" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button></div>}
         mobileCard={(activity) => {
           const summary = workoutBlockSummary(activity)
           const derived = primaryActivityMetrics(activity)
@@ -1265,11 +1495,11 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
             <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium text-white" translate="no">{activity.title}</p><p className="mt-1 text-[11px] text-zinc-500">{activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</p></div><Badge className="font-mono text-zinc-400">#{activity.id}</Badge></div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center"><Stat label="distance" value={formatDistance(activity.distance_km)} /><Stat label="pace" value={`${formatPace(activity.average_pace_seconds_per_km)}${perKmUnit()}`} /><Stat label="hr" value={activity.average_heart_rate_bpm || "--"} /></div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">{summary ? <Badge>interval</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{summary || splitCountLabel(activity.segments.length)}</Badge>{derived.slice(0, 1).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div>
-            <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>Inspect</Button>
+            <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={() => void openActivityDetail(activity.id)}>{uiText("Подробнее", "Details")}</Button>
           </div>
         }}
       />
-      {detail ? <ResponsiveDetailPanel title="Activity detail" onClose={closeActivityDetail}><ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /></ResponsiveDetailPanel> : null}
+      {detail ? <ResponsiveDetailPanel title={uiText("Детали тренировки", "Workout details")} onClose={closeActivityDetail}><ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /></ResponsiveDetailPanel> : null}
       {activities.some((activity) => activity.workout_blocks?.length) && <CollapsibleSection title="Interval structures" summary={<Badge>{activities.filter((activity) => activity.workout_blocks?.length).length}</Badge>} className="mx-4 mb-4"><div className="grid gap-3 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
           <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
@@ -1279,7 +1509,7 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
     </Card>
   }
   return <Card>
-    <CardHeader><div><CardTitle>Activities</CardTitle><p className="text-xs text-zinc-500">{activities.length} total</p></div><Button size="sm" onClick={onImport}>+ Import</Button></CardHeader>
+    <CardHeader><div><CardTitle>{uiText("Тренировки", "Workouts")}</CardTitle><p className="text-xs text-zinc-500">{activities.length} {uiText("всего", "total")}</p></div><Button size="sm" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button></CardHeader>
     <div className="grid gap-2 p-4 md:hidden">
       {activities.slice(0, compact ? 6 : undefined).map((activity) => {
         const summary = workoutBlockSummary(activity)
@@ -1290,7 +1520,7 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
           <div className="mt-2 flex flex-wrap items-center gap-1.5">{summary ? <Badge>interval</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{summary || splitCountLabel(activity.segments.length)}</Badge>{derived.slice(0, 1).map((metric) => <Badge key={metric.metric_key} className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{activityMetricLabel(metric.metric_key)} {formatActivityMetric(metric)}</Badge>)}</div>
         </div>
       })}
-      {!activities.length ? <p className="text-xs text-zinc-500">No recent activities.</p> : null}
+      {!activities.length ? <p className="text-xs text-zinc-500">{uiText("Тренировок пока нет.", "No workouts yet.")}</p> : null}
     </div>
     <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[720px] text-left text-xs">
@@ -1339,13 +1569,13 @@ function ActivityDetailPanel({ activity, validation, loading, error, onClose, on
   return <Card className="border-orange-400/25 bg-zinc-950/70">
     <CardHeader>
       <div className="min-w-0">
-        <CardTitle>Activity detail</CardTitle>
+        <CardTitle>{uiText("Детали тренировки", "Workout details")}</CardTitle>
         <p className="mt-1 truncate text-xs text-zinc-500" translate="no">{activity.title} · #{activity.id} · {activity.started_at ? formatLocalDateTime(activity.started_at) : noDateLabel()}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Badge className={signalClass(validation?.status)}>{loading ? "loading" : validation?.status || "validation"}</Badge>
-        <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>Refresh</Button>
-        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+        <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>{uiText("Обновить", "Refresh")}</Button>
+        <Button size="sm" variant="ghost" onClick={onClose}>{uiText("Закрыть", "Close")}</Button>
       </div>
     </CardHeader>
     <div className="grid gap-4 border-t border-zinc-800 p-4 text-xs">
@@ -1438,7 +1668,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   const [linkError, setLinkError] = useState("")
   const [importHistoryError, setImportHistoryError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState("Upload screenshots from the same workout. Up to 6 files per batch.")
+  const [message, setMessage] = useState<string | null>(null)
   const activeImportCount = imports.filter((batch) => ACTIVE_IMPORT_STATUSES.has(batch.status)).length
 
   async function loadImports() {
@@ -1448,14 +1678,17 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       const nextImports = await api.imports()
       setImports(nextImports)
       setUploadResult((current) => {
-        if (!current) return current
+        if (!current) {
+          const latestScreenshotImport = nextImports.find((batch) => batch.recognition_engine !== "csv")
+          return latestScreenshotImport ? { ...latestScreenshotImport } : null
+        }
         const updated = nextImports.find((batch) => batch.id === current.id)
         return updated ? { ...updated } : current
       })
       return nextImports
     } catch (error) {
       console.error(error)
-      setImportHistoryError("Не удалось загрузить историю импортов")
+      setImportHistoryError(uiText("Не удалось загрузить историю загрузок", "Could not load upload history"))
       return []
     }
   }
@@ -1470,7 +1703,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       setMatchCandidates(await api.activityMatchCandidates(result.created_activity_id, true))
     } catch (error) {
       console.error(error)
-      setCandidateError("Не удалось загрузить кандидатов плана. Позже можно сопоставить вручную в Plans.")
+      setCandidateError(uiText("Не удалось найти подходящую тренировку в плане. Позже ее можно отметить вручную в разделе «План».", "Could not find a matching workout in the plan. You can mark it manually in Plan later."))
     }
   }
 
@@ -1480,15 +1713,15 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     const input = form.elements.namedItem("screenshots") as HTMLInputElement | null
     const files = Array.from(input?.files || [])
     if (!files.length) {
-      setMessage("Выберите хотя бы один скриншот.")
+      setMessage(uiText("Выберите хотя бы один скриншот.", "Choose at least one screenshot."))
       return
     }
     if (files.length > 6) {
-      setMessage("Загрузите не больше 6 скриншотов за один batch.")
+      setMessage(uiText("Загрузите не больше 6 скриншотов за один раз.", "Upload no more than 6 screenshots at once."))
       return
     }
     setBusy(true)
-    setMessage("Uploading screenshots...")
+    setMessage(uiText("Загружаем скриншоты...", "Uploading screenshots..."))
     setMatchCandidates([])
     setCandidateError("")
     setLinkError("")
@@ -1496,14 +1729,14 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       await devLogin()
       const result = await api.uploadScreenshots(files)
       setUploadResult(result)
-      setMessage(result.recognition_message || "Import queued")
+      setMessage(importQueuedMessage())
       await loadCandidatesForResult(result)
       await loadImports()
       await onChanged()
       form.reset()
     } catch (error) {
       console.error(error)
-      setMessage(error instanceof Error ? error.message : "Import failed")
+      setMessage(apiErrorMessage(error, uiText("Не удалось загрузить скриншоты", "Could not upload screenshots")))
     } finally {
       setBusy(false)
     }
@@ -1515,22 +1748,22 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     const input = form.elements.namedItem("csv_file") as HTMLInputElement | null
     const file = input?.files?.[0]
     if (!file) {
-      setMessage("Выберите CSV файл.")
+      setMessage(uiText("Выберите CSV файл.", "Choose a CSV file."))
       return
     }
     setBusy(true)
-    setMessage("CSV import is running...")
+    setMessage(uiText("Добавляем тренировки из CSV...", "Adding workouts from CSV..."))
     try {
       await devLogin()
       const result = await api.uploadCsv(file, stringOrNull(new FormData(form).get("source_app")) || "csv")
       setCsvResult(result)
-      setMessage(result.recognition_message || "CSV import completed")
+      setMessage(csvImportDoneMessage(result))
       await loadImports()
       await onChanged()
       form.reset()
     } catch (error) {
       console.error(error)
-      setMessage(error instanceof Error ? error.message : "CSV import failed")
+      setMessage(apiErrorMessage(error, uiText("Не удалось добавить тренировки из CSV", "Could not add workouts from CSV")))
     } finally {
       setBusy(false)
     }
@@ -1548,7 +1781,7 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       await onChanged()
     } catch (error) {
       console.error(error)
-      setLinkError("Не удалось привязать workout. Обновите candidates или сопоставьте из Plans.")
+      setLinkError(uiText("Не удалось отметить тренировку в плане. Обновите список или сделайте это позже в разделе «План».", "Could not mark the workout in the plan. Refresh the list or do it later in Plan."))
     } finally {
       setBusy(false)
     }
@@ -1561,13 +1794,13 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       await devLogin()
       const result = await api.confirmImport(batchId)
       setUploadResult(result)
-      setMessage(result.recognition_message || "Import confirmed")
+      setMessage(uiText("Тренировка подтверждена и добавлена в историю.", "Workout confirmed and added to history."))
       await loadCandidatesForResult(result)
       await loadImports()
       await onChanged()
     } catch (error) {
       console.error(error)
-      setMessage(error instanceof Error ? error.message : "Не удалось подтвердить import candidate")
+      setMessage(apiErrorMessage(error, uiText("Не удалось подтвердить тренировку", "Could not confirm the workout")))
     } finally {
       setBusy(false)
     }
@@ -1580,12 +1813,29 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       const result = await api.rejectImport(batchId)
       setUploadResult(result)
       setMatchCandidates([])
-      setMessage(result.recognition_message || "Import rejected")
+      setMessage(uiText("Загрузка отменена. Тренировка не добавлена.", "Upload cancelled. The workout was not added."))
       await loadImports()
       await onChanged()
     } catch (error) {
       console.error(error)
-      setMessage(error instanceof Error ? error.message : "Не удалось отклонить import candidate")
+      setMessage(apiErrorMessage(error, uiText("Не удалось отменить загрузку", "Could not cancel the upload")))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function retryImport(batchId: number) {
+    setBusy(true)
+    setLinkError("")
+    try {
+      await devLogin()
+      const result = await api.retryImport(batchId)
+      setUploadResult(result)
+      setMessage(uiText("Скриншоты отправлены на повторную проверку.", "Screenshots were sent for another check."))
+      await loadImports()
+    } catch (error) {
+      console.error(error)
+      setMessage(apiErrorMessage(error, uiText("Не удалось повторно проверить скриншоты", "Could not check the screenshots again")))
     } finally {
       setBusy(false)
     }
@@ -1597,11 +1847,11 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
       await devLogin()
       const result = await api.updateImportCandidate(batchId, payload)
       setUploadResult(result)
-      setMessage(result.recognition_message || "Import candidate updated")
+      setMessage(uiText("Правки сохранены. Теперь можно подтвердить тренировку.", "Changes saved. You can now confirm the workout."))
       await loadImports()
     } catch (error) {
       console.error(error)
-      setMessage(error instanceof Error ? error.message : "Не удалось обновить import candidate")
+      setMessage(apiErrorMessage(error, uiText("Не удалось сохранить правки", "Could not save corrections")))
     } finally {
       setBusy(false)
     }
@@ -1624,55 +1874,63 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
     return () => window.clearInterval(interval)
   }, [activeImportCount])
 
-  return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <div className="grid gap-4">
+  return <div className="grid gap-4">
+    <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
       <Card>
-        <CardHeader><div><CardTitle>Import screenshots</CardTitle><p className="text-xs text-zinc-500">Huawei and iPhone templates or vision LLM recognition.</p></div><Badge>{imports.length} batches</Badge></CardHeader>
+        <CardHeader><div><CardTitle>{uiText("Добавить тренировку", "Add a workout")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Выберите скриншоты одной тренировки. Данные обработаются в фоне.", "Select screenshots from one workout. The details will be processed in the background.")}</p></div>{activeImportCount ? <Badge className="border-sky-400/40 bg-sky-400/15 text-sky-100">{activeImportCount} {uiText("в работе", "processing")}</Badge> : null}</CardHeader>
         <form onSubmit={upload} className="grid gap-3 p-4 text-xs">
-          <Field label="Screenshots"><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
-          <Button type="submit" disabled={busy}>{busy ? "Uploading..." : "Upload and recognize"}</Button>
+          <Field label={uiText("Скриншоты", "Screenshots")}><Input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></Field>
+          <Button type="submit" disabled={busy}>{busy ? uiText("Загружаем...", "Uploading...") : uiText("Загрузить скриншоты", "Upload screenshots")}</Button>
         </form>
-        <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400">
-          <p className="leading-5" translate="no">{message}</p>
-          <p className="mt-2 text-zinc-600">Recognition runs in the background with retries and provider fallback. Unknown screenshots require a configured vision LLM.</p>
+        <div className="border-t border-zinc-800 p-4 text-xs text-zinc-400" aria-live="polite">
+          <p className="leading-5" translate="no">{message || uiText("Выберите скриншоты одной тренировки. До 6 файлов за раз.", "Choose screenshots from one workout. Up to 6 files at once.")}</p>
+          <p className="mt-2 text-zinc-600">{uiText("Страницу можно закрыть: обработка продолжится, а статус обновится автоматически.", "You can leave this page: processing will continue and the status will update automatically.")}</p>
         </div>
       </Card>
-      <CollapsibleSection title="CSV import" summary={<Badge>6.18</Badge>}>
-        <form onSubmit={uploadCsv} className="grid gap-3 p-4 text-xs">
-          <Field label="CSV file"><Input name="csv_file" type="file" accept=".csv,text/csv" required /></Field>
-          <Field label="Source app"><Input name="source_app" defaultValue="csv" placeholder="garmin, strava, manual" /></Field>
-          <Button type="submit" disabled={busy}>{busy ? "Importing..." : "Import CSV"}</Button>
-        </form>
-        {csvResult ? <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
-          <Stat label="created" value={csvResult.created_activities} />
-          <Stat label="duplicates" value={csvResult.skipped_duplicates} />
-          <Stat label="matched" value={csvResult.matched_workouts} />
-          <Stat label="failed" value={csvResult.failed_rows} />
-          {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
-        </div> : null}
-      </CollapsibleSection>
+
+      <Card>
+        <CardHeader><div><CardTitle>{uiText("Последняя тренировка", "Latest workout")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Здесь появится результат и следующий шаг.", "The result and your next step will appear here.")}</p></div>{uploadResult && <Badge className={importStatusClass(uploadResult)}>{importStatusLabel(uploadResult.status)}</Badge>}</CardHeader>
+        {uploadResult ? <div className="grid gap-3 p-4 text-xs">
+          <div className={cn("rounded-lg border p-3", importStatusClass(uploadResult))}>
+            <p className="text-base font-semibold text-white">{importNextAction(uploadResult)}</p>
+            <p className="mt-1 leading-5 text-zinc-300">{importNextActionDescription(uploadResult)}</p>
+          </div>
+          {RETRYABLE_IMPORT_STATUSES.has(uploadResult.status) || uploadResult.status === "failed" ? <div><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => retryImport(uploadResult.id)}>{busy ? uiText("Запускаем...", "Starting...") : uiText("Повторить сейчас", "Retry now")}</Button></div> : null}
+          {uploadResult.requires_confirmation && uploadResult.candidate ? <CollapsibleSection title={uiText("Проверьте данные", "Review recognized data")} summary={<Badge>{uiText("нужно подтвердить", "confirm")}</Badge>} defaultOpen><ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /></CollapsibleSection> : null}
+          {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100">{uploadResult.auto_matched ? uiText("Тренировка автоматически отмечена в плане.", "The workout was marked in your plan automatically.") : uiText("Тренировка отмечена в плане.", "The workout was marked in your plan.")}</div> : null}
+          {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
+          <CollapsibleSection title={uiText("Технические детали", "Technical details")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("скрыто", "hidden")}</Badge>}>
+            <div className="grid gap-0 divide-y divide-zinc-800 rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
+              <ImportMeta label={uiText("Пакет", "Batch")} value={`#${uploadResult.id}`} />
+              <ImportMeta label={uiText("Способ", "Engine")} value={uploadResult.recognition_engine || "--"} />
+              <ImportMeta label={uiText("Попытки", "Attempts")} value={`${uploadResult.recognition_attempt_count || 0}/${uploadResult.recognition_max_attempts || "?"}`} />
+              {uploadResult.created_activity_id ? <ImportMeta label={uiText("Активность", "Activity")} value={`#${uploadResult.created_activity_id}`} /> : null}
+              {uploadResult.matched_workout_id ? <ImportMeta label={uiText("Тренировка плана", "Plan workout")} value={`#${uploadResult.matched_workout_id}`} /> : null}
+            </div>
+            <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400" translate="no">{uploadResult.recognition_message || "No recognition message"}</div>
+            {uploadResult.recognition_last_error && uploadResult.recognition_last_error !== uploadResult.recognition_message ? <div className="mt-2 rounded-md border border-red-400/20 bg-red-400/10 px-3 py-2 text-red-100" translate="no"><strong>{uiText("Причина:", "Reason:")}</strong> {uploadResult.recognition_last_error}</div> : null}
+          </CollapsibleSection>
+        </div> : <p className="p-4 text-xs text-zinc-500">{uiText("Загрузите скриншоты, и здесь появится текущий статус.", "Upload screenshots to see the current status here.")}</p>}
+      </Card>
     </div>
 
-    <div className="grid gap-4">
-      <Card>
-        <CardHeader><div><CardTitle>Last import result</CardTitle><p className="text-xs text-zinc-500">Recognition output and plan match state.</p></div>{uploadResult && <Badge className={importStatusClass(uploadResult)} translate="no">{importStatusLabel(uploadResult.status)}</Badge>}</CardHeader>
-        {uploadResult ? <div className="grid gap-3 p-4 text-xs">
-          <div className="grid gap-2 md:grid-cols-4">
-            <Stat label="batch" value={`#${uploadResult.id}`} />
-            <Stat label="activity" value={uploadResult.created_activity_id ? `#${uploadResult.created_activity_id}` : "--"} />
-            <Stat label="matched" value={uploadResult.matched_workout_id ? `#${uploadResult.matched_workout_id}` : "--"} />
-            <Stat label="engine" value={uploadResult.recognition_engine || "--"} />
-          </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400" translate="no">{uploadResult.recognition_message || "No recognition message"}</div>
-          {ACTIVE_IMPORT_STATUSES.has(uploadResult.status) ? <div className="rounded-md border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-sky-100" translate="no">Background recognition is active. Attempt {uploadResult.recognition_attempt_count || 0}/{uploadResult.recognition_max_attempts || "?"}{uploadResult.recognition_retry_at ? ` · retry at ${formatLocalDateTime(uploadResult.recognition_retry_at)}` : ""}</div> : null}
-          {uploadResult.requires_confirmation && uploadResult.candidate ? <CollapsibleSection title="Technical candidate review" summary={<Badge>confirm needed</Badge>} defaultOpen><ImportCandidateReview batch={uploadResult} busy={busy} onConfirm={confirmImport} onReject={rejectImport} onUpdate={updateImportCandidate} /></CollapsibleSection> : null}
-          {uploadResult.matched_workout_id ? <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{uploadResult.auto_matched ? "Auto-linked by import matching" : "Currently matched"} to planned workout #{uploadResult.matched_workout_id}.</div> : null}
-          {uploadResult.created_activity_id && !uploadResult.matched_workout_id ? <MatchReview candidates={matchCandidates} busy={busy} candidateError={candidateError} linkError={linkError} onLink={linkCandidate} /> : null}
-        </div> : <p className="p-4 text-xs text-zinc-500">Upload a screenshot batch to see recognition and matching feedback.</p>}
-      </Card>
+    <CollapsibleSection title={uiText("Добавить из CSV", "Add from CSV")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("другой способ", "another option")}</Badge>}>
+      <form onSubmit={uploadCsv} className="grid gap-3 p-4 text-xs">
+        <Field label={uiText("CSV файл", "CSV file")}><Input name="csv_file" type="file" accept=".csv,text/csv" required /></Field>
+        <Field label={uiText("Источник", "Source")}><Input name="source_app" defaultValue="csv" placeholder="garmin, strava, manual" /></Field>
+        <Button type="submit" disabled={busy}>{busy ? uiText("Добавляем...", "Adding...") : uiText("Добавить тренировки", "Add workouts")}</Button>
+      </form>
+      {csvResult ? <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-4 text-xs md:grid-cols-4">
+        <Stat label={uiText("добавлено", "added")} value={csvResult.created_activities} />
+        <Stat label={uiText("дубликаты", "duplicates")} value={csvResult.skipped_duplicates} />
+        <Stat label={uiText("в плане", "in plan")} value={csvResult.matched_workouts} />
+        <Stat label={uiText("ошибки", "failed")} value={csvResult.failed_rows} />
+        {csvResult.errors.length ? <p className="col-span-full rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-orange-100" translate="no">{csvResult.errors.slice(0, 3).join(" · ")}</p> : null}
+      </div> : null}
+    </CollapsibleSection>
 
-      <CollapsibleSection title="Import history" summary={<Badge>{imports.length} batches</Badge>}>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><p className="text-zinc-500">Recent recognition batches and confirmation queue.{activeImportCount ? ` ${activeImportCount} active.` : ""}</p><Button type="button" size="sm" variant="secondary" onClick={loadImports}>Refresh</Button></div>
+    <CollapsibleSection title={uiText("История загрузок", "Upload history")} summary={<Badge>{uploadCountLabel(imports.length)}</Badge>}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><p className="text-zinc-500">{uiText("Техническая история загрузок и очереди подтверждений.", "Technical upload history and confirmation queue.")}{activeImportCount ? ` ${uiText("В работе", "Active")}: ${activeImportCount}.` : ""}</p><Button type="button" size="sm" variant="secondary" onClick={loadImports}>{uiText("Обновить", "Refresh")}</Button></div>
         {importHistoryError ? <p className="pb-2 text-xs text-orange-200">{importHistoryError}</p> : null}
         <div className="grid gap-2 md:hidden">
           {imports.map((batch) => <div key={`import-mobile-${batch.id}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no">
@@ -1680,20 +1938,24 @@ function ImportsPage({ onChanged }: { onChanged: () => Promise<void> }) {
             <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500"><span>Activity {batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</span><span>Match {batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</span><span className="col-span-full">Engine {batch.recognition_engine || "--"}</span></div>
             <p className="mt-2 break-words text-zinc-500">{batch.recognition_message || "--"}</p>
             {ACTIVE_IMPORT_STATUSES.has(batch.status) ? <p className="mt-1 text-sky-200">Attempt {batch.recognition_attempt_count || 0}/{batch.recognition_max_attempts || "?"}{batch.recognition_retry_at ? ` · retry ${formatLocalDateTime(batch.recognition_retry_at)}` : ""}</p> : null}
-            {batch.requires_confirmation ? <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : null}
+            {batch.requires_confirmation ? <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>{uiText("Подтвердить", "Confirm")}</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>{uiText("Не использовать", "Reject")}</Button></div> : null}
+            {RETRYABLE_IMPORT_STATUSES.has(batch.status) ? <div className="mt-3"><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => retryImport(batch.id)}>{uiText("Повторить сейчас", "Retry now")}</Button></div> : null}
           </div>)}
-          {!imports.length && <p className="text-xs text-zinc-500">История импортов пока пуста.</p>}
+          {!imports.length && <p className="text-xs text-zinc-500">{uiText("Загрузок пока нет.", "No uploads yet.")}</p>}
         </div>
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Batch</th><th>Status</th><th>Activity</th><th>Match</th><th>Engine</th><th>Message</th><th>Action</th><th>Date</th></tr></thead>
-            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500" translate="no">#{batch.id}</td><td><Badge className={importStatusClass(batch)} translate="no">{importStatusLabel(batch.status)}</Badge>{ACTIVE_IMPORT_STATUSES.has(batch.status) ? <p className="mt-1 text-[10px] text-sky-200" translate="no">{batch.recognition_attempt_count || 0}/{batch.recognition_max_attempts || "?"}</p> : null}</td><td translate="no">{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td translate="no">{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td translate="no">{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] break-words text-zinc-500" translate="no">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>Confirm</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>Reject</Button></div> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500" translate="no">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
+            <tbody>{imports.map((batch) => <tr key={batch.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 font-mono text-zinc-500" translate="no">#{batch.id}</td><td><Badge className={importStatusClass(batch)} translate="no">{importStatusLabel(batch.status)}</Badge>{ACTIVE_IMPORT_STATUSES.has(batch.status) ? <p className="mt-1 text-[10px] text-sky-200" translate="no">{batch.recognition_attempt_count || 0}/{batch.recognition_max_attempts || "?"}</p> : null}</td><td translate="no">{batch.created_activity_id ? `#${batch.created_activity_id}` : "--"}</td><td translate="no">{batch.matched_workout_id ? `#${batch.matched_workout_id}` : "--"}</td><td translate="no">{batch.recognition_engine || "--"}</td><td className="max-w-[18rem] break-words text-zinc-500" translate="no">{batch.recognition_message || "--"}</td><td>{batch.requires_confirmation ? <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={busy} onClick={() => confirmImport(batch.id)}>{uiText("Подтвердить", "Confirm")}</Button><Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => rejectImport(batch.id)}>{uiText("Не использовать", "Reject")}</Button></div> : RETRYABLE_IMPORT_STATUSES.has(batch.status) ? <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => retryImport(batch.id)}>{uiText("Повторить", "Retry")}</Button> : <span className="text-zinc-600">--</span>}</td><td className="text-zinc-500" translate="no">{batch.created_at ? formatLocalDateTime(batch.created_at) : "--"}</td></tr>)}</tbody>
           </table>
-          {!imports.length && <p className="p-4 text-xs text-zinc-500">История импортов пока пуста.</p>}
+          {!imports.length && <p className="p-4 text-xs text-zinc-500">{uiText("Загрузок пока нет.", "No uploads yet.")}</p>}
         </div>
-      </CollapsibleSection>
-    </div>
+    </CollapsibleSection>
   </div>
+}
+
+function ImportMeta({ label, value }: { label: string; value: string }) {
+  return <div className="grid min-h-10 grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 py-2"><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{label}</span><strong className="min-w-0 break-words text-right font-medium text-white" translate="no">{value}</strong></div>
 }
 
 function ImportCandidateReview({ batch, busy, onConfirm, onReject, onUpdate }: { batch: ImportUploadResult; busy: boolean; onConfirm: (batchId: number) => Promise<void>; onReject: (batchId: number) => Promise<void>; onUpdate: (batchId: number, payload: Record<string, unknown>) => Promise<void> }) {
@@ -1732,35 +1994,41 @@ function ImportCandidateReview({ batch, busy, onConfirm, onReject, onUpdate }: {
   }
 
   return <div className="grid gap-3 rounded-md border border-orange-400/25 bg-orange-400/10 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">Review required before analytics</p><p className="mt-1 text-orange-100/70">LLM output passed validation but will not create an activity until confirmed.</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100" translate="no">{candidate.confidence || "unknown"} confidence</Badge></div>
-    <div className="grid gap-2 md:grid-cols-4"><Stat label="title" value={candidate.activity.title || "--"} /><Stat label="distance" value={candidate.activity.distance_km ? `${candidate.activity.distance_km} ${kmUnit()}` : "--"} /><Stat label="duration" value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label="pace" value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
-    {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70" translate="no">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
-    {candidate.estimated_fields.length ? <p className="text-[11px] text-orange-100/70" translate="no">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-orange-50">{uiText("Проверьте данные тренировки", "Review workout details")}</p><p className="mt-1 text-orange-100/70">{uiText("Тренировка появится в истории после подтверждения.", "The workout will appear in your history after confirmation.")}</p></div><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("нужно проверить", "review needed")}</Badge></div>
+    <div className="grid gap-2 md:grid-cols-4"><Stat label={uiText("название", "title")} value={candidate.activity.title || "--"} /><Stat label={uiText("дистанция", "distance")} value={candidate.activity.distance_km ? `${candidate.activity.distance_km} ${kmUnit()}` : "--"} /><Stat label={uiText("время", "duration")} value={candidate.activity.duration_seconds ? formatDuration(candidate.activity.duration_seconds) : "--"} /><Stat label={uiText("темп", "pace")} value={candidate.activity.average_pace_seconds_per_km ? formatPace(candidate.activity.average_pace_seconds_per_km) : "--"} /></div>
     <form onSubmit={submitCorrection} className="grid gap-2 rounded-md border border-orange-400/20 bg-zinc-950/70 p-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-orange-100/70">Manual corrections before confirm</p>
+      <p className="text-xs font-semibold text-orange-100/80">{uiText("Исправить перед подтверждением", "Correct before confirming")}</p>
       <div className="grid gap-2 md:grid-cols-3">
-        <Field label="Title"><Input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></Field>
-        <Field label="Started at"><Input value={draft.started_at} onChange={(event) => setDraft((current) => ({ ...current, started_at: event.target.value }))} placeholder="2026-06-08T07:00:00+00:00" /></Field>
-        <Field label="Distance km"><Input type="number" step="0.01" value={draft.distance_km} onChange={(event) => setDraft((current) => ({ ...current, distance_km: event.target.value }))} /></Field>
-        <Field label="Duration sec"><Input type="number" step="1" value={draft.duration_seconds} onChange={(event) => setDraft((current) => ({ ...current, duration_seconds: event.target.value }))} /></Field>
-        <Field label="Pace sec/km"><Input type="number" step="1" value={draft.average_pace_seconds_per_km} onChange={(event) => setDraft((current) => ({ ...current, average_pace_seconds_per_km: event.target.value }))} /></Field>
-        <Field label="Avg HR bpm"><Input type="number" step="1" value={draft.average_heart_rate_bpm} onChange={(event) => setDraft((current) => ({ ...current, average_heart_rate_bpm: event.target.value }))} /></Field>
+        <Field label={uiText("Название", "Title")}><Input value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></Field>
+        <Field label={uiText("Когда началась", "Start time")}><Input value={draft.started_at} onChange={(event) => setDraft((current) => ({ ...current, started_at: event.target.value }))} placeholder="2026-06-08T07:00:00+00:00" /></Field>
+        <Field label={uiText("Дистанция, км", "Distance, km")}><Input type="number" step="0.01" value={draft.distance_km} onChange={(event) => setDraft((current) => ({ ...current, distance_km: event.target.value }))} /></Field>
+        <Field label={uiText("Время, сек", "Duration, sec")}><Input type="number" step="1" value={draft.duration_seconds} onChange={(event) => setDraft((current) => ({ ...current, duration_seconds: event.target.value }))} /></Field>
+        <Field label={uiText("Темп, сек/км", "Pace, sec/km")}><Input type="number" step="1" value={draft.average_pace_seconds_per_km} onChange={(event) => setDraft((current) => ({ ...current, average_pace_seconds_per_km: event.target.value }))} /></Field>
+        <Field label={uiText("Средний пульс", "Average heart rate")}><Input type="number" step="1" value={draft.average_heart_rate_bpm} onChange={(event) => setDraft((current) => ({ ...current, average_heart_rate_bpm: event.target.value }))} /></Field>
       </div>
-      <div><Button type="submit" size="sm" variant="secondary" disabled={busy}>Save corrections</Button></div>
+      <div><Button type="submit" size="sm" variant="secondary" disabled={busy}>{uiText("Сохранить правки", "Save corrections")}</Button></div>
     </form>
-    <div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={() => onConfirm(batch.id)}>Confirm and create activity</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onReject(batch.id)}>Reject candidate</Button></div>
+    <div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={() => onConfirm(batch.id)}>{uiText("Добавить тренировку", "Add workout")}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => onReject(batch.id)}>{uiText("Отменить", "Cancel")}</Button></div>
+    <CollapsibleSection title={uiText("Технические детали распознавания", "Recognition technical details")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{confidenceLabel(candidate.confidence || "low")}</Badge>}>
+      {candidate.uncertainty_notes.length ? <p className="text-[11px] text-orange-100/70" translate="no">uncertainty: {candidate.uncertainty_notes.slice(0, 3).join(" · ")}</p> : null}
+      {candidate.estimated_fields.length ? <p className="mt-1 text-[11px] text-orange-100/70" translate="no">estimated: {candidate.estimated_fields.slice(0, 4).join(" · ")}</p> : null}
+      <p className="mt-1 text-[11px] text-zinc-500" translate="no">segments {candidate.segments_count} · splits {candidate.split_blocks_count} · blocks {candidate.workout_blocks_count}</p>
+    </CollapsibleSection>
   </div>
 }
 
 function MatchReview({ candidates, busy, candidateError, linkError, onLink }: { candidates: PlanWorkoutMatchCandidate[]; busy: boolean; candidateError: string; linkError: string; onLink: (candidate: PlanWorkoutMatchCandidate) => Promise<void> }) {
   if (candidateError) return <div className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{candidateError}</div>
-  if (!candidates.length) return <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">No confident active-plan candidates. Open Plans to match manually later.</div>
+  if (!candidates.length) return <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">{uiText("Не нашли подходящую тренировку в активном плане. Позже ее можно отметить вручную в разделе «План».", "No matching workout was found in the active plan. You can mark it manually in Plan later.")}</div>
   return <div className="grid gap-2">
-    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Plan match candidates</p>
+    <p className="text-xs font-semibold text-white">{uiText("Отметить тренировку в плане", "Mark a planned workout")}</p>
     {linkError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{linkError}</p> : null}
     {candidates.slice(0, 4).map((candidate) => <div key={candidate.workout.id} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs md:grid-cols-[1fr_auto] md:items-center">
-      <div translate="no"><p className="font-medium text-white">{candidate.workout.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.workout.id}</span></p><p className="mt-1 text-zinc-500">Week {candidate.workout.week_index} · {candidate.workout.scheduled_date ? formatLocalDate(candidate.workout.scheduled_date) : noDateLabel()} · {candidate.workout.distance_km?.toFixed(1) || "--"} {kmUnit()}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" disabled={busy} aria-label={`Link uploaded activity to planned workout ${candidate.workout.title} #${candidate.workout.id}`} onClick={() => onLink(candidate)}>Link</Button></div>
+      <div><p className="font-medium text-white">{coachWorkoutTitle(candidate.workout)}</p><p className="mt-1 text-zinc-500">{candidate.workout.scheduled_date ? formatLocalDate(candidate.workout.scheduled_date) : noDateLabel()} · {workoutTypeLabel(candidate.workout.workout_type)} · {formatWorkoutTarget(candidate.workout)}</p></div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end"><Button size="sm" disabled={busy} aria-label={uiText("Отметить эту тренировку выполненной в плане", "Mark this planned workout as completed")} onClick={() => onLink(candidate)}>{uiText("Отметить в плане", "Mark in plan")}</Button></div>
+      <CollapsibleSection title={uiText("Почему предложили", "Why suggested")} className="md:col-span-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}>
+        <p className="text-[11px] text-zinc-500" translate="no">{candidate.reasons.slice(0, 3).join(" · ") || candidate.confidence}</p>
+      </CollapsibleSection>
     </div>)}
   </div>
 }
@@ -1924,7 +2192,7 @@ function CalendarPage({ onImport, onPlans }: { onImport: () => void; onPlans: ()
           <Input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
           <Button type="submit" disabled={loading}>{loading ? "Loading..." : "Load range"}</Button>
         </form>
-        <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => applyQuickRange("week")}>This week</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("next")}>Next week</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("month")}>This month</Button><Button size="sm" variant="ghost" onClick={onImport}>+ Import</Button><Button size="sm" variant="ghost" onClick={onPlans}>Open plans</Button></div>
+        <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => applyQuickRange("week")}>{uiText("Эта неделя", "This week")}</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("next")}>{uiText("Следующая неделя", "Next week")}</Button><Button size="sm" variant="secondary" onClick={() => applyQuickRange("month")}>{uiText("Этот месяц", "This month")}</Button><Button size="sm" variant="ghost" onClick={onImport}>{uiText("Добавить тренировку", "Add workout")}</Button><Button size="sm" variant="ghost" onClick={onPlans}>{uiText("Открыть план", "Open plan")}</Button></div>
         {error ? <p className="mt-3 rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs text-orange-100">{error}</p> : null}
       </Card>
       <Card className="grid grid-cols-4 divide-x divide-zinc-800 p-3 max-md:grid-cols-2 max-md:divide-x-0 max-md:divide-y">
@@ -2051,12 +2319,12 @@ function TrendChart({ title, series, formatter, lowerIsBetter = false }: { title
   const max = Math.max(1, ...values)
   const min = Math.max(1, Math.min(...values, max))
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3">
-    <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-white">{title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{series?.granularity || "week"}</Badge></div>
+    <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-white">{title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{trendGranularityLabel(series?.granularity)}</Badge></div>
     <div className="mt-3 grid gap-2">{points.length ? points.slice(-10).map((point) => {
       const numericValue = typeof point.value === "number" && Number.isFinite(point.value) ? point.value : 0
       const width = lowerIsBetter && numericValue > 0 ? min / numericValue * 100 : numericValue / max * 100
       return <div key={`${title}-${point.period_label}`} className="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-[11px]"><span className="truncate text-zinc-500">{point.period_label}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(4, width)}%` }} /></div><strong className="text-right text-zinc-300">{formatter(point.value)}</strong></div>
-    }) : <p className="text-xs text-zinc-500">Нет точек для выбранного периода.</p>}</div>
+    }) : <p className="text-xs text-zinc-500">{uiText("Нет точек для выбранного периода.", "No points for the selected period.")}</p>}</div>
   </div>
 }
 
@@ -2113,45 +2381,54 @@ function Analytics({ analytics }: { analytics: AnalyticsSummary | null }) {
   return <div className="grid gap-4">
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Analytics Overview</p><h2 className="mt-2 text-lg font-semibold text-white">Training signal center</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">Периодная аналитика: объем, темп, пульс, adherence, best efforts и VO2max/VDOT estimate с источником.</p></div>
-        <div className="flex flex-wrap gap-2"><Badge translate="no">{summary?.period.label || "loading"}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">loading</Badge> : null}</div>
+        <div><p className="text-xs font-semibold text-orange-200">{uiText("Прогресс", "Progress")}</p><h2 className="mt-2 text-lg font-semibold text-white">{uiText("Как меняется ваша форма", "How your fitness is changing")}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">{uiText("Сначала общий вывод, затем детали для тех, кто хочет смотреть глубже.", "A coaching summary first, then details if you want to look deeper.")}</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{periodPresetLabel(preset)}</Badge>{loading ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("обновляем", "updating")}</Badge> : null}</div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-[10rem_1fr_1fr]">
-        <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">7 дней</option><option value="28d">28 дней</option><option value="90d">90 дней</option><option value="year">Год</option><option value="all">Все время</option><option value="custom">Custom</option></Select>
+        <Select value={preset} onChange={(event) => setPreset(event.target.value)}><option value="7d">{uiText("7 дней", "7 days")}</option><option value="28d">{uiText("28 дней", "28 days")}</option><option value="90d">{uiText("90 дней", "90 days")}</option><option value="year">{uiText("Год", "Year")}</option><option value="all">{uiText("Все время", "All time")}</option><option value="custom">{uiText("Свой период", "Custom")}</option></Select>
         <Input type="date" value={customFrom} disabled={preset !== "custom"} onChange={(event) => setCustomFrom(event.target.value)} />
         <Input type="date" value={customTo} disabled={preset !== "custom"} onChange={(event) => setCustomTo(event.target.value)} />
       </div>
-      {error ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => setReloadToken((current) => current + 1)}>Retry</Button></div> : null}
+      {error ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => setReloadToken((current) => current + 1)}>{uiText("Повторить", "Retry")}</Button></div> : null}
     </Card>
 
-    <div className="grid gap-3 md:grid-cols-4">
-      <MetricCard label="distance" value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix={kmUnit()} />
-      <MetricCard label="time" value={formatDuration(summary?.total_duration_seconds)} />
-      <MetricCard label="workouts" value={summary?.activity_count || 0} />
-      <MetricCard label="adherence" value={`${Math.round((summary?.adherence?.completion_rate || 0) * 100)}%`} hint="done workouts / planned workouts" explainer={<CalculationExplainer><p>Completion rate is calculated from active-plan workouts in the selected period. Missed and skipped workouts lower the value.</p></CalculationExplainer>} />
-      <MetricCard label="weighted pace" value={`${formatPace(summary?.weighted_average_pace_seconds_per_km)}${perKmUnit()}`} hint="total duration / total distance" explainer={<CalculationExplainer><p>Weighted pace uses total moving duration divided by total distance, so short outlier runs do not distort the average like a simple mean would.</p></CalculationExplainer>} />
-      <MetricCard label="avg HR" value={summary?.average_heart_rate_bpm || "--"} hint="duration-weighted" explainer={<CalculationExplainer><p>Average HR is weighted by activity duration. Longer runs contribute more than short sessions.</p></CalculationExplainer>} />
-      <MetricCard label="load" value={summary?.training_load ?? "--"} hint={summary?.load_method || "unavailable"} explainer={<CalculationExplainer><p>Load sums aerobic training stress when available. If devices do not provide stress values, the card stays unavailable instead of guessing.</p></CalculationExplainer>} />
-      <MetricCard label="VDOT / VO2max" value={vdot?.value ?? vo2?.value ?? "--"} hint={vdot ? `${vdot.confidence} · ${vdot.method}` : vo2 ? `${vo2.confidence} · ${vo2.method}` : "needs race/device data"} explainer={<CalculationExplainer><p>VDOT is derived from race-like best efforts. Manual or device VO2max is shown as fallback and keeps its own method and confidence.</p><p className="mt-2 text-zinc-500">Source: {calculationSourceReference(vdot || vo2)}</p></CalculationExplainer>} />
-    </div>
+    <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_right,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
+      <div className="grid gap-4 lg:grid-cols-[1fr_0.85fr] lg:items-end">
+        <div><p className="text-xs font-semibold text-orange-200">{uiText("Вывод тренера", "Coach summary")}</p><h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">{summary?.activity_count ? uiText("Регулярность важнее отдельных быстрых дней", "Consistency matters more than single fast days") : uiText("Добавьте первые тренировки", "Add your first workouts")}</h3><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{summary?.activity_count ? uiText(`За период: ${summary.activity_count} тренировок и ${Number(summary.total_distance_km || 0).toFixed(1)} ${kmUnit()}. Средний темп и выполнение плана смотрите как тренд, а не как оценку дня.`, `This period: ${summary.activity_count} workouts and ${Number(summary.total_distance_km || 0).toFixed(1)} ${kmUnit()}. Treat average pace and plan completion as trends, not a daily grade.`) : uiText("Добавьте несколько тренировок, и здесь появится понятный обзор прогресса.", "Add a few workouts to see a clear progress summary here.")}</p></div>
+        <div className="grid grid-cols-2 gap-2 text-center text-xs">
+          <Stat label={uiText("дистанция", "distance")} value={Number(summary?.total_distance_km || 0).toFixed(1)} suffix={kmUnit()} />
+          <Stat label={uiText("тренировки", "workouts")} value={summary?.activity_count || 0} />
+          <p className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-left leading-5 text-zinc-400">{uiText("Средний темп", "Average pace")}: <span className="text-white">{formatPace(summary?.weighted_average_pace_seconds_per_km)}{perKmUnit()}</span>. {uiText("План выполнен", "Plan completion")}: <span className="text-white">{Math.round((summary?.adherence?.completion_rate || 0) * 100)}%</span>.</p>
+        </div>
+      </div>
+    </Card>
 
-    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-      <Card><CardHeader><CardTitle>Monthly volume</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} {kmUnit()} total</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs" translate="no"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} {kmUnit()}</strong></div>) : <p className="p-4 text-xs text-zinc-500">Нет месячных данных.</p>}</div></Card>
-      <Card><CardHeader><CardTitle>VO2max / VDOT</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">source shown</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Estimated VDOT</p><p className="mt-1 text-2xl font-semibold text-white" translate="no">{vdot?.value ?? "--"}</p><p className="mt-1 text-zinc-500" translate={vdot ? "no" : undefined}>{vdot ? `${vdot.confidence} · ${vdot.method}` : "Нужен hard effort или race-like activity >= 3 км."}</p><p className="mt-1 text-[11px] text-zinc-600" translate={vdot ? "no" : undefined}>{vdot ? calculationSourceReference(vdot) : "source appears after an eligible effort"}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="text-zinc-500">Manual/device VO2max</p><p className="mt-1 text-2xl font-semibold text-white" translate="no">{vo2?.value ?? "--"}</p><p className="mt-1 text-zinc-500" translate={vo2 ? "no" : undefined}>{vo2 ? `${vo2.confidence} · ${vo2.method}` : "Можно добавить в Profile measurements."}</p><p className="mt-1 text-[11px] text-zinc-600" translate={vo2 ? "no" : undefined}>{vo2 ? calculationSourceReference(vo2) : "manual/device source appears after measurement"}</p></div></div></Card>
-    </div>
+    <CollapsibleSection title={uiText("Графики и подробности", "Charts and details")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("посмотреть глубже", "look deeper")}</Badge>}>
+      <div className="grid gap-4">
+        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <Card><CardHeader><CardTitle>{uiText("Объем по месяцам", "Monthly volume")}</CardTitle><Badge>{Number(summary?.total_distance_km || 0).toFixed(1)} {kmUnit()}</Badge></CardHeader><div className="space-y-3 p-4">{months.length ? months.map((month) => <div key={month.month} className="grid grid-cols-[110px_1fr_90px] items-center gap-3 text-xs" translate="no"><span className="text-zinc-400">{month.month}</span><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${Math.max(6, month.distance_km / maxMonth * 100)}%` }} /></div><strong>{month.distance_km.toFixed(1)} {kmUnit()}</strong></div>) : <p className="p-4 text-xs text-zinc-500">{uiText("Нет месячных данных.", "No monthly data yet.")}</p>}</div></Card>
+          <Card><CardHeader><CardTitle>{uiText("Пульс и время", "Heart rate and time")}</CardTitle><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("за период", "period")}</Badge></CardHeader><div className="grid gap-3 p-4 text-xs"><Stat label={uiText("время", "time")} value={formatDuration(summary?.total_duration_seconds)} /><Stat label={uiText("ср. пульс", "avg HR")} value={summary?.average_heart_rate_bpm || "--"} /><Stat label={uiText("пропущено", "missed")} value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
+        </div>
+        <div className="grid gap-3 xl:grid-cols-3">
+          <TrendChart title={uiText("Дистанция по неделям", "Weekly distance")} series={volumeTrend} formatter={(value) => `${Number(value || 0).toFixed(1)} ${kmUnit()}`} />
+          <TrendChart title={uiText("Темп", "Pace trend")} series={paceTrend} formatter={(value) => `${formatPace(value)}${perKmUnit()}`} lowerIsBetter />
+          <TrendChart title={uiText("Пульс", "Heart rate trend")} series={hrTrend} formatter={(value) => value ? `${Math.round(value)} ${uiText("уд/мин", "bpm")}` : "--"} />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <Card><CardHeader><CardTitle>{uiText("Лучшие отрезки", "Best efforts")}</CardTitle><Badge>{summary?.best_efforts.length || 0}</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]"><div className="font-semibold text-white" translate="no">{effort.target_distance_km} {kmUnit()}</div><div><p className="text-zinc-300" translate="no">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}{perKmUnit()}</p><p className="mt-1 text-zinc-500">{uiText("лучший результат за период", "best result in this period")}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{effort.started_at ? formatLocalDate(effort.started_at) : noDateLabel()}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">{uiText("Пока нет достаточно длинных пробежек для лучших усилий.", "No sufficiently long runs for best efforts yet.")}</p>}</div></Card>
+          <Card><CardHeader><CardTitle>{uiText("Подсказки", "Insights")}</CardTitle><Badge>{insights.length}</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insightCoachTitle(insight)}</p><Badge className={insight.severity === "warning" || insight.severity === "critical" ? signalClass(insight.severity) : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{signalStatusLabel(insight.severity)}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{insightCoachMessage(insight)}</p>{insight.evidence.length || insight.reasons.length ? <CollapsibleSection title={uiText("Детали расчета", "Calculation details")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{confidenceLabel(insight.confidence)}</Badge>}><p className="text-[11px] text-zinc-600" translate="no">{insight.title}: {insight.message}</p><p className="mt-1 text-[11px] text-zinc-600" translate="no">{insight.evidence.slice(0, 2).map((item) => `${String(item.metric || item.source || "signal")}=${String(item.value ?? item.method ?? item.source ?? "ok")}`).join(" · ")}</p>{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600" translate="no">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</CollapsibleSection> : null}</div>)}</div></Card>
+        </div>
+      </div>
+    </CollapsibleSection>
 
-    <div className="grid gap-3 xl:grid-cols-3">
-      <TrendChart title="Weekly volume" series={volumeTrend} formatter={(value) => `${Number(value || 0).toFixed(1)} ${kmUnit()}`} />
-      <TrendChart title="Pace trend" series={paceTrend} formatter={(value) => `${formatPace(value)}${perKmUnit()}`} lowerIsBetter />
-      <TrendChart title="HR trend" series={hrTrend} formatter={(value) => value ? `${Math.round(value)} bpm` : "--"} />
-    </div>
-
-    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-      <Card><CardHeader><CardTitle>Best efforts</CardTitle><Badge>{summary?.best_efforts.length || 0} efforts</Badge></CardHeader><div className="divide-y divide-zinc-800">{summary?.best_efforts.length ? summary.best_efforts.map((effort) => <div key={`${effort.target_distance_km}-${effort.activity_id}`} className="grid gap-2 px-4 py-3 text-xs md:grid-cols-[5rem_1fr_auto]" translate="no"><div className="font-semibold text-white">{effort.target_distance_km} {kmUnit()}</div><div><p className="text-zinc-300">{formatDuration(effort.duration_seconds)} · {formatPace(effort.pace_seconds_per_km)}{perKmUnit()}</p><p className="mt-1 text-zinc-500">{effort.title} · {effort.source} · {effort.confidence}</p>{effort.estimated_vdot ? <p className="mt-1 text-[11px] text-zinc-600">VDOT: {calculationMetadata(effort.estimated_vdot)}</p> : null}</div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT {effort.estimated_vdot?.value ?? "--"}</Badge></div>) : <p className="p-4 text-xs text-zinc-500">Нужны активности с достаточной дистанцией.</p>}</div></Card>
-      <Card><CardHeader><CardTitle>Insights</CardTitle><Badge>{insights.length} notes</Badge></CardHeader><div className="grid gap-2 p-4">{insights.map((insight) => <div key={insight.title} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">{insight.title}</p><div className="flex gap-1.5"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{insight.confidence}</Badge><Badge className={insight.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{insight.severity}</Badge></div></div><p className="mt-1 leading-5 text-zinc-400">{insight.message}</p>{insight.evidence.length ? <p className="mt-1 text-[11px] text-zinc-600">evidence: {insight.evidence.slice(0, 2).map((item) => `${String(item.metric || item.source || "signal")}=${String(item.value ?? item.method ?? item.source ?? "ok")}`).join(" · ")}</p> : null}{insight.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{insight.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div></Card>
-    </div>
-
-    <Card className="p-4"><div className="grid gap-3 text-xs md:grid-cols-3"><Stat label="training days" value={summary?.consistency.training_days || 0} /><Stat label="days / week" value={summary?.consistency.training_days_per_week || 0} /><Stat label="missed planned" value={summary?.consistency.missed_planned_sessions || 0} /></div></Card>
+    <CollapsibleSection title={uiText("Продвинутые показатели", "Advanced metrics")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">VDOT / VO2max</Badge>}>
+      <div className="grid gap-3 text-xs md:grid-cols-3">
+        <Stat label="VDOT" value={vdot?.value ?? "--"} />
+        <Stat label="VO2max" value={vo2?.value ?? "--"} />
+        <Stat label="load" value={summary?.training_load ?? "--"} />
+      </div>
+      <p className="mt-3 text-[11px] text-zinc-500" translate="no">{vdot ? calculationMetadata(vdot) : vo2 ? calculationMetadata(vo2) : summary?.load_method || "technical estimates appear after enough data"}</p>
+    </CollapsibleSection>
   </div>
 }
 
@@ -2922,7 +3199,7 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
   const [zoneError, setZoneError] = useState("")
   const [savingZones, setSavingZones] = useState(false)
 
-  if (!profile) return <Card className="p-4 text-sm text-zinc-400">Loading profile...</Card>
+  if (!profile) return <Card className="p-4 text-sm text-zinc-400">{uiText("Загружаем профиль...", "Loading profile...")}</Card>
 
   async function submitProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -3054,98 +3331,106 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
   const hrZoneFormKey = hrRows.map((row) => `${row.zone_key}:${row.label}:${row.lower_value ?? ""}:${row.upper_value ?? ""}`).join("|")
   const hasManualHrZones = Boolean(zones?.hr.some((zone) => zone.method === "manual"))
   const onboardingReady = Boolean(completeness && completeness.score >= ONBOARDING_READY_SCORE)
-  const zoneReadiness = completeness ? [
-    completeness.can_calculate_hr_zones ? "HR zones ready" : "HR zones need HRmax or birthdate",
-    completeness.can_calculate_hrr_zones ? "HRR zones ready" : "HRR zones need resting HR",
-    completeness.can_calculate_pace_zones ? "Pace zones ready" : "Pace zones need threshold pace",
-  ] : []
+  const zoneReadiness = profileZoneReadinessLabels(completeness)
 
   return <div className="grid gap-4">
     {onboardingMode ? <Card className="border-orange-400/30 bg-orange-400/10 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-100">First-run onboarding</p><h2 className="mt-1 text-lg font-semibold text-white">Complete athlete setup before planning</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-orange-100/80">Fill the highlighted physiology, training availability and threshold fields, then save. Runforfan will recalculate estimated zones immediately; manual overrides can be added from the zones section.</p></div>
-        <div className="flex flex-wrap gap-2"><Badge>{completenessScore}% complete</Badge><Button type="button" size="sm" variant="secondary" onClick={onDismissOnboarding}>Skip for now</Button></div>
+        <div><p className="text-[11px] font-semibold text-orange-100">{uiText("Первичная настройка", "First setup")}</p><h2 className="mt-1 text-lg font-semibold text-white">{uiText("Заполните данные для безопасного плана", "Complete setup before planning")}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-orange-100/80">{uiText("Дни тренировок, пульс, ограничения и пороговые значения помогают сделать план осторожнее и точнее.", "Training days, heart-rate inputs, constraints and thresholds make the plan safer and more precise.")}</p></div>
+        <div className="flex flex-wrap gap-2"><Badge>{completenessScore}%</Badge><Button type="button" size="sm" variant="secondary" onClick={onDismissOnboarding}>{uiText("Пропустить пока", "Skip for now")}</Button></div>
       </div>
       <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">Missing inputs</p><p className="mt-1 text-orange-100/80">{completeness?.missing.length ? completeness.missing.map(missingLabel).join(" · ") : "Required onboarding inputs are present."}</p></div>
-        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">Zone readiness</p><p className="mt-1 text-orange-100/80">{zoneReadiness.join(" · ") || "Loading zone readiness."}</p>{onboardingReady ? <p className="mt-1 text-orange-100">Ready: save/recalculate is complete.</p> : null}</div>
+        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">{uiText("Что добавить", "What to add")}</p><p className="mt-1 text-orange-100/80">{completeness?.missing.length ? completeness.missing.map(missingLabel).join(" · ") : uiText("Основные данные заполнены.", "Required setup inputs are present.")}</p></div>
+        <div className="rounded-md border border-orange-400/20 bg-black/20 p-3"><p className="font-semibold text-white">{uiText("Готовность зон", "Zone readiness")}</p><p className="mt-1 text-orange-100/80">{zoneReadiness.join(" · ") || uiText("Загружаем готовность зон.", "Loading zone readiness.")}</p>{onboardingReady ? <p className="mt-1 text-orange-100">{uiText("Готово: можно строить план.", "Ready: planning can start.")}</p> : null}</div>
       </div>
     </Card> : null}
+    <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_right,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
+      <div className="grid gap-4 lg:grid-cols-[1fr_18rem] lg:items-end">
+        <div>
+          <p className="text-xs font-semibold text-orange-200">{uiText("Что нужно плану", "What the plan needs")}</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{completeness?.missing.length ? uiText("Заполните только данные, которые влияют на тренировки", "Fill only the details that affect training") : uiText("Профиль готов для спокойного планирования", "Profile is ready for calm planning")}</h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{completeness?.missing.length ? uiText(`Сейчас важнее всего: ${completeness.missing.slice(0, 3).map(missingLabel).join(", ")}. Остальное можно оставить на потом.`, `Most useful now: ${completeness.missing.slice(0, 3).map(missingLabel).join(", ")}. Everything else can wait.`) : uiText("Дни, пульс и ограничения достаточно заполнены. Меняйте профиль только когда меняется реальная ситуация.", "Training days, heart rate and limits are filled enough. Change the profile only when your real situation changes.")}</p>
+        </div>
+        <div className="rounded-xl border border-orange-400/20 bg-black/20 p-3 text-xs">
+          <p className="font-semibold text-orange-100">{uiText("Готовность", "Readiness")}: {completenessScore}%</p>
+          <div className="mt-2 h-2 rounded-full bg-zinc-900"><div className="h-full rounded-full bg-orange-400" style={{ width: `${completenessScore}%` }} /></div>
+          <p className="mt-2 leading-5 text-orange-100/75">{safetyMessageLabel(safety?.message)}</p>
+        </div>
+      </div>
+    </Card>
     <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
       <Card>
-        <CardHeader><div><CardTitle>Athlete profile</CardTitle><p className="text-xs text-zinc-500">Физиология, пороги и ограничения для расчетов.</p></div><Badge translate="no">{completeness?.confidence || "low"} confidence</Badge></CardHeader>
+        <CardHeader><div><CardTitle>{uiText("Профиль бегуна", "Runner profile")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Дни тренировок, пульс и ограничения, которые влияют на план.", "Training days, heart-rate inputs and constraints that affect the plan.")}</p></div><Badge>{confidenceLabel(completeness?.confidence || "low")}</Badge></CardHeader>
         <form key={profile.updated_at} onSubmit={submitProfile} className="grid gap-4 p-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/70 p-3">
+            <div><p className="font-semibold text-white">{uiText("Сохранить базовые данные", "Save essential setup")}</p><p className="mt-1 text-zinc-500">{uiText("Это обновит зоны и безопасные рекомендации.", "This updates zones and safer recommendations.")}</p></div>
+            <Button type="submit">{uiText("Сохранить профиль", "Save profile")}</Button>
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <CollapsibleSection title="Personal" defaultOpen>
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Personal</p>
+            <CollapsibleSection title={uiText("Когда вы можете бегать", "Training availability")} defaultOpen>
               <div className="grid gap-3">
-                <Field label="Дата рождения"><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
-                <Field label="Пол"><Select name="sex" defaultValue={profile.sex}><option value="unspecified">Не указан</option><option value="male">Мужской</option><option value="female">Женский</option><option value="other">Другой</option></Select></Field>
-                <Field label="Timezone"><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
-                <Field label="Locale"><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
+                <Field label={uiText("Дни тренировок", "Training days")}><Input name="preferred_weekdays" defaultValue={(profile.preferred_weekdays || []).join(",")} placeholder="1,3,6" /></Field>
+                <Field label={uiText("День длинной", "Long run day")}><Select name="long_run_weekday" defaultValue={profile.long_run_weekday || ""}><option value="">{uiText("авто", "Auto")}</option>{[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>{weekdayLabel(day)}</option>)}</Select></Field>
+                <Field label={uiText("Макс. длительность, мин", "Max duration, min")}><Input name="max_run_duration_minutes" type="number" min="15" max="600" step="5" defaultValue={profile.max_run_duration_minutes ?? ""} placeholder={uiText("необязательно", "optional")} /></Field>
               </div>
             </CollapsibleSection>
-            <CollapsibleSection title="Body">
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Body</p>
+            <CollapsibleSection title={uiText("Пульс и пороги", "Heart rate and thresholds")} defaultOpen>
               <div className="grid gap-3">
-                <Field label="Вес, кг"><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder="например 72.5" /></Field>
-                <Field label="Рост, см"><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
-                <Field label="Unit system"><Select name="unit_system" defaultValue={profile.unit_system || "metric"}><option value="metric">Metric</option><option value="imperial">Imperial</option></Select></Field>
+                <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Пульс покоя", "Resting heart rate")}><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field><Field label={uiText("Максимальный пульс", "Maximum heart rate")}><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field></div>
+                <Field label={uiText("Откуда максимальный пульс", "Maximum heart-rate source")}><Select name="max_hr_source" defaultValue={profile.max_hr_source || "manual"}><option value="manual">{uiText("Введен вручную", "Entered manually")}</option><option value="measured">{uiText("Измерен", "Measured")}</option><option value="tanaka_estimated">{uiText("Оценка по возрасту", "Age estimate")}</option></Select></Field>
+                <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Пороговый пульс", "Threshold heart rate")}><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field><Field label={uiText("Пороговый темп, сек/км", "Threshold pace, sec/km")}><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field></div>
+                <Field label={uiText("VO2max, если известен", "VO2max, if known")}><Input name="vo2max" type="number" min="10" max="100" step="0.1" defaultValue={profile.vo2max ?? ""} placeholder={uiText("необязательно", "optional")} /></Field>
               </div>
             </CollapsibleSection>
-            <CollapsibleSection title="Physiology" defaultOpen>
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Physiology</p>
-              <div className="grid gap-3">
-                <div className="grid gap-2 sm:grid-cols-2"><Field label="Пульс покоя"><Input name="resting_heart_rate_bpm" type="number" min="25" max="120" defaultValue={profile.resting_heart_rate_bpm ?? ""} /></Field><Field label="HRmax"><Input name="max_heart_rate_bpm" type="number" min="80" max="240" defaultValue={profile.max_heart_rate_bpm ?? ""} /></Field></div>
-                <Field label="Источник HRmax"><Select name="max_hr_source" defaultValue={profile.max_hr_source || "manual"}><option value="manual">Manual</option><option value="measured">Measured</option><option value="tanaka_estimated">Tanaka estimated</option></Select></Field>
-                <div className="grid gap-2 sm:grid-cols-2"><Field label="Пороговый пульс"><Input name="lactate_threshold_hr_bpm" type="number" min="60" max="230" defaultValue={profile.lactate_threshold_hr_bpm ?? ""} /></Field><Field label="Пороговый темп, сек/км"><Input name="lactate_threshold_pace_seconds_per_km" type="number" min="120" max="1200" defaultValue={profile.lactate_threshold_pace_seconds_per_km ?? ""} /></Field></div>
-                <Field label="VO2max"><Input name="vo2max" type="number" min="10" max="100" step="0.1" defaultValue={profile.vo2max ?? ""} placeholder="если известен" /></Field>
-              </div>
-            </CollapsibleSection>
-            <CollapsibleSection title="Preferences">
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Preferences</p>
-              <div className="grid gap-3">
-                <Field label="Training days"><Input name="preferred_weekdays" defaultValue={(profile.preferred_weekdays || []).join(",")} placeholder="ISO weekdays, e.g. 1,3,6" /></Field>
-                <Field label="Long run day"><Select name="long_run_weekday" defaultValue={profile.long_run_weekday || ""}><option value="">Auto</option>{WEEKDAY_LABELS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</Select></Field>
-                <Field label="Max duration, мин"><Input name="max_run_duration_minutes" type="number" min="15" max="600" step="5" defaultValue={profile.max_run_duration_minutes ?? ""} placeholder="optional" /></Field>
-              </div>
-            </CollapsibleSection>
-            <CollapsibleSection title="Safety" className="md:col-span-2">
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Safety</p>
+            <CollapsibleSection title={uiText("Восстановление и безопасность", "Recovery and safety")} className="md:col-span-2" defaultOpen={onboardingMode}>
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Травмы / ограничения"><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder="травмы, ограничения" /></Field>
-                <Field label="Conditions"><Input name="health_conditions" defaultValue={profile.health_conditions || ""} placeholder="астма, давление, прочее" /></Field>
-                <Field label="Recovery status"><Select name="recovery_status" defaultValue={profile.recovery_status || "normal"}><option value="fresh">Fresh</option><option value="normal">Normal</option><option value="tired">Tired</option><option value="strained">Strained</option><option value="injured">Injured</option><option value="unknown">Unknown</option></Select></Field>
-                <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> conservative mode</label>
+                <Field label={uiText("Травмы / ограничения", "Injuries / limits")}><Input name="injury_notes" defaultValue={profile.injury_notes || ""} placeholder={uiText("травмы, ограничения", "injuries, limitations")} /></Field>
+                <Field label={uiText("Медицинские особенности", "Health notes")}><Input name="health_conditions" defaultValue={profile.health_conditions || ""} placeholder={uiText("астма, давление, прочее", "asthma, blood pressure, other")} /></Field>
+                <Field label={uiText("Восстановление сейчас", "Current recovery")}><Select name="recovery_status" defaultValue={profile.recovery_status || "normal"}><option value="fresh">{uiText("свежо", "Fresh")}</option><option value="normal">{uiText("нормально", "Normal")}</option><option value="tired">{uiText("усталость", "Tired")}</option><option value="strained">{uiText("перегруз", "Strained")}</option><option value="injured">{uiText("травма", "Injured")}</option><option value="unknown">{uiText("не знаю", "Unknown")}</option></Select></Field>
+                <label className="flex h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-zinc-400"><input name="conservative_mode" type="checkbox" defaultChecked={profile.conservative_mode} /> {uiText("делать план осторожнее", "keep the plan conservative")}</label>
+              </div>
+            </CollapsibleSection>
+            <CollapsibleSection title={uiText("Личные данные", "Personal details")}>
+              <div className="grid gap-3">
+                <Field label={uiText("Дата рождения", "Date of birth")}><Input name="date_of_birth" type="date" defaultValue={profile.date_of_birth || ""} /></Field>
+                <Field label={uiText("Пол", "Sex")}><Select name="sex" defaultValue={profile.sex}><option value="unspecified">{uiText("не указан", "Not specified")}</option><option value="male">{uiText("мужской", "Male")}</option><option value="female">{uiText("женский", "Female")}</option><option value="other">{uiText("другой", "Other")}</option></Select></Field>
+                <Field label={uiText("Часовой пояс", "Timezone")}><Input name="timezone" defaultValue={profile.timezone || ""} placeholder="Europe/Moscow" /></Field>
+                <Field label={uiText("Язык данных", "Data locale")}><Input name="locale" defaultValue={profile.locale || ""} placeholder="ru-RU" /></Field>
+              </div>
+            </CollapsibleSection>
+            <CollapsibleSection title={uiText("Тело и единицы", "Body and units")}>
+              <div className="grid gap-3">
+                <Field label={uiText("Вес, кг", "Weight, kg")}><Input name="weight_kg" type="number" min="25" max="250" step="0.1" defaultValue={profile.weight_kg ?? ""} placeholder={uiText("например 72.5", "for example 72.5")} /></Field>
+                <Field label={uiText("Рост, см", "Height, cm")}><Input name="height_cm" type="number" min="80" max="260" step="0.1" defaultValue={profile.height_cm ?? ""} /></Field>
+                <Field label={uiText("Единицы", "Units")}><Select name="unit_system" defaultValue={profile.unit_system || "metric"}><option value="metric">{uiText("метрические", "Metric")}</option><option value="imperial">{uiText("имперские", "Imperial")}</option></Select></Field>
               </div>
             </CollapsibleSection>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><Button type="submit">Save profile</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">days {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">long {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)} translate="no">{profile.recovery_status || "normal"}</Badge></div>
+          <div className="flex flex-wrap items-center gap-2"><Button type="submit">{uiText("Сохранить профиль", "Save profile")}</Button><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("дни", "days")} {weekdayListLabel(profile.preferred_weekdays)}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("длинная", "long")} {weekdayLabel(profile.long_run_weekday)}</Badge><Badge className={signalClass(profile.recovery_status)}>{signalStatusLabel(profile.recovery_status)}</Badge></div>
         </form>
       </Card>
 
       <div className="grid gap-4">
         <Card className="p-4">
-          <div className="flex items-center justify-between"><p className="text-sm font-semibold text-white">Completeness</p><Badge>{completenessScore}%</Badge></div>
+          <div className="flex items-center justify-between"><p className="text-sm font-semibold text-white">{uiText("Готовность профиля", "Profile readiness")}</p><Badge>{completenessScore}%</Badge></div>
           <div className="mt-3 h-2 rounded bg-zinc-900"><div className="h-full rounded bg-orange-400" style={{ width: `${completenessScore}%` }} /></div>
           <div className="mt-3 grid gap-1 text-xs text-zinc-400">
-            <span>HR zones: {completeness?.can_calculate_hr_zones ? "ready" : "missing data"}</span>
-            <span>HRR zones: {completeness?.can_calculate_hrr_zones ? "ready" : "needs resting HR"}</span>
-            <span>Pace zones: {completeness?.can_calculate_pace_zones ? "ready" : "needs threshold pace"}</span>
+            {zoneReadiness.map((item) => <span key={item}>{item}</span>)}
           </div>
           {completeness?.missing.length ? <div className="mt-3 flex flex-wrap gap-1">{completeness.missing.map((field) => <Badge key={field} className="border-zinc-700 bg-zinc-900 text-zinc-300">{missingLabel(field)}</Badge>)}</div> : null}
         </Card>
         <Card className="p-4">
-          <p className="text-sm font-semibold text-white">Safety</p>
-          <p className="mt-2 text-xs leading-5 text-zinc-400" translate="no">{safety?.message}</p>
-          {safety?.warnings.length ? <div className="mt-3 grid gap-2" translate="no">{safety.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{warning}</div>)}</div> : <p className="mt-3 text-xs text-zinc-500">Нет активных предупреждений.</p>}
+          <p className="text-sm font-semibold text-white">{uiText("Безопасность", "Safety")}</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">{safetyMessageLabel(safety?.message)}</p>
+          {safety?.warnings.length ? <div className="mt-3 grid gap-2">{safety.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{safetyWarningLabel(warning)}</div>)}</div> : <p className="mt-3 text-xs text-zinc-500">{uiText("Нет активных предупреждений.", "No active warnings.")}</p>}
         </Card>
       </div>
     </div>
 
+    <CollapsibleSection title={uiText("Зоны, измерения и точные настройки", "Zones, measurements and exact overrides")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("продвинуто", "advanced")}</Badge>}>
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
       <Card>
-        <CardHeader><div><CardTitle>Training zones</CardTitle><p className="text-xs text-zinc-500">Метод, источник и confidence показываются для каждой зоны.</p></div><Button size="sm" onClick={recalculateZones}>Recalculate</Button></CardHeader>
+        <CardHeader><div><CardTitle>{uiText("Тренировочные зоны", "Training zones")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Обычно их можно не трогать. Точные методы скрыты в деталях.", "Most runners can leave these alone. Exact methods are hidden in details.")}</p></div><Button size="sm" onClick={recalculateZones}>{uiText("Пересчитать", "Recalculate")}</Button></CardHeader>
         <div className="grid gap-4 p-4">
           <ZoneTable title="Heart rate" zones={zones?.hr || []} />
           <ZoneTable title="Pace" zones={zones?.pace || []} />
@@ -3187,17 +3472,18 @@ function ProfileZones({ profile, completeness, safety, zones, measurements, onbo
         </div>
       </Card>
     </div>
+    </CollapsibleSection>
   </div>
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="grid gap-1"><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{label}</span>{children}</label>
+  return <label className="grid gap-1"><span className="text-[11px] font-medium text-zinc-500">{label}</span>{children}</label>
 }
 
 function ZoneTable({ title, zones }: { title: string; zones: Zone[] }) {
   return <div className="min-w-0 rounded-md border border-zinc-800">
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2"><p className="text-xs font-semibold text-white">{title}</p><Badge>{zones.length} zones</Badge></div>
-    {zones.length ? <><div className="grid gap-2 p-3 md:hidden">{zones.map((zone) => <div key={`mobile-zone-${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{zone.label || zone.zone_key}</p><p className="font-mono text-[10px] text-zinc-600">{zone.zone_key}</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.confidence}</Badge></div><p className="mt-2 text-zinc-300">{formatZoneRange(zone)}</p><p className="mt-1 break-words text-[11px] text-zinc-600" translate="no">{zone.method} · {zone.source_reference}</p></div>)}</div><div className="hidden max-w-full overflow-x-auto md:block"><table className="w-full min-w-[520px] text-left text-xs">
+    {zones.length ? <><div className="grid gap-2 p-3 md:hidden">{zones.map((zone) => <div key={`mobile-zone-${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{zone.label || zone.zone_key}</p><p className="text-[11px] text-zinc-500">{zone.zone_key}</p></div></div><p className="mt-2 text-zinc-300">{formatZoneRange(zone)}</p><CollapsibleSection title={uiText("Метод", "Method")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.confidence}</Badge>}><p className="break-words text-[11px] text-zinc-600" translate="no">{zone.method} · {zone.source_reference}</p></CollapsibleSection></div>)}</div><div className="hidden max-w-full overflow-x-auto md:block"><table className="w-full min-w-[520px] text-left text-xs">
       <thead className="text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-3 py-2">Zone</th><th>Range</th><th>Method</th><th>Confidence</th></tr></thead>
       <tbody>{zones.map((zone) => <tr key={`${zone.method}-${zone.zone_key}-${zone.id || "calc"}`} className="border-t border-zinc-900 align-top"><td className="px-3 py-2 font-medium text-white">{zone.label || zone.zone_key}<div className="font-mono text-[10px] text-zinc-600">{zone.zone_key}</div></td><td>{formatZoneRange(zone)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{zone.method}</Badge><div className="mt-1 max-w-[16rem] text-[10px] text-zinc-600">{zone.source_reference}</div></td><td>{zone.confidence}</td></tr>)}</tbody>
     </table></div></> : <p className="p-3 text-xs text-zinc-500">Нет данных для расчета.</p>}
@@ -3224,9 +3510,9 @@ function planCurrentWeekLabel(plan: Plan) {
   const weekStart = startOfWeekISO()
   const weekEnd = addDays(weekStart, 6)
   const currentWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date >= weekStart && workout.scheduled_date <= weekEnd)
-  if (currentWorkout) return `неделя ${currentWorkout.week_index}`
+  if (currentWorkout) return `${uiText("неделя", "week")} ${currentWorkout.week_index}`
   const nextWorkout = plan.workouts.find((workout) => workout.scheduled_date && workout.scheduled_date > weekEnd)
-  return nextWorkout ? `следующая ${formatDate(nextWorkout.scheduled_date)}` : "--"
+  return nextWorkout ? `${uiText("следующая", "next")} ${formatDate(nextWorkout.scheduled_date)}` : "--"
 }
 
 function planStatusClass(status: string) {
@@ -3237,75 +3523,95 @@ function planStatusClass(status: string) {
 }
 
 function planStatusLabel(status: string) {
-  if (status === "active") return "активная"
-  if (status === "completed") return "завершена"
-  if (status === "archived") return "архив"
-  if (status === "draft") return "черновик"
+  if (status === "active") return uiText("активная", "active")
+  if (status === "completed") return uiText("завершена", "completed")
+  if (status === "archived") return uiText("архив", "archived")
+  if (status === "draft") return uiText("черновик", "draft")
   return status
 }
 
 function planGoalTypeLabel(goalType: string) {
-  if (goalType === "5k") return "5 км"
-  if (goalType === "10k") return "10 км"
-  if (goalType === "half_marathon") return "полумарафон"
-  if (goalType === "marathon") return "марафон"
-  if (goalType === "base_building") return "база"
-  if (goalType === "custom") return "своя цель"
+  if (goalType === "5k") return uiText("5 км", "5K")
+  if (goalType === "10k") return uiText("10 км", "10K")
+  if (goalType === "half_marathon") return uiText("полумарафон", "half marathon")
+  if (goalType === "marathon") return uiText("марафон", "marathon")
+  if (goalType === "base_building") return uiText("база", "base")
+  if (goalType === "custom") return uiText("своя цель", "custom goal")
   return goalType
 }
 
 function workoutTypeLabel(type?: string | null) {
-  if (type === "easy") return "легкий бег"
-  if (type === "recovery") return "восстановление"
-  if (type === "strides") return "легкий + ускорения"
-  if (type === "steady") return "ровная работа"
-  if (type === "interval") return "интервалы"
-  if (type === "tempo") return "темповая"
-  if (type === "threshold") return "пороговая"
-  if (type === "hill") return "горки"
-  if (type === "long") return "длинная"
-  if (type === "race_pace") return "темп старта"
+  if (type === "easy") return uiText("легкий бег", "easy run")
+  if (type === "recovery") return uiText("восстановление", "recovery")
+  if (type === "strides") return uiText("легкий + ускорения", "easy + strides")
+  if (type === "steady") return uiText("ровная работа", "steady")
+  if (type === "interval") return uiText("интервалы", "intervals")
+  if (type === "tempo") return uiText("темповая", "tempo")
+  if (type === "threshold") return uiText("пороговая", "threshold")
+  if (type === "hill") return uiText("горки", "hills")
+  if (type === "long") return uiText("длинная", "long run")
+  if (type === "race_pace") return uiText("темп старта", "race pace")
   if (type === "strength" || type === "ofp") return "ОФП"
-  if (type === "mobility" || type === "prehab") return "мобилити"
-  return type || "тренировка"
+  if (type === "mobility" || type === "prehab") return uiText("мобилити", "mobility")
+  return type || uiText("тренировка", "workout")
 }
 
 function workoutStatusLabel(status: string) {
-  if (status === "planned") return "запланирована"
-  if (status === "rescheduled") return "перенесена"
-  if (status === "done") return "сделана"
-  if (status === "missed") return "пропущена"
-  if (status === "skipped") return "отменена"
+  if (status === "planned") return uiText("запланирована", "planned")
+  if (status === "rescheduled") return uiText("перенесена", "rescheduled")
+  if (status === "done") return uiText("сделана", "done")
+  if (status === "missed") return uiText("пропущена", "missed")
+  if (status === "skipped") return uiText("отменена", "skipped")
   return status
 }
 
 function workoutIntensityLabel(intensity?: string | null) {
-  if (!intensity) return "по плану"
+  if (!intensity) return uiText("по плану", "planned")
   const lower = intensity.toLowerCase()
-  if (lower.includes("easy-long")) return "легко, долго"
-  if (lower.includes("easy")) return "легко"
-  if (lower.includes("recovery")) return "восстановительно"
-  if (lower.includes("steady")) return "ровно"
-  if (lower.includes("interval")) return "быстро с отдыхом"
-  if (lower.includes("tempo") || lower.includes("threshold")) return "контролируемо быстро"
-  if (lower.includes("race")) return "темп старта"
-  if (lower.includes("strides")) return "легко + ускорения"
-  return intensity
+  if (lower.includes("easy-long")) return uiText("легко, долго", "easy-long")
+  if (lower.includes("easy")) return uiText("легко", "easy")
+  if (lower.includes("recovery")) return uiText("восстановительно", "recovery")
+  if (lower.includes("steady")) return uiText("ровно", "steady")
+  if (lower.includes("interval")) return uiText("быстро с отдыхом", "fast with recovery")
+  if (lower.includes("tempo") || lower.includes("threshold")) return uiText("контролируемо быстро", "controlled fast")
+  if (lower.includes("race")) return uiText("темп старта", "race pace")
+  if (lower.includes("strides")) return uiText("легко + ускорения", "easy + strides")
+  return uiText("по самочувствию", "by feel")
 }
 
 function trainingLevelLabel(level: string) {
-  if (level === "beginner") return "начинаем осторожно"
-  if (level === "intermediate") return "средняя база"
-  if (level === "advanced") return "хорошая база"
-  if (level === "novice") return "мало истории"
-  return level || "по истории"
+  if (level === "beginner") return uiText("начинаем осторожно", "careful start")
+  if (level === "intermediate") return uiText("средняя база", "moderate base")
+  if (level === "advanced") return uiText("хорошая база", "strong base")
+  if (level === "novice") return uiText("мало истории", "limited history")
+  return level || uiText("по истории", "based on history")
+}
+
+function trendGranularityLabel(granularity?: string | null) {
+  if (granularity === "week") return uiText("неделя", "week")
+  if (granularity === "month") return uiText("месяц", "month")
+  if (granularity === "day") return uiText("день", "day")
+  return granularity || uiText("период", "period")
+}
+
+function insightCoachTitle(insight: AnalyticsInsight) {
+  if (insight.severity === "critical" || insight.severity === "warning") return uiText("Стоит проверить нагрузку", "Check your load")
+  return uiText("Наблюдение по прогрессу", "Progress note")
+}
+
+function insightCoachMessage(insight: AnalyticsInsight) {
+  const text = `${insight.title} ${insight.message} ${insight.reasons.join(" ")}`.toLowerCase()
+  if (text.includes("fatigue") || text.includes("устал")) return uiText("В последних данных есть признаки усталости. Следующую тяжелую работу лучше держать короче и спокойнее.", "Recent data suggests fatigue. Keep the next hard workout shorter and calmer.")
+  if (text.includes("hard") || text.includes("intensity") || text.includes("быстр")) return uiText("Быстрых работ может быть многовато. Легкие дни должны оставаться действительно легкими.", "There may be too many hard efforts. Easy days should stay truly easy.")
+  if (text.includes("volume") || text.includes("distance") || text.includes("объем") || text.includes("дистан")) return uiText("Объем меняется заметно. Лучше наращивать километры постепенно.", "Volume is changing noticeably. Build distance gradually.")
+  return uiText("Это расчетная подсказка по последним тренировкам. Используйте ее как повод проверить самочувствие, а не как жесткий приказ.", "This is a calculated note from recent training. Use it as a reason to check how you feel, not as a strict command.")
 }
 
 function confidenceLabel(confidence: string) {
-  if (confidence === "high") return "данных достаточно"
-  if (confidence === "medium") return "данных частично достаточно"
-  if (confidence === "low") return "данных мало"
-  return confidence || "оценка по доступной истории"
+  if (confidence === "high") return uiText("данных достаточно", "enough data")
+  if (confidence === "medium") return uiText("данных частично достаточно", "some data")
+  if (confidence === "low") return uiText("данных мало", "limited data")
+  return confidence || uiText("оценка по доступной истории", "based on available history")
 }
 
 function formatTargetTime(seconds?: number | null) {
@@ -3321,7 +3627,14 @@ function formatDateTime(value?: string | null) {
 }
 
 function planGoalLabel(plan: Plan) {
-  return `${planGoalTypeLabel(plan.goal_type)}${plan.race_distance_km ? ` · ${plan.race_distance_km.toFixed(1)} км` : ""}`
+  return `${planGoalTypeLabel(plan.goal_type)}${plan.race_distance_km ? ` · ${plan.race_distance_km.toFixed(1)} ${kmUnit()}` : ""}`
+}
+
+function displayPlanTitle(plan: Pick<Plan, "title" | "goal_type" | "race_distance_km"> | null | undefined) {
+  if (!plan) return uiText("Беговая программа", "Running program")
+  const title = plan.title?.trim()
+  if (!title || /\b(smoke|test|debug|completion)\b/i.test(title) || /\d{6,}/.test(title)) return `${planGoalTypeLabel(plan.goal_type)} ${uiText("программа", "program")}`
+  return title
 }
 
 function planCurrentWeekIndex(plan: Plan) {
@@ -3400,8 +3713,8 @@ function planReviewWarnings(plan: Plan) {
   const warnings: string[] = []
   const isLongGoal = (plan.race_distance_km || 0) >= 21 || plan.goal_type === "half_marathon" || plan.goal_type === "marathon"
   const isMarathon = (plan.race_distance_km || 0) >= 42 || plan.goal_type === "marathon"
-  if (isMarathon && plan.available_days_per_week < 3) warnings.push("Марафонский план на 2 беговых дня - это компромисс. Для полноценной подготовки лучше 3+ беговых дня.")
-  if (isLongGoal && planQualityWorkouts(plan).length === 0) warnings.push("В плане нет быстрых или темповых тренировок. Он получится слишком мягким и однообразным.")
+  if (isMarathon && plan.available_days_per_week < 3) warnings.push(uiText("Марафонский план на 2 беговых дня - это компромисс. Для полноценной подготовки лучше 3+ беговых дня.", "A marathon plan with 2 running days is a compromise. For full preparation, 3+ running days are better."))
+  if (isLongGoal && planQualityWorkouts(plan).length === 0) warnings.push(uiText("В плане нет быстрых или темповых тренировок. Он получится слишком мягким и однообразным.", "The plan has no fast or tempo workouts. It may be too soft and repetitive."))
   const weekIndexes = Array.from(new Set(plan.workouts.map((workout) => workout.week_index)))
   const weakLongWeek = weekIndexes.find((weekIndex) => {
     const runs = plan.workouts.filter((workout) => workout.week_index === weekIndex && !isSupportWorkoutType(workout.workout_type) && workout.distance_km)
@@ -3409,11 +3722,19 @@ function planReviewWarnings(plan: Plan) {
     const biggestOther = Math.max(...runs.filter((workout) => workout.workout_type !== "long").map((workout) => workout.distance_km || 0), 0)
     return longRun && biggestOther > (longRun.distance_km || 0) + 0.5
   })
-  if (weakLongWeek) warnings.push(`Неделя ${weakLongWeek}: длинная пробежка короче другой беговой тренировки. Для длинной цели это подозрительно.`)
+  if (weakLongWeek) warnings.push(uiText(`Неделя ${weakLongWeek}: длинная пробежка короче другой беговой тренировки. Для длинной цели это подозрительно.`, `Week ${weakLongWeek}: the long run is shorter than another run. For a long goal, this looks suspicious.`))
   return warnings
 }
 
 function plainPlanWarning(warning: string) {
+  if (isEnglishLanguage()) {
+    return warning
+      .replace(/Фактический объем заметно ниже плана/gi, "Actual volume is noticeably below plan")
+      .replace(/Неделя\s+(\d+)/gi, "Week $1")
+      .replace(/длинная пробежка/gi, "long run")
+      .replace(/быстрые тренировки/gi, "hard workouts")
+      .replace(/быстрых или темповых/gi, "fast or tempo")
+  }
   return warning
     .replace(/interval\/tempo\/race-pace/gi, "быстрых или темповых")
     .replace(/\bWeek\s+(\d+)/gi, "Неделя $1")
@@ -3422,11 +3743,11 @@ function plainPlanWarning(warning: string) {
 }
 
 const QUICK_PLAN_GOALS = [
-  { value: "5k", label: "5 км", distance: "5", title: "Программа на 5 км" },
-  { value: "10k", label: "10 км", distance: "10", title: "Программа на 10 км" },
-  { value: "half_marathon", label: "Полумарафон", distance: "21.1", title: "Программа на полумарафон" },
-  { value: "marathon", label: "Марафон", distance: "42.2", title: "Марафонская программа" },
-  { value: "base_building", label: "Просто база", distance: "10", title: "Базовая беговая программа" },
+  { value: "5k", label: "5 км", enLabel: "5K", distance: "5", title: "Программа на 5 км", enTitle: "5K program" },
+  { value: "10k", label: "10 км", enLabel: "10K", distance: "10", title: "Программа на 10 км", enTitle: "10K program" },
+  { value: "half_marathon", label: "Полумарафон", enLabel: "Half marathon", distance: "21.1", title: "Программа на полумарафон", enTitle: "Half marathon program" },
+  { value: "marathon", label: "Марафон", enLabel: "Marathon", distance: "42.2", title: "Марафонская программа", enTitle: "Marathon program" },
+  { value: "base_building", label: "Просто база", enLabel: "Just base", distance: "10", title: "Базовая беговая программа", enTitle: "Base running program" },
 ] as const
 
 const QUICK_PLAN_DAYS = [2, 3, 4, 5, 6]
@@ -3435,17 +3756,26 @@ function quickGoalDefaults(goal: string) {
   return QUICK_PLAN_GOALS.find((item) => item.value === goal) || QUICK_PLAN_GOALS[3]
 }
 
+function quickGoalLabel(goal: (typeof QUICK_PLAN_GOALS)[number]) {
+  return isEnglishLanguage() ? goal.enLabel : goal.label
+}
+
+function quickGoalTitle(goal: (typeof QUICK_PLAN_GOALS)[number]) {
+  return isEnglishLanguage() ? goal.enTitle : goal.title
+}
+
 function dayChoiceLabel(days: number) {
+  if (isEnglishLanguage()) return `${days} times per week`
   return days === 2 || days === 3 || days === 4 ? `${days} раза в неделю` : `${days} раз в неделю`
 }
 
 function plainRiskMessage(message: string) {
   const lower = message.toLowerCase()
-  if (lower.includes("injury") || lower.includes("pain")) return "Учтем боль или травму и сделаем план осторожнее."
-  if (lower.includes("volume") || lower.includes("load")) return "Объем будет расти аккуратно, без резких скачков."
-  if (lower.includes("long")) return "Длинные пробежки будут ограничены до безопасного уровня."
+  if (lower.includes("injury") || lower.includes("pain")) return uiText("Учтем боль или травму и сделаем план осторожнее.", "The plan will account for pain or injury and stay conservative.")
+  if (lower.includes("volume") || lower.includes("load")) return uiText("Объем будет расти аккуратно, без резких скачков.", "Volume will increase carefully without sharp jumps.")
+  if (lower.includes("long")) return uiText("Длинные пробежки будут ограничены до безопасного уровня.", "Long runs will be capped at a safe level.")
   if (/[а-яё]/i.test(message)) return plainPlanWarning(message)
-  return "План будет построен осторожнее из-за ограничений или нехватки данных."
+  return uiText("План будет построен осторожнее из-за ограничений или нехватки данных.", "The plan will be more conservative because of constraints or limited data.")
 }
 
 function workoutTargetMode(workout: PlanWorkout) {
@@ -3465,10 +3795,10 @@ function workoutBlocks(workout: PlanWorkout) {
       .map((block) => {
         const repeat = block.repeat_count > 1 ? `${block.repeat_count}x ` : ""
         const target = block.target_distance_km ? `${block.target_distance_km.toFixed(2)} ${kmUnit()}` : block.target_duration_seconds ? formatDurationMinutes(block.target_duration_seconds) : "target"
-        const pace = block.target_pace_min_seconds_per_km && block.target_pace_max_seconds_per_km ? ` @ ${formatPace(block.target_pace_min_seconds_per_km)}-${formatPace(block.target_pace_max_seconds_per_km)}${perKmUnit()}` : ""
-        const hr = block.target_hr_min_bpm && block.target_hr_max_bpm ? ` HR ${block.target_hr_min_bpm}-${block.target_hr_max_bpm}` : ""
-        const rpe = block.target_rpe_min !== null && block.target_rpe_max !== null ? ` RPE ${block.target_rpe_min}-${block.target_rpe_max}` : ""
-        return `${repeat}${block.block_type}: ${target}${pace}${hr}${rpe}`
+        const pace = block.target_pace_min_seconds_per_km && block.target_pace_max_seconds_per_km ? ` · ${uiText("темп", "pace")} ${formatPace(block.target_pace_min_seconds_per_km)}-${formatPace(block.target_pace_max_seconds_per_km)}${perKmUnit()}` : ""
+        const hr = block.target_hr_min_bpm && block.target_hr_max_bpm ? ` · ${uiText("пульс", "HR")} ${block.target_hr_min_bpm}-${block.target_hr_max_bpm}` : ""
+        const rpe = block.target_rpe_min !== null && block.target_rpe_max !== null ? ` · ${uiText("ощущение", "effort")} ${block.target_rpe_min}-${block.target_rpe_max}/10` : ""
+        return `${repeat}${workoutBlockTypeLabel(block.block_type)}: ${target}${pace}${hr}${rpe}`
       })
   }
   if (workout.workout_type === "strength" || workout.workout_type === "ofp") return ["Разминка", "Икры/стопы", "Одна нога", "Ягодицы/кор", "Заминка"]
@@ -3480,21 +3810,29 @@ function workoutBlocks(workout: PlanWorkout) {
   return ["Легкий непрерывный бег", "Расслабленная техника", "Ускорения по самочувствию"]
 }
 
+function workoutBlockTypeLabel(type: string) {
+  if (type === "warmup") return uiText("разминка", "warm-up")
+  if (type === "work") return uiText("основная часть", "main part")
+  if (type === "recovery") return uiText("легкое восстановление", "easy recovery")
+  if (type === "cooldown") return uiText("заминка", "cool-down")
+  return uiText("блок", "block")
+}
+
 function workoutPurpose(workout: PlanWorkout) {
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Сделать тело устойчивее к беговой нагрузке: стопы, икры, таз, ягодицы и кор."
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Снять зажатость и поддержать слабые места бегуна без лишней усталости."
-  if (workout.workout_type === "long") return "Развить выносливость и подготовить ноги к долгой работе."
-  if (workout.workout_type === "interval") return "Дать быстрый стимул, но оставить восстановление под контролем."
-  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return "Потренировать устойчивый темп без гонки на тренировке."
-  if (workout.workout_type === "recovery") return "Восстановить ноги и сохранить регулярность."
-  return "Набрать аэробный объем и поддержать стабильность."
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return uiText("Сделать тело устойчивее к беговой нагрузке: стопы, икры, таз, ягодицы и кор.", "Make the body more resilient for running load: feet, calves, hips, glutes and core.")
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return uiText("Снять зажатость и поддержать слабые места бегуна без лишней усталости.", "Loosen up and support weak spots without adding fatigue.")
+  if (workout.workout_type === "long") return uiText("Развить выносливость и подготовить ноги к долгой работе.", "Build endurance and prepare the legs for longer work.")
+  if (workout.workout_type === "interval") return uiText("Дать быстрый стимул, но оставить восстановление под контролем.", "Add a faster stimulus while keeping recovery controlled.")
+  if (["tempo", "threshold", "race_pace"].includes(workout.workout_type)) return uiText("Потренировать устойчивый темп без гонки на тренировке.", "Practice steady pace without racing the workout.")
+  if (workout.workout_type === "recovery") return uiText("Восстановить ноги и сохранить регулярность.", "Help the legs recover while keeping consistency.")
+  return uiText("Набрать аэробный объем и поддержать стабильность.", "Build aerobic volume and keep consistency.")
 }
 
 function workoutSafetyNote(workout: PlanWorkout) {
-  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return "Не делать до отказа и не добиваться сильной крепатуры."
-  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return "Легко и без боли: это должно улучшать готовность, а не утомлять."
-  if (["interval", "tempo", "threshold", "race_pace", "long"].includes(workout.workout_type)) return "Сократить или пропустить при боли, плохом сне, необычной усталости или странном пульсе."
-  return "Держать разговорный темп; сократить, если восстановление хуже обычного."
+  if (workout.workout_type === "strength" || workout.workout_type === "ofp") return uiText("Не делать до отказа и не добиваться сильной крепатуры.", "Do not train to failure or chase heavy soreness.")
+  if (workout.workout_type === "mobility" || workout.workout_type === "prehab") return uiText("Легко и без боли: это должно улучшать готовность, а не утомлять.", "Keep it easy and pain-free: it should improve readiness, not add fatigue.")
+  if (["interval", "tempo", "threshold", "race_pace", "long"].includes(workout.workout_type)) return uiText("Сократить или пропустить при боли, плохом сне, необычной усталости или странном пульсе.", "Shorten or skip if there is pain, poor sleep, unusual fatigue or odd heart rate.")
+  return uiText("Держать разговорный темп; сократить, если восстановление хуже обычного.", "Keep a conversational pace; shorten it if recovery feels worse than usual.")
 }
 
 function Planning() {
@@ -3503,6 +3841,7 @@ function Planning() {
   const [builderPreview, setBuilderPreview] = useState<PlanBuilderPreview | null>(null)
   const [builderPreviewError, setBuilderPreviewError] = useState("")
   const [previewingBuilder, setPreviewingBuilder] = useState(false)
+  const [creatingPlan, setCreatingPlan] = useState(false)
   const [planWeeks, setPlanWeeks] = useState<PlanWeekSummary[]>([])
   const [planWeeksPlanId, setPlanWeeksPlanId] = useState<number | null>(null)
   const [planWeeksError, setPlanWeeksError] = useState("")
@@ -3559,6 +3898,7 @@ function Planning() {
 
   async function createPlan(activatePlan = false) {
     if (!planBuilderForm.current) return
+    setCreatingPlan(true)
     setBuilderPreviewError("")
     try {
       const plan = await api.generatePlan(planBuilderPayload(planBuilderForm.current, activatePlan))
@@ -3567,7 +3907,9 @@ function Planning() {
       if (plan.status === "active") await loadRecommendations(plan.id)
     } catch (error) {
       console.error(error)
-      setBuilderPreviewError(activatePlan ? "Не удалось создать и активировать план" : "Не удалось создать draft-план")
+      setBuilderPreviewError(activatePlan ? uiText("Не удалось создать и активировать программу", "Failed to create and activate the plan") : uiText("Не удалось создать черновик программы", "Failed to create draft plan"))
+    } finally {
+      setCreatingPlan(false)
     }
   }
 
@@ -3579,7 +3921,7 @@ function Planning() {
       setBuilderPreview(await api.previewPlan(planBuilderPayload(planBuilderForm.current)))
     } catch (error) {
       console.error(error)
-      setBuilderPreviewError("Не удалось подготовить preview плана")
+      setBuilderPreviewError(uiText("Не удалось подготовить проверку программы", "Failed to prepare plan preview"))
     } finally {
       setPreviewingBuilder(false)
     }
@@ -3604,7 +3946,7 @@ function Planning() {
       await loadPlanVersions(updated.id)
     } catch (error) {
       console.error(error)
-      setPlanActionError(`Не удалось обновить план #${plan.id}`)
+      setPlanActionError(uiText("Не удалось обновить программу", "Could not update the plan"))
     } finally {
       setBusyPlan(null)
     }
@@ -3621,7 +3963,7 @@ function Planning() {
       await loadPlanVersions(updated.id)
     } catch (error) {
       console.error(error)
-      setPlanActionError(`Не удалось переименовать план #${plan.id}`)
+      setPlanActionError(uiText("Не удалось переименовать программу", "Could not rename the plan"))
     } finally {
       setBusyPlan(null)
     }
@@ -3635,14 +3977,14 @@ function Planning() {
       await loadPlans(duplicated.id)
     } catch (error) {
       console.error(error)
-      setPlanActionError(`Не удалось дублировать план #${plan.id}`)
+      setPlanActionError(uiText("Не удалось создать копию программы", "Could not duplicate the plan"))
     } finally {
       setBusyPlan(null)
     }
   }
 
   async function deleteSelectedPlan(plan: Plan) {
-    if (!window.confirm(`Удалить программу #${plan.id}? Это действие нельзя отменить.`)) return
+    if (!window.confirm(uiText("Удалить эту программу? Это действие нельзя отменить.", "Delete this plan? This cannot be undone."))) return
     setBusyPlan(plan.id)
     setPlanActionError("")
     try {
@@ -3650,7 +3992,7 @@ function Planning() {
       await loadPlans(null)
     } catch (error) {
       console.error(error)
-      setPlanActionError(plan.status === "active" ? "Активный план нельзя удалить: сначала архивируйте его" : `Не удалось удалить план #${plan.id}`)
+      setPlanActionError(plan.status === "active" ? uiText("Активную программу нельзя удалить: сначала архивируйте ее", "The active plan cannot be deleted: archive it first") : uiText("Не удалось удалить программу", "Could not delete the plan"))
     } finally {
       setBusyPlan(null)
     }
@@ -3737,7 +4079,7 @@ function Planning() {
       if (result) await refreshPlanDetail(result.id)
     } catch (error) {
       console.error(error)
-      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось привязать активность" }))
+      setCandidateErrors((current) => ({ ...current, [workout.id]: uiText("Не удалось отметить тренировку в плане", "Could not mark the workout in the plan") }))
     }
   }
 
@@ -3765,7 +4107,7 @@ function Planning() {
   async function saveTarget(workout: PlanWorkout) {
     const draft = targetDrafts[workout.id] || targetDraftFromWorkout(workout)
     if (!targetDraftChanged(workout, draft)) return
-    const saved = await patchWorkout(workout, targetPayload(draft), "Не удалось сохранить цель тренировки")
+    const saved = await patchWorkout(workout, targetPayload(draft), uiText("Не удалось сохранить цель тренировки", "Failed to save workout target"))
     if (saved) {
       setTargetDrafts((current) => {
         const next = { ...current }
@@ -3790,7 +4132,7 @@ function Planning() {
       if (result) await refreshPlanDetail(result.id)
     } catch (error) {
       console.error(error)
-      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось завершить тренировку вручную" }))
+      setCandidateErrors((current) => ({ ...current, [workout.id]: uiText("Не удалось отметить тренировку", "Failed to mark workout done") }))
     }
   }
 
@@ -3812,7 +4154,7 @@ function Planning() {
       if (result) await refreshPlanDetail(result.id)
     } catch (error) {
       console.error(error)
-      setCandidateErrors((current) => ({ ...current, [workout.id]: "Не удалось сохранить feedback" }))
+      setCandidateErrors((current) => ({ ...current, [workout.id]: uiText("Не удалось сохранить самочувствие", "Failed to save feedback") }))
     }
   }
 
@@ -3829,7 +4171,7 @@ function Planning() {
       if (recommendationsRequest.current === requestId) setRecommendations(nextRecommendations)
     } catch (error) {
       console.error(error)
-      if (recommendationsRequest.current === requestId) setRecommendationError("Не удалось загрузить coach recommendations")
+      if (recommendationsRequest.current === requestId) setRecommendationError(uiText("Не удалось загрузить рекомендации тренера", "Failed to load coach recommendations"))
     } finally {
       if (recommendationsRequest.current === requestId) setLoadingRecommendations(false)
     }
@@ -3861,7 +4203,7 @@ function Planning() {
       await loadRecommendationAudits(planId)
     } catch (error) {
       console.error(error)
-      setRecommendationActionError("Не удалось подготовить preview корректировок")
+      setRecommendationActionError(uiText("Не удалось подготовить проверку корректировок", "Failed to prepare adjustment preview"))
     } finally {
       setPreviewingRecommendations(false)
     }
@@ -3882,7 +4224,7 @@ function Planning() {
       await loadPlanVersions(applied.plan.id)
     } catch (error) {
       console.error(error)
-      setRecommendationActionError("Не удалось применить корректировки")
+      setRecommendationActionError(uiText("Не удалось применить корректировки", "Failed to apply adjustments"))
     } finally {
       setApplyingRecommendations(false)
     }
@@ -3922,80 +4264,37 @@ function Planning() {
   const goalDefaults = quickGoalDefaults(quickGoal)
   const visibleDetailWeeks = currentWeekIndex ? detailWeeks.filter((week) => week.week_index >= currentWeekIndex).slice(0, 4) : detailWeeks.slice(0, 4)
   const remainingDetailWeeks = detailWeeks.filter((week) => !visibleDetailWeeks.some((visible) => visible.week_index === week.week_index))
-  return <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <Card>
-      <CardHeader><div><CardTitle>Создать программу</CardTitle><p className="text-xs text-zinc-500">Мы берем твои последние пробежки, зоны и ограничения. Если данных мало, программа будет осторожнее.</p></div>{result && <Badge>#{result.id}</Badge>}</CardHeader>
-      <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
-        <div className="grid gap-2">
-          <p className="font-semibold text-white">К чему готовимся?</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {QUICK_PLAN_GOALS.map((goal) => <label key={goal.value} aria-label={goal.label} className={cn("cursor-pointer rounded-xl border px-3 py-3 transition", quickGoal === goal.value ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="goal_type" type="radio" value={goal.value} checked={quickGoal === goal.value} onChange={() => setQuickGoal(goal.value)} /><span className="text-sm font-semibold">{goal.label}</span></label>)}
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <p className="font-semibold text-white">Когда старт или сколько недель готовимся?</p>
-          <div className="grid gap-2 sm:grid-cols-2"><Field label="Дата старта"><Input name="target_date" type="date" /></Field><Field label="Если даты нет"><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder="например, 12 недель" /></Field></div>
-        </div>
-        <div className="grid gap-2">
-          <p className="font-semibold text-white">Сколько раз в неделю реально бегать?</p>
-          <div className="grid grid-cols-5 gap-2">
-            {QUICK_PLAN_DAYS.map((days) => <label key={days} aria-label={dayChoiceLabel(days)} className={cn("cursor-pointer rounded-xl border px-2 py-3 text-center transition", quickDays === days ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="available_days_per_week" type="radio" value={days} checked={quickDays === days} onChange={() => setQuickDays(days)} /><span className="text-base font-semibold">{days}</span></label>)}
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <p className="font-semibold text-white">Есть ограничения?</p>
-          <div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="injury" type="checkbox" /> травма/боль</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="no_hard_workouts" type="checkbox" /> пока без быстрых работ</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_strength" type="checkbox" defaultChecked /> ОФП</label><label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_mobility" type="checkbox" defaultChecked /> мобилити</label></div>
-        </div>
-        <CollapsibleSection title="Точные настройки (необязательно)" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">можно не трогать</Badge>}>
-          <div className="grid gap-3">
-            <div className="grid gap-2 sm:grid-cols-2"><Field label="Название"><Input key={`title-${quickGoal}`} name="title" defaultValue={goalDefaults.title} /></Field><Field label="Дистанция, км"><Input key={`distance-${quickGoal}`} name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue={goalDefaults.distance} /></Field></div>
-            <div className="grid gap-2 sm:grid-cols-2"><Field label="Целевое время, мин"><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder="необязательно" /></Field><Field label="Текущий объем, км/нед"><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder="если пусто, возьмем из истории" /></Field></div>
-            <Field label="Самая длинная недавняя пробежка, км"><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder="необязательно" /></Field>
-            <div className="grid gap-2 sm:grid-cols-2"><Field label="Недавний старт, км"><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder="необязательно" /></Field><Field label="Время недавнего старта, мин"><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder="необязательно" /></Field></div>
-            <div className="grid gap-2 sm:grid-cols-2"><Field label="Удобные дни"><Input name="preferred_weekdays" placeholder="1,3,6 если важно" /></Field><Field label="Лимит времени, мин/нед"><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder="необязательно" /></Field></div>
-            <div className="grid gap-2 sm:grid-cols-2"><Field label="Макс. длинная, км"><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder="необязательно" /></Field><Field label="Макс. длинная, мин"><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder="необязательно" /></Field></div>
-            <Field label="Покрытие"><Input name="terrain" placeholder="асфальт, трейл, дорожка" /></Field>
-            <div className="grid gap-2 sm:grid-cols-3"><Field label="ОФП в неделю"><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label="Мобилити в неделю"><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label="Оборудование"><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">Вес тела</option><option value="bands">Резинки</option><option value="dumbbells">Гантели</option><option value="gym">Зал</option></Select></Field></div>
-            <div className="grid gap-2 sm:grid-cols-3"><Field label="Приоритет"><Select name="priority" defaultValue="b"><option value="a">главный старт</option><option value="b">обычный старт</option><option value="c">тренировочный старт</option></Select></Field><Field label="Рост нагрузки"><Select name="aggressiveness" defaultValue="auto"><option value="auto">авто</option><option value="beginner">осторожнее</option><option value="intermediate">средне</option><option value="advanced">смелее, если история позволяет</option></Select></Field><Field label="Ориентир"><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">смешанный</option><option value="pace">темп</option><option value="hr">пульс</option><option value="rpe">ощущения</option></Select></Field></div>
-          </div>
-        </CollapsibleSection>
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Button type="submit" className="h-10 text-sm">Создать программу</Button><Button type="button" variant="secondary" disabled={previewingBuilder} onClick={previewBuilder}>{previewingBuilder ? "Проверяем..." : "Проверить перед созданием"}</Button></div>
-      </form>
-      {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
-      {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
-      <div className="border-t border-zinc-800 p-4">
-        <CollapsibleSection title="Мои программы" summary={<Badge>{plans.length}</Badge>}>
-          {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
-          <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
-        </CollapsibleSection>
+  return <div className="grid gap-4">
+    <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="text-xs font-semibold text-orange-200">{uiText("Моя программа", "My plan")}</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{result ? uiText("Следующий шаг уже в плане", "Your next step is already in the plan") : uiText("Сначала создайте программу", "Create a plan first")}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">{result ? uiText("Сначала смотрите ближайшую тренировку и текущую неделю. Создание другой программы ниже свернуто как вторичное действие.", "Start with the next workout and current week. Creating another plan is collapsed below as a secondary action.") : uiText("Ответьте на несколько вопросов, и программа появится здесь.", "Answer a few questions and the plan will appear here.")}</p></div>
+        {result ? <Badge className={planStatusClass(result.status)}>{planStatusLabel(result.status)}</Badge> : null}
+      </div>
+      <div className="mt-4">
+        {result ? <NextPlanWorkoutCard workout={nextWorkout} currentWeekIndex={currentWeekIndex} /> : <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-sm text-zinc-400">{uiText("Ниже открыт мастер создания программы.", "The plan builder below is open.")}</div>}
       </div>
     </Card>
+
     <Card>
-      <CardHeader><div><CardTitle>Моя программа</CardTitle><p className="text-xs text-zinc-500">Ближайшая тренировка, понятный обзор и недели плана без лишней диагностики.</p></div>{planMode ? <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{conservative ? "осторожный режим" : "обычный режим"}</Badge> : null}</CardHeader>
+      <CardHeader><div><CardTitle>{uiText("Детали программы", "Plan details")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Недели плана, отметки выполнения и дополнительные настройки.", "Plan weeks, completion actions and additional settings.")}</p></div>{planMode ? <Badge className={conservative ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : undefined}>{conservative ? uiText("осторожный режим", "conservative mode") : uiText("обычный режим", "standard mode")}</Badge> : null}</CardHeader>
       <div className="grid gap-4 p-4 text-sm text-zinc-400">
         {result ? <>
-          <NextPlanWorkoutCard workout={nextWorkout} currentWeekIndex={currentWeekIndex} />
           {planWarnings.length ? <div className="grid gap-2">{planWarnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{plainPlanWarning(warning)}</div>)}</div> : null}
           <PlanDetailHeader plan={result} currentWeekIndex={currentWeekIndex} />
           <div className="flex flex-wrap items-center gap-2">
-            {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Сделать активной</Button> : <Badge>активная программа</Badge>}
-            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">выполнено {Math.round((result.adherence?.completion_rate || 0) * 100)}%</Badge>
+            {result.status !== "active" ? <Button size="sm" onClick={() => activate(result.id)}>Сделать активной</Button> : <Badge>{uiText("активная программа", "active program")}</Badge>}
+            <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("выполнено", "done")} {Math.round((result.adherence?.completion_rate || 0) * 100)}%</Badge>
             <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{result.adherence?.completed_distance_km || 0}/{result.adherence?.planned_distance_km || 0} {kmUnit()}</Badge>
           </div>
           {result.adherence?.warnings?.length ? <div className="grid gap-2">{result.adherence.warnings.map((warning) => <div key={warning} className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{plainPlanWarning(warning)}</div>)}</div> : null}
-          <div className="grid grid-cols-3 gap-2 text-center text-xs">
-            <Stat label="недель" value={weekCount} />
-            <Stat label="тренировок" value={result.workouts.length} />
-            <Stat label="раз в неделю" value={result.available_days_per_week} />
-          </div>
           {planWeeksError ? <p className="rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planWeeksError}</p> : null}
           <div className="grid gap-3">{visibleDetailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={week.week_index === currentWeekIndex || week.workouts.some((workout) => workout.id === nextWorkout?.id)} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
-          {remainingDetailWeeks.length ? <CollapsibleSection title="Остальные недели" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingDetailWeeks.length}</Badge>}>
+          {remainingDetailWeeks.length ? <CollapsibleSection title={uiText("Остальные недели", "Other weeks")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingDetailWeeks.length}</Badge>}>
             <div className="grid gap-3">{remainingDetailWeeks.map((week) => <PlanWeek key={week.week_index} summary={week} defaultOpen={false} nextWorkoutId={nextWorkout?.id || null} candidatesByWorkout={candidatesByWorkout} candidateErrors={candidateErrors} feedbackDrafts={feedbackDrafts} completionDrafts={completionDrafts} targetDrafts={targetDrafts} rescheduleDrafts={rescheduleDrafts} loadingCandidates={loadingCandidates} onFindCandidates={loadCandidates} onLinkCandidate={linkCandidate} onUpdate={updateWorkout} onReschedule={rescheduleWorkout} onUnlinkActivity={unlinkWorkoutActivity} onRescheduleDraft={(workout, value) => setRescheduleDrafts((current) => ({ ...current, [workout.id]: value }))} onFeedbackDraft={updateFeedbackDraft} onCompletionDraft={updateCompletionDraft} onTargetDraft={updateTargetDraft} onSaveTarget={saveTarget} onCompleteWorkout={completeWorkoutManually} onSaveFeedback={saveFeedback} />)}</div>
           </CollapsibleSection> : null}
-          <CollapsibleSection title="Для продвинутых" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">детали</Badge>}>
+          <CollapsibleSection title={uiText("Для продвинутых", "Advanced")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}>
             <div className="grid gap-3">
-              <CollapsibleSection title="Объяснение плана"><p className="leading-6" translate="no">{result.explanation}</p></CollapsibleSection>
+              <CollapsibleSection title={uiText("Объяснение плана", "Plan explanation")}><p className="leading-6" translate="no">{result.explanation}</p></CollapsibleSection>
               <CoachRecommendations recommendations={visibleRecommendations} preview={recommendationPreview?.plan_id === result.id ? recommendationPreview : null} audits={recommendationAudits} error={recommendationError} actionError={recommendationActionError} loading={loadingRecommendations} previewing={previewingRecommendations} applying={applyingRecommendations} onRefresh={() => loadRecommendations(result.id)} onPreview={() => previewRecommendations(result.id)} onApply={() => applyRecommendations(result.id)} />
               <CollapsibleSection title="Графики и распределение" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">опционально</Badge>}>
                 <div className="grid gap-3"><PlanVolumeChart weeks={detailWeeks} /><PlanIntensitySplit split={intensitySplit} /></div>
@@ -4003,9 +4302,59 @@ function Planning() {
               <PlanVersions versions={planVersions} />
             </div>
           </CollapsibleSection>
-        </> : <p>Создайте программу слева, и здесь появятся ближайшая тренировка, недели и простые подсказки.</p>}
+        </> : <p>{uiText("Создайте программу, и здесь появятся ближайшая тренировка, недели и простые подсказки.", "Create a program, and the next workout, weeks and simple tips will appear here.")}</p>}
       </div>
     </Card>
+
+    <CollapsibleSection key={result ? "secondary-plan-builder" : "primary-plan-builder"} title={result ? uiText("Создать или выбрать другую программу", "Create or choose another plan") : uiText("Создать программу", "Create a plan")} summary={result ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("после текущего плана", "after current plan")}</Badge> : <Badge>{uiText("начать", "start")}</Badge>} defaultOpen={!result}>
+    <Card>
+      <CardHeader><div><CardTitle>{uiText("Создать программу", "Create a plan")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Мы берем последние пробежки, зоны и ограничения. Если данных мало, программа будет осторожнее.", "Runforfan uses recent runs, zones and constraints. If data is limited, the plan stays conservative.")}</p></div>{result && <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("вторично", "secondary")}</Badge>}</CardHeader>
+      <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">{uiText("К чему готовимся?", "What are you preparing for?")}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {QUICK_PLAN_GOALS.map((goal) => <label key={goal.value} aria-label={quickGoalLabel(goal)} className={cn("cursor-pointer rounded-xl border px-3 py-3 transition", quickGoal === goal.value ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="goal_type" type="radio" value={goal.value} checked={quickGoal === goal.value} onChange={() => setQuickGoal(goal.value)} /><span className="text-sm font-semibold">{quickGoalLabel(goal)}</span></label>)}
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">{uiText("Когда старт или сколько недель готовимся?", "When is the race, or how many weeks do you want?")}</p>
+          <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Дата старта", "Race date")}><Input name="target_date" type="date" /></Field><Field label={uiText("Если даты нет", "If no date")}><Input name="plan_length_weeks" type="number" min="4" max="24" step="1" placeholder={uiText("например, 12 недель", "for example, 12 weeks")} /></Field></div>
+        </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">{uiText("Сколько раз в неделю реально бегать?", "How many times per week can you really run?")}</p>
+          <div className="grid grid-cols-3 gap-2 min-[380px]:grid-cols-5">
+            {QUICK_PLAN_DAYS.map((days) => <label key={days} aria-label={dayChoiceLabel(days)} className={cn("cursor-pointer rounded-xl border px-2 py-3 text-center transition", quickDays === days ? "border-orange-400/60 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700")}><input className="sr-only" name="available_days_per_week" type="radio" value={days} checked={quickDays === days} onChange={() => setQuickDays(days)} /><span className="text-base font-semibold">{days}</span></label>)}
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <p className="font-semibold text-white">{uiText("Есть ограничения?", "Any limits?")}</p>
+          <div className="grid gap-2 sm:grid-cols-2"><label className="flex min-h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="injury" type="checkbox" /> {uiText("травма/боль", "injury/pain")}</label><label className="flex min-h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="no_hard_workouts" type="checkbox" /> {uiText("пока без быстрых работ", "no hard workouts for now")}</label><label className="flex min-h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_strength" type="checkbox" defaultChecked /> {uiText("ОФП", "strength")}</label><label className="flex min-h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-300"><input name="include_mobility" type="checkbox" defaultChecked /> {uiText("мобилити", "mobility")}</label></div>
+        </div>
+        <CollapsibleSection title={uiText("Точные настройки (необязательно)", "Exact settings (optional)")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("можно не трогать", "safe to skip")}</Badge>}>
+          <div className="grid gap-3">
+            <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Название", "Name")}><Input key={`title-${quickGoal}-${languageLocale()}`} name="title" defaultValue={quickGoalTitle(goalDefaults)} /></Field><Field label={uiText("Дистанция, км", "Distance, km")}><Input key={`distance-${quickGoal}`} name="race_distance_km" type="number" min="1" max="100" step="0.1" defaultValue={goalDefaults.distance} /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Целевое время, мин", "Target time, min")}><Input name="target_time_minutes" type="number" min="1" max="2880" step="1" placeholder={uiText("необязательно", "optional")} /></Field><Field label={uiText("Текущий объем, км/нед", "Current volume, km/week")}><Input name="current_weekly_distance_km" type="number" min="0" max="200" step="0.1" placeholder={uiText("если пусто, возьмем из истории", "if empty, use history")} /></Field></div>
+            <Field label={uiText("Самая длинная недавняя пробежка, км", "Longest recent run, km")}><Input name="longest_recent_run_km" type="number" min="0" max="100" step="0.1" placeholder={uiText("необязательно", "optional")} /></Field>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Недавний старт, км", "Recent race, km")}><Input name="recent_race_distance_km" type="number" min="1" max="100" step="0.1" placeholder={uiText("необязательно", "optional")} /></Field><Field label={uiText("Время недавнего старта, мин", "Recent race time, min")}><Input name="recent_race_time_minutes" type="number" min="1" max="2880" step="1" placeholder={uiText("необязательно", "optional")} /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Удобные дни", "Preferred days")}><Input name="preferred_weekdays" placeholder={uiText("1,3,6 если важно", "1,3,6 if important")} /></Field><Field label={uiText("Лимит времени, мин/нед", "Time budget, min/week")}><Input name="time_budget_minutes_per_week" type="number" min="30" max="5000" step="5" placeholder={uiText("необязательно", "optional")} /></Field></div>
+            <div className="grid gap-2 sm:grid-cols-2"><Field label={uiText("Макс. длинная, км", "Max long run, km")}><Input name="max_long_run_km" type="number" min="1" max="100" step="0.1" placeholder={uiText("необязательно", "optional")} /></Field><Field label={uiText("Макс. длинная, мин", "Max long run, min")}><Input name="max_long_run_duration_minutes" type="number" min="15" max="600" step="5" placeholder={uiText("необязательно", "optional")} /></Field></div>
+            <Field label={uiText("Покрытие", "Surface")}><Input name="terrain" placeholder={uiText("асфальт, трейл, дорожка", "road, trail, treadmill")} /></Field>
+            <div className="grid gap-2 sm:grid-cols-3"><Field label={uiText("ОФП в неделю", "Strength per week")}><Input name="strength_sessions_per_week" type="number" min="0" max="3" step="1" defaultValue="1" /></Field><Field label={uiText("Мобилити в неделю", "Mobility per week")}><Input name="mobility_sessions_per_week" type="number" min="0" max="4" step="1" defaultValue="1" /></Field><Field label={uiText("Оборудование", "Equipment")}><Select name="strength_equipment" defaultValue="bodyweight"><option value="bodyweight">{uiText("Вес тела", "Bodyweight")}</option><option value="bands">{uiText("Резинки", "Bands")}</option><option value="dumbbells">{uiText("Гантели", "Dumbbells")}</option><option value="gym">{uiText("Зал", "Gym")}</option></Select></Field></div>
+            <div className="grid gap-2 sm:grid-cols-3"><Field label={uiText("Приоритет", "Priority")}><Select name="priority" defaultValue="b"><option value="a">{uiText("главный старт", "main race")}</option><option value="b">{uiText("обычный старт", "normal race")}</option><option value="c">{uiText("тренировочный старт", "training race")}</option></Select></Field><Field label={uiText("Рост нагрузки", "Load growth")}><Select name="aggressiveness" defaultValue="auto"><option value="auto">{uiText("авто", "auto")}</option><option value="beginner">{uiText("осторожнее", "more careful")}</option><option value="intermediate">{uiText("средне", "moderate")}</option><option value="advanced">{uiText("смелее, если история позволяет", "bolder if history allows")}</option></Select></Field><Field label={uiText("Ориентир", "Intensity guide")}><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">{uiText("смешанный", "mixed")}</option><option value="pace">{uiText("темп", "pace")}</option><option value="hr">{uiText("пульс", "heart rate")}</option><option value="rpe">{uiText("ощущения", "feel")}</option></Select></Field></div>
+          </div>
+        </CollapsibleSection>
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Button type="submit" className="text-sm" disabled={creatingPlan}>{creatingPlan ? uiText("Создаем программу...", "Creating plan...") : uiText("Создать и открыть программу", "Create and open plan")}</Button><Button type="button" variant="secondary" disabled={previewingBuilder || creatingPlan} onClick={previewBuilder}>{previewingBuilder ? uiText("Готовим проверку...", "Preparing preview...") : uiText("Проверить план", "Preview plan")}</Button></div>
+      </form>
+      {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
+      {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
+      <div className="border-t border-zinc-800 p-4">
+        <CollapsibleSection title={uiText("Мои программы", "My programs")} summary={<Badge>{plans.length}</Badge>}>
+          {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
+          <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
+        </CollapsibleSection>
+      </div>
+    </Card>
+    </CollapsibleSection>
   </div>
 }
 
@@ -4019,34 +4368,34 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
   const warningFlags = preview.risk_flags.filter((flag) => flag.severity === "critical" || flag.severity === "warning")
   return <div className="mx-4 mb-4 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><p className="font-semibold text-white">Проверка программы</p><p className="mt-1 text-zinc-500">Коротко о том, как стартует план до создания.</p></div>
-      <Badge className={warningFlags.length ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{warningFlags.length ? "есть предупреждения" : "выглядит спокойно"}</Badge>
+      <div><p className="font-semibold text-white">{uiText("Проверка программы", "Plan preview")}</p><p className="mt-1 text-zinc-500">{uiText("Коротко о том, как стартует план до создания.", "A short look at how the plan starts before creating it.")}</p></div>
+      <Badge className={warningFlags.length ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{warningFlags.length ? uiText("есть предупреждения", "needs attention") : uiText("выглядит спокойно", "looks calm")}</Badge>
     </div>
-    <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-      <Stat label="недель" value={preview.weeks} />
-      <Stat label="сейчас" value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
-      <Stat label="пик" value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
+    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-4">
+      <Stat label={uiText("недель", "weeks")} value={preview.weeks} />
+      <Stat label={uiText("сейчас", "now")} value={preview.current_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
+      <Stat label={uiText("пик", "peak")} value={preview.peak_weekly_distance_km.toFixed(1)} suffix={kmUnit()} />
       <Stat label="ОФП" value={supportSessions} />
     </div>
     <div className="mt-3 grid gap-2 text-zinc-300">
-      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Стартуем от уровня: <span className="font-medium text-white">{trainingLevelLabel(preview.baseline.training_age_level)}</span>. История: <span className="font-medium text-white">{confidenceLabel(preview.baseline.confidence)}</span>.</p>
-      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Объем: от {preview.current_weekly_distance_km.toFixed(1)} до {preview.peak_weekly_distance_km.toFixed(1)} {kmUnit()} в неделю.</p>
-      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">Первая неделя: примерно {firstWeekDistance?.toFixed(1) || "--"} {kmUnit()} и {firstWorkouts.length} ближайшие тренировки ниже.</p>
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">{uiText("Стартуем от уровня", "Starting level")}: <span className="font-medium text-white">{trainingLevelLabel(preview.baseline.training_age_level)}</span>. {uiText("История", "History")}: <span className="font-medium text-white">{confidenceLabel(preview.baseline.confidence)}</span>.</p>
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">{uiText("Объем", "Volume")}: {preview.current_weekly_distance_km.toFixed(1)} - {preview.peak_weekly_distance_km.toFixed(1)} {kmUnit()} {uiText("в неделю", "per week")}.</p>
+      <p className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">{uiText("Первая неделя", "First week")}: {firstWeekDistance?.toFixed(1) || "--"} {kmUnit()} {uiText("и ближайшие тренировки ниже.", "and the nearest workouts below.")}</p>
     </div>
-    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.slice(0, 3).map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><p className="font-medium">{plainRiskMessage(flag.message)}</p></div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">Серьезных предупреждений на проверке нет.</p>}
-    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white" translate="no">Неделя {workout.week_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
-    <CollapsibleSection title="Для любопытных" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">технические детали</Badge>}>
+    {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5">{preview.risk_flags.slice(0, 3).map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><p className="font-medium">{plainRiskMessage(flag.message)}</p></div>)}</div> : <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">{uiText("Серьезных предупреждений на проверке нет.", "No major preview warnings.")}</p>}
+    <div className="mt-3 grid gap-1.5">{firstWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{uiText("Неделя", "Week")} {workout.week_index} · {coachPreviewWorkoutTitle(workout)}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
+    <CollapsibleSection title={uiText("Для любопытных", "For curious runners")} className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("технические детали", "technical details")}</Badge>}>
       <p className="leading-5 text-zinc-400" translate="no">{preview.explanation}</p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Данные истории</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.baseline.training_age_level} · {preview.baseline.confidence}</Badge></div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-500" translate="no">
-        <p>source: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
-        <p>history: <span className="text-zinc-300">{preview.baseline.history_span_days} days</span></p>
-        <p>consistent: <span className="text-zinc-300">{preview.baseline.consistent_weeks || 0} weeks</span></p>
-        <p>quality: <span className="text-zinc-300">{preview.baseline.quality_sessions_8w || 0}/8w</span></p>
-        <p>activities: <span className="text-zinc-300">{preview.baseline.activity_count}</span></p>
-        <p>recent long: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} {kmUnit()}</span></p>
-        <p>typical run: <span className="text-zinc-300">{preview.baseline.recent_run_distance_median_km?.toFixed(1) || "--"} {kmUnit()}</span></p>
-        <p>runs 4w: <span className="text-zinc-300">{preview.baseline.recent_run_count_4w || 0}</span></p>
+        <p>источник: <span className="text-zinc-300">{preview.baseline.current_weekly_volume_source}</span></p>
+        <p>история: <span className="text-zinc-300">{preview.baseline.history_span_days} дн.</span></p>
+        <p>стабильно: <span className="text-zinc-300">{preview.baseline.consistent_weeks || 0} нед.</span></p>
+        <p>качество: <span className="text-zinc-300">{preview.baseline.quality_sessions_8w || 0}/8 нед.</span></p>
+        <p>активности: <span className="text-zinc-300">{preview.baseline.activity_count}</span></p>
+        <p>длинная: <span className="text-zinc-300">{preview.baseline.recent_long_run_km?.toFixed(1) || "--"} {kmUnit()}</span></p>
+        <p>типичная: <span className="text-zinc-300">{preview.baseline.recent_run_distance_median_km?.toFixed(1) || "--"} {kmUnit()}</span></p>
+        <p>пробежки 4 нед.: <span className="text-zinc-300">{preview.baseline.recent_run_count_4w || 0}</span></p>
       </div>
       <div className="mt-2 grid grid-cols-6 gap-1">{preview.baseline.observed_weekly_volume_km.map((volume, index) => <div key={`${index}-${volume}`} className="rounded bg-zinc-900 px-1.5 py-1 text-center"><p className="font-mono text-[10px] text-zinc-600">-{6 - index}w</p><p className="text-zinc-300">{volume.toFixed(1)}</p></div>)}</div>
       <div className="mt-3 grid gap-2">
@@ -4055,8 +4404,8 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
       <div className="flex flex-wrap gap-2" translate="no"><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{preview.intensity_mode}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">priority {preview.priority}</Badge>{preview.preferred_weekdays.length ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">days {preview.preferred_weekdays.join(",")}</Badge> : null}{split.map((item) => <Badge key={item.key} className="border-zinc-700 bg-zinc-900 text-zinc-300">{item.key} {item.value}%</Badge>)}</div>
       {preview.risk_flags.length ? <div className="mt-3 grid gap-1.5" translate="no">{preview.risk_flags.map((flag) => <div key={flag.code} className={cn("rounded-md border px-2 py-1.5", signalClass(flag.severity))}><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{flag.message}</p><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{flag.code}</Badge></div>{flag.reasons.length ? <p className="mt-1 text-[11px] text-zinc-500">{flag.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div> : null}
     </CollapsibleSection>
-    {remainingWorkouts.length ? <CollapsibleSection title="Остальные тренировки в проверке" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
-      <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white" translate="no">Неделя {workout.week_index} · {workout.title}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
+    {remainingWorkouts.length ? <CollapsibleSection title={uiText("Остальные тренировки в проверке", "Other preview workouts")} className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
+      <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{uiText("Неделя", "Week")} {workout.week_index} · {coachPreviewWorkoutTitle(workout)}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
     </CollapsibleSection> : null}
   </div>
 }
@@ -4068,18 +4417,18 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
   const renameChanged = renameDraft.trim() && renameDraft.trim() !== plan.title
   return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
     <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
-      <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{plan.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{plan.id}</span></p><p className="mt-1 text-zinc-500">{planGoalTypeLabel(plan.goal_type)} · старт {formatDate(plan.target_date)} · {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="недель" value={weeks} /><Stat label="км" value={plannedKm.toFixed(1)} /><Stat label="готово" value={`${adherence}%`} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{displayPlanTitle(plan)}</p><p className="mt-1 text-zinc-500">{planGoalTypeLabel(plan.goal_type)} · {uiText("старт", "start")} {formatDate(plan.target_date)} · {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label={uiText("недель", "weeks")} value={weeks} /><Stat label={kmUnit()} value={plannedKm.toFixed(1)} /><Stat label={uiText("готово", "done")} value={`${adherence}%`} /></div>
     </div>
-    <CollapsibleSection title="Управление" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">действия</Badge>}>
-      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder="Название программы" /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? "Сохраняем..." : "Переименовать"}</Button></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label="тренировок" value={plan.workouts.length} /><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label="время" value={formatDuration(planPlannedDuration(plan))} /></div>
+    <CollapsibleSection title={uiText("Управление", "Manage")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("действия", "actions")}</Badge>}>
+      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder={uiText("Название программы", "Program name")} /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? uiText("Сохраняем...", "Saving...") : uiText("Переименовать", "Rename")}</Button></div>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label={uiText("тренировок", "workouts")} value={plan.workouts.length} /><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label={uiText("время", "time")} value={formatDuration(planPlannedDuration(plan))} /></div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>Сделать активной</Button> : null}
-        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>Завершить</Button> : null}
-        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>В архив</Button> : null}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>Копия</Button>
-        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>Удалить</Button>
+        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>{uiText("Сделать активной", "Make active")}</Button> : null}
+        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>{uiText("Завершить", "Complete")}</Button> : null}
+        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>{uiText("В архив", "Archive")}</Button> : null}
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>{uiText("Копия", "Duplicate")}</Button>
+        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>{uiText("Удалить", "Delete")}</Button>
       </div>
     </CollapsibleSection>
   </div>
@@ -4087,45 +4436,44 @@ function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDra
 
 function PlanDetailHeader({ plan, currentWeekIndex }: { plan: Plan; currentWeekIndex: number | null }) {
   const history = [
-    { label: "создана", value: formatDateTime(plan.created_at) },
-    { label: "обновлена", value: formatDateTime(plan.updated_at) },
+    { label: uiText("создана", "created"), value: formatDateTime(plan.created_at) },
+    { label: uiText("обновлена", "updated"), value: formatDateTime(plan.updated_at) },
   ]
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">программа</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{plan.title}</h3><p className="mt-1 text-zinc-500" translate="no">{planGoalLabel(plan)}</p></div>
-      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">неделя {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">неделя --</Badge>}</div>
+      <div><p className="text-[11px] font-semibold text-zinc-500">{uiText("Программа", "Program")}</p><h3 className="mt-1 text-base font-semibold text-white">{displayPlanTitle(plan)}</h3><p className="mt-1 text-zinc-500">{planGoalLabel(plan)}</p></div>
+      <div className="flex flex-wrap gap-2"><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge>{currentWeekIndex ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("неделя", "week")} {currentWeekIndex}</Badge> : <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("неделя", "week")} --</Badge>}</div>
     </div>
-    <div className="mt-3 grid grid-cols-2 gap-2 text-center md:grid-cols-4">
-      <Stat label="старт" value={formatDate(plan.target_date)} />
-      <Stat label="цель" value={formatTargetTime(plan.target_time_seconds)} />
-      <Stat label="план км" value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
-      <Stat label="сделано км" value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
-    </div>
-    <CollapsibleSection title="Детали программы" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">ещё</Badge>}>
+    <CollapsibleSection title={uiText("Сводка программы", "Plan summary")} className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("показать", "show")}</Badge>}>
+      <div className="grid grid-cols-2 gap-2 text-center md:grid-cols-4">
+        <Stat label={uiText("старт", "start")} value={formatDate(plan.target_date)} />
+        <Stat label={uiText("цель", "target")} value={formatTargetTime(plan.target_time_seconds)} />
+        <Stat label={uiText("план км", "planned km")} value={(plan.adherence?.planned_distance_km || planPlannedDistance(plan)).toFixed(1)} />
+        <Stat label={uiText("сделано км", "done km")} value={(plan.adherence?.completed_distance_km || 0).toFixed(1)} />
+      </div>
       <div className="grid gap-1.5 text-[11px] text-zinc-500 md:grid-cols-2">{history.map((item) => <div key={item.label} className="rounded border border-zinc-900 bg-zinc-950 px-2 py-1"><span className="font-mono uppercase tracking-[0.12em] text-zinc-600">{item.label}</span><span className="ml-2 text-zinc-300">{item.value}</span></div>)}</div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label="время" value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} /></div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-center"><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label={uiText("время", "time")} value={formatDuration(plan.adherence?.planned_duration_seconds || planPlannedDuration(plan))} /></div>
     </CollapsibleSection>
   </div>
 }
 
 function NextPlanWorkoutCard({ workout, currentWeekIndex }: { workout: PlanWorkout | null; currentWeekIndex: number | null }) {
   if (!workout) return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Следующая тренировка</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">нет в календаре</Badge></div>
-    <p className="mt-2 text-zinc-500">В активной программе пока нет будущей запланированной тренировки.</p>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-white">Следующая тренировка</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("нет в календаре", "not scheduled")}</Badge></div>
+    <p className="mt-2 text-zinc-500">{uiText("В активной программе пока нет будущей запланированной тренировки.", "The active program has no future scheduled workout yet.")}</p>
   </div>
   const isCurrentWeek = currentWeekIndex === workout.week_index
   return <div className="rounded-md border border-orange-400/30 bg-orange-400/10 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-orange-200">Следующая тренировка</p><h3 className="mt-1 text-base font-semibold text-white" translate="no">{workout.title}</h3><p className="mt-1 text-orange-100" translate="no">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · неделя {workout.week_index}{isCurrentWeek ? " · текущая" : ""}</p></div>
-      <div className="flex flex-wrap gap-1.5"><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">ближайшая</Badge><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div>
+      <div><p className="text-[11px] font-semibold text-orange-200">{uiText("Следующая тренировка", "Next workout")}</p><h3 className="mt-1 text-base font-semibold text-white">{coachWorkoutTitle(workout)}</h3><p className="mt-1 text-orange-100">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · {uiText("неделя", "week")} {workout.week_index}{isCurrentWeek ? ` · ${uiText("текущая", "current")}` : ""}</p></div>
+      <div className="flex flex-wrap gap-1.5"><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("ближайшая", "nearest")}</Badge><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div>
     </div>
-    <div className="mt-3 grid gap-2 md:grid-cols-3">
-      <Stat label="цель" value={formatWorkoutTarget(workout)} />
-      <Stat label="интенсивность" value={workoutIntensityLabel(workout.intensity)} />
-      <Stat label="статус" value={workoutStatusLabel(workout.status)} />
+    <div className="mt-3 grid gap-2 md:grid-cols-2">
+      <Stat label={uiText("цель", "target")} value={formatWorkoutTarget(workout)} />
+      <Stat label={uiText("ощущение", "effort")} value={workoutIntensityLabel(workout.intensity)} />
     </div>
-    <p className="mt-3 leading-5 text-zinc-300" translate="no">{workout.description || workoutPurpose(workout)}</p>
-    <p className="mt-2 text-[11px] text-zinc-500">Ниже автоматически раскрыта неделя с этой тренировкой. Если цель выглядит странно, ее можно поправить в карточке тренировки.</p>
+    <p className="mt-3 leading-5 text-zinc-300">{workoutPurpose(workout)}</p>
+    <p className="mt-2 text-[11px] text-zinc-500">{uiText("Ниже автоматически раскрыта неделя с этой тренировкой. Если цель выглядит странно, ее можно поправить в карточке тренировки.", "The week with this workout is opened below. If the target looks wrong, you can adjust it in the workout card.")}</p>
   </div>
 }
 
@@ -4165,7 +4513,7 @@ function riskLevel(risk: Record<string, unknown> | null | undefined) {
 
 function CoachRecommendations({ recommendations, preview, audits, error, actionError, loading, previewing, applying, onRefresh, onPreview, onApply }: { recommendations: PlanRecommendations | null; preview: PlanRecommendationPreview | null; audits: PlanRecommendationAudit[]; error: string; actionError: string; loading: boolean; previewing: boolean; applying: boolean; onRefresh: () => void; onPreview: () => void; onApply: () => void }) {
   const statusClass = recommendations?.status === "watch" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : recommendations?.status === "adjust" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"
-  const statusLabel = recommendations?.status || (loading ? "loading" : error ? "error" : "idle")
+  const statusLabel = recommendations?.status || (loading ? "загрузка" : error ? "ошибка" : "нет данных")
   const canApply = Boolean(preview?.changes.length) && !applying && !previewing
   return <div className="rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -4178,31 +4526,32 @@ function CoachRecommendations({ recommendations, preview, audits, error, actionE
       <p className="mt-3 leading-5 text-zinc-300" translate="no">{recommendations.adaptation_summary || recommendations.summary}</p>
       <CollapsibleSection title="Метрики рекомендации" className="mt-3">
         <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
-          <Stat label="completion" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
-          <Stat label="distance" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
-          <Stat label="recent km" value={recommendations.metrics.recent_completed_distance_km} />
-          <Stat label="next 7d km" value={recommendations.metrics.upcoming_planned_distance_km} />
-          <Stat label="risk" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
-          <Stat label="hard 7d" value={recommendations.metrics.upcoming_hard_workouts || 0} />
+          <Stat label="готово" value={`${Math.round(recommendations.metrics.completion_rate * 100)}%`} />
+          <Stat label="км" value={`${Math.round(recommendations.metrics.distance_completion_rate * 100)}%`} />
+          <Stat label="недавние км" value={recommendations.metrics.recent_completed_distance_km} />
+          <Stat label="7 дней км" value={recommendations.metrics.upcoming_planned_distance_km} />
+          <Stat label="риск" value={`${riskLevel(recommendations.risk_before)}→${riskLevel(preview?.risk_after || recommendations.risk_after)}`} />
+          <Stat label="быстрые 7д" value={recommendations.metrics.upcoming_hard_workouts || 0} />
         </div>
       </CollapsibleSection>
       <div className="mt-3 grid gap-2" translate="no">{recommendations.recommendations.map((item) => <div key={`${item.type}-${item.title}-${item.workout_id || item.week_index || "plan"}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{item.title}</p><Badge className={item.severity === "warning" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : item.severity === "critical" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{item.type}</Badge></div><p className="mt-1 leading-5 text-zinc-400">{item.message}</p>{item.reasons.length ? <p className="mt-1 text-[11px] text-zinc-600">{item.reasons.slice(0, 2).join(" · ")}</p> : null}</div>)}</div>
       {preview ? <CollapsibleSection title="Что изменится" className="mt-3 border-orange-400/20 bg-orange-400/10" summary={<Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length}</Badge>}>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-orange-100">Что изменится</p><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{preview.changes.length}</Badge></div>
-        {preview.changes.length ? <div className="mt-2 grid gap-1.5" translate="no">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "plan"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">No automatic changes are safe to apply.</p>}
-        {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2" translate="no"><p className="font-medium text-zinc-300">Skipped</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "none")}: {String(item.reason || "manual review")}</p>)}</div></div> : null}
+        {preview.changes.length ? <div className="mt-2 grid gap-1.5" translate="no">{preview.changes.map((change, index) => <div key={`${change.workout_id}-${change.field}-${index}`} className="grid gap-1 rounded-md border border-zinc-800 bg-zinc-950/80 p-2 md:grid-cols-[7rem_1fr]"><div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">#{change.workout_id || "план"} · {change.field}</div><div><p className="text-zinc-300"><span className="text-zinc-500">{formatChangeValue(change.before)}</span> <span className="text-orange-200">-&gt;</span> <span className="text-white">{formatChangeValue(change.after)}</span></p>{change.reason ? <p className="mt-1 text-[11px] text-zinc-500">{change.reason}</p> : null}</div></div>)}</div> : <p className="mt-2 text-zinc-500">Безопасных автоматических изменений нет.</p>}
+        {preview.skipped.length ? <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2" translate="no"><p className="font-medium text-zinc-300">Пропущено</p><div className="mt-1 grid gap-1 text-[11px] text-zinc-500">{preview.skipped.slice(0, 4).map((item, index) => <p key={index}>{String(item.action || "нет действия")}: {String(item.reason || "нужна ручная проверка")}</p>)}</div></div> : null}
       </CollapsibleSection> : null}
-      {audits.length ? <CollapsibleSection title="Adjustment history" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge>}><div className="grid gap-1 text-[11px] text-zinc-500" translate="no">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {formatLocalDateTime(audit.created_at)}</p>)}</div></CollapsibleSection> : null}
-    </> : <p className="mt-3 text-zinc-500">{loading ? "Recommendations are loading..." : error ? "Recommendations are unavailable." : "No recommendations loaded."}</p>}
+      {audits.length ? <CollapsibleSection title="История корректировок" className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{audits.length}</Badge>}><div className="grid gap-1 text-[11px] text-zinc-500" translate="no">{audits.slice(0, 3).map((audit) => <p key={audit.id}>#{audit.id} · {audit.status} · {formatLocalDateTime(audit.created_at)}</p>)}</div></CollapsibleSection> : null}
+    </> : <p className="mt-3 text-zinc-500">{loading ? "Рекомендации загружаются..." : error ? "Рекомендации недоступны." : "Рекомендации еще не загружены."}</p>}
   </div>
 }
 
 function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, candidateErrors, feedbackDrafts, completionDrafts, targetDrafts, rescheduleDrafts, loadingCandidates, onFindCandidates, onLinkCandidate, onUpdate, onReschedule, onUnlinkActivity, onRescheduleDraft, onFeedbackDraft, onCompletionDraft, onTargetDraft, onSaveTarget, onCompleteWorkout, onSaveFeedback }: { summary: PlanWeekSummary; defaultOpen: boolean; nextWorkoutId: number | null; candidatesByWorkout: Record<number, PlanActivityMatchCandidate[]>; candidateErrors: Record<number, string>; feedbackDrafts: Record<number, FeedbackDraft>; completionDrafts: Record<number, CompletionDraft>; targetDrafts: Record<number, WorkoutTargetDraft>; rescheduleDrafts: Record<number, string>; loadingCandidates: number | null; onFindCandidates: (workout: PlanWorkout) => Promise<void>; onLinkCandidate: (workout: PlanWorkout, activityId: number) => Promise<void>; onUpdate: (workout: PlanWorkout, status: string) => Promise<void>; onReschedule: (workout: PlanWorkout, scheduledDate: string) => Promise<void>; onUnlinkActivity: (workout: PlanWorkout) => Promise<void>; onRescheduleDraft: (workout: PlanWorkout, value: string) => void; onFeedbackDraft: (workout: PlanWorkout, patch: Partial<FeedbackDraft>) => void; onCompletionDraft: (workout: PlanWorkout, patch: Partial<CompletionDraft>) => void; onTargetDraft: (workout: PlanWorkout, patch: Partial<WorkoutTargetDraft>) => void; onSaveTarget: (workout: PlanWorkout) => Promise<void>; onCompleteWorkout: (workout: PlanWorkout) => Promise<void>; onSaveFeedback: (workout: PlanWorkout) => Promise<void> }) {
   const [isOpen, setIsOpen] = useState(defaultOpen)
+  const [openCompletionWorkoutId, setOpenCompletionWorkoutId] = useState<number | null>(null)
   useEffect(() => { if (defaultOpen) setIsOpen(true) }, [defaultOpen])
 
   return <details open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)} className="group rounded-md border border-zinc-800 bg-zinc-950/60">
-    <summary className="cursor-pointer list-none border-b border-transparent px-3 py-2 group-open:border-zinc-800 [&::-webkit-details-marker]:hidden">
+    <summary className="min-h-11 cursor-pointer list-none border-b border-transparent px-3 py-2 group-open:border-zinc-800 [&::-webkit-details-marker]:hidden">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-white">Неделя {summary.week_index}</p><div className="flex flex-wrap gap-1.5"><Badge>{summary.planned_distance_km.toFixed(1)} {kmUnit()}</Badge>{summary.support_workouts ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">ОФП {summary.support_workouts}</Badge> : null}{summary.deload ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">легче</Badge> : null}</div></div>
     </summary>
     <div className="border-b border-zinc-900 px-3 py-2">
@@ -4233,17 +4582,21 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
       const targetSupportWorkout = isSupportWorkoutType(targetDraft.workout_type)
       const actualSupportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className={cn("rounded-md border bg-zinc-950 p-3 text-xs", isNextWorkout ? "border-orange-400/50 ring-1 ring-orange-400/30" : "border-zinc-900")}>
-        <div className="flex flex-wrap items-start justify-between gap-2"><div translate="no"><p className="font-medium text-white">{workout.title}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · цель: {formatWorkoutTarget(workout)}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">ближайшая</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workoutStatusLabel(workout.status)}</Badge></div></div>
-        <CollapsibleSection title="Что внутри" className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">блоки</Badge>}>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{coachWorkoutTitle(workout)}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · {workoutPurpose(workout)}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("ближайшая", "nearest")}</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workoutStatusLabel(workout.status)}</Badge></div></div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {canCompleteManually ? <Button size="sm" onClick={() => setOpenCompletionWorkoutId(workout.id)}>{uiText("Отметить", "Mark done")}</Button> : null}
+          {!workout.completed_activity_id ? <Button size="sm" variant="secondary" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? uiText("Ищем...", "Searching...") : uiText("Найти выполненную тренировку", "Find completed workout")}</Button> : <Button size="sm" variant="secondary" onClick={() => onUnlinkActivity(workout)}>{uiText("Снять отметку", "Remove completion")}</Button>}
+        </div>
+        <CollapsibleSection title="Что внутри" className="mt-2" defaultOpen={isNextWorkout} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">блоки</Badge>}>
           <div className="grid gap-2 md:grid-cols-4">
             <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">цель</span><p className="mt-1 text-zinc-300">{workoutTargetMode(workout)} · {formatWorkoutTarget(workout)}</p></div>
             <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">зачем</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
             <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">безопасность</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
-          <p className="mt-2 leading-5 text-zinc-400" translate="no">{workout.description}</p>
+          {workout.description ? <CollapsibleSection title={uiText("Текст из плана", "Original plan text")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}><p className="leading-5 text-zinc-500" translate="no">{workout.description}</p></CollapsibleSection> : null}
         </CollapsibleSection>
-        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100" translate="no">Linked activity #{workout.completed_activity_id}: {formatWorkoutActual(workout)}</div> : null}
+        {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{uiText("Тренировка выполнена", "Workout completed")}: {formatWorkoutActual(workout)}</div> : null}
         {workout.execution_score?.score !== null && workout.execution_score ? <CollapsibleSection title="Оценка выполнения" className="mt-2" summary={<Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge>}>
           <div className="flex flex-wrap gap-2 text-zinc-500"><span>объем {workout.execution_score.volume_score === null ? "--" : `${Math.round(workout.execution_score.volume_score * 100)}%`}</span><span>интенсивность {workout.execution_score.intensity_score === null ? "--" : `${Math.round(workout.execution_score.intensity_score * 100)}%`}</span><span>статус {workout.execution_score.adherence_status}</span></div>{workout.execution_score.flags.length ? <p className="mt-1 text-zinc-600">{workout.execution_score.flags.slice(0, 2).join(" · ")}</p> : null}
         </CollapsibleSection> : null}
@@ -4260,45 +4613,45 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
             <Input placeholder="описание" value={targetDraft.description} disabled={!canEditTarget} onChange={(event) => onTargetDraft(workout, { description: event.target.value })} />
             <Button size="sm" disabled={!canEditTarget || !targetChanged} onClick={() => onSaveTarget(workout)}>Сохранить</Button>
           </div>
-          <p className="mt-2 text-[11px] text-zinc-500" translate="no">Сохраним как: {formatWorkoutTarget(targetPayload(targetDraft))}</p>
-          {!canEditTarget ? <p className="mt-2 text-[11px] text-zinc-600">Выполненную или привязанную тренировку сначала нужно отвязать, чтобы не менять историю.</p> : null}
+          <p className="mt-2 text-[11px] text-zinc-500">{uiText("Сохраним как", "Will save as")}: {formatWorkoutTarget(targetPayload(targetDraft))}</p>
+          {!canEditTarget ? <p className="mt-2 text-[11px] text-zinc-600">Чтобы изменить выполненную тренировку, сначала снимите отметку о выполнении.</p> : null}
         </CollapsibleSection>
-        {canCompleteManually ? <CollapsibleSection title="Отметить вручную" className="mt-2">
+        {canCompleteManually ? <CollapsibleSection title="Отметить вручную" className="mt-2" defaultOpen={openCompletionWorkoutId === workout.id}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Отметить тренировку</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">вручную</Badge></div>
           <div className="grid gap-2 md:grid-cols-4">
-            {actualSupportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">только время</div> : <Input type="number" min="0" max="250" step="0.1" placeholder="факт, км" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}
-            <Input type="number" min="1" max="2880" step="1" placeholder="минуты" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} />
-            <Input type="number" min="0" max="10" step="1" placeholder="RPE" value={completionDraft.rpe} onChange={(event) => onCompletionDraft(workout, { rpe: event.target.value })} />
-            <Input type="number" min="30" max="240" step="1" placeholder="avg HR" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} />
+            <Field label={uiText("Факт, км", "Actual, km")}>{actualSupportWorkout ? <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-500">{uiText("только время", "time only")}</div> : <Input type="number" min="0" max="250" step="0.1" value={completionDraft.actual_distance_km} onChange={(event) => onCompletionDraft(workout, { actual_distance_km: event.target.value })} />}</Field>
+            <Field label={uiText("Минуты", "Minutes")}><Input type="number" min="1" max="2880" step="1" value={completionDraft.actual_duration_minutes} onChange={(event) => onCompletionDraft(workout, { actual_duration_minutes: event.target.value })} /></Field>
+            <Field label="RPE"><Input type="number" min="0" max="10" step="1" value={completionDraft.rpe} onChange={(event) => onCompletionDraft(workout, { rpe: event.target.value })} /></Field>
+            <Field label={uiText("Средний пульс", "Average HR")}><Input type="number" min="30" max="240" step="1" value={completionDraft.average_heart_rate_bpm} onChange={(event) => onCompletionDraft(workout, { average_heart_rate_bpm: event.target.value })} /></Field>
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-4">
-            <Input type="number" min="0" max="10" placeholder="soreness" value={completionDraft.soreness_0_10} onChange={(event) => onCompletionDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} />
-            <Input type="number" min="0" max="10" placeholder="pain" value={completionDraft.pain_level} onChange={(event) => onCompletionDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} />
-            <Input type="number" min="0" max="10" placeholder="sleep" value={completionDraft.sleep_quality_0_10} onChange={(event) => onCompletionDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
-            <Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} />
+            <Field label={uiText("Забитость", "Soreness")}><Input type="number" min="0" max="10" value={completionDraft.soreness_0_10} onChange={(event) => onCompletionDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} /></Field>
+            <Field label={uiText("Боль", "Pain")}><Input type="number" min="0" max="10" value={completionDraft.pain_level} onChange={(event) => onCompletionDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} /></Field>
+            <Field label={uiText("Сон", "Sleep")}><Input type="number" min="0" max="10" value={completionDraft.sleep_quality_0_10} onChange={(event) => onCompletionDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} /></Field>
+            <Field label={uiText("Когда сделано", "Completed at")}><Input type="datetime-local" value={completionDraft.completed_at} onChange={(event) => onCompletionDraft(workout, { completed_at: event.target.value })} /></Field>
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="боль/заметки" value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="погода" value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="комментарий" value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Готово</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Field label={uiText("Боль / заметки", "Pain notes")}><Input value={completionDraft.pain_notes} onChange={(event) => onCompletionDraft(workout, { pain_notes: event.target.value })} /></Field><Field label={uiText("Погода", "Weather")}><Input value={completionDraft.weather_notes} onChange={(event) => onCompletionDraft(workout, { weather_notes: event.target.value })} /></Field><Field label={uiText("Комментарий", "Comment")}><Input value={completionDraft.user_notes} onChange={(event) => onCompletionDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /></Field><div className="flex items-end"><Button size="sm" onClick={() => onCompleteWorkout(workout)}>Готово</Button></div></div>
         </CollapsibleSection> : null}
         {canGiveFeedback ? <CollapsibleSection title="Самочувствие" className="mt-2" summary={workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">сохранено</Badge> : <Badge>новое</Badge>}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">Самочувствие после тренировки</p>{workout.feedback ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">сохранено</Badge> : <Badge>новое</Badge>}</div>
           <div className="grid gap-2 md:grid-cols-5">
-            <Input type="number" min="0" max="10" placeholder="RPE" value={draft.rpe} onChange={(event) => onFeedbackDraft(workout, { rpe: event.target.value })} />
-            <Input type="number" min="0" max="10" placeholder="soreness" value={draft.soreness_0_10} onChange={(event) => onFeedbackDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} />
-            <Input type="number" min="0" max="10" placeholder="pain" value={draft.pain_level} onChange={(event) => onFeedbackDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} />
-            <Input type="number" min="0" max="10" placeholder="sleep" value={draft.sleep_quality_0_10} onChange={(event) => onFeedbackDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} />
-            <label className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-zinc-400"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> pain</label>
+            <Field label="RPE"><Input type="number" min="0" max="10" value={draft.rpe} onChange={(event) => onFeedbackDraft(workout, { rpe: event.target.value })} /></Field>
+            <Field label={uiText("Забитость", "Soreness")}><Input type="number" min="0" max="10" value={draft.soreness_0_10} onChange={(event) => onFeedbackDraft(workout, { soreness_0_10: event.target.value, fatigue: event.target.value })} /></Field>
+            <Field label={uiText("Боль", "Pain")}><Input type="number" min="0" max="10" value={draft.pain_level} onChange={(event) => onFeedbackDraft(workout, { pain_level: event.target.value, pain: Number(event.target.value) > 0 })} /></Field>
+            <Field label={uiText("Сон", "Sleep")}><Input type="number" min="0" max="10" value={draft.sleep_quality_0_10} onChange={(event) => onFeedbackDraft(workout, { sleep_quality_0_10: event.target.value, sleep_quality: event.target.value })} /></Field>
+            <label className="flex min-h-11 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-zinc-400 md:min-h-8 md:px-2"><input checked={draft.pain} type="checkbox" onChange={(event) => onFeedbackDraft(workout, { pain: event.target.checked })} /> есть боль</label>
           </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Input placeholder="боль/заметки" value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /><Input placeholder="погода" value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /><Input placeholder="комментарий" value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /><Button size="sm" onClick={() => onSaveFeedback(workout)}>Сохранить</Button></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]"><Field label={uiText("Боль / заметки", "Pain notes")}><Input value={draft.pain_notes} onChange={(event) => onFeedbackDraft(workout, { pain_notes: event.target.value })} /></Field><Field label={uiText("Погода", "Weather")}><Input value={draft.weather_notes} onChange={(event) => onFeedbackDraft(workout, { weather_notes: event.target.value })} /></Field><Field label={uiText("Комментарий", "Comment")}><Input value={draft.user_notes} onChange={(event) => onFeedbackDraft(workout, { user_notes: event.target.value, notes: event.target.value })} /></Field><div className="flex items-end"><Button size="sm" onClick={() => onSaveFeedback(workout)}>Сохранить</Button></div></div>
         </CollapsibleSection> : null}
         <CollapsibleSection title="Действия" className="mt-2">
         {canReschedule ? <div className="mb-2 grid gap-2 md:grid-cols-[1fr_auto]"><Input type="date" value={rescheduleDraft} onChange={(event) => onRescheduleDraft(workout, event.target.value)} /><Button size="sm" variant="ghost" disabled={!rescheduleDraft || rescheduleDraft === workout.scheduled_date} onClick={() => onReschedule(workout, rescheduleDraft)}>Перенести</Button></div> : null}
-        <div className="flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">связана с пробежкой</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>Отвязать</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>Пропустил</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>Отменить</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? "Ищем..." : "Найти пробежку"}</Button></div>
+        <div className="flex flex-wrap gap-2">{workout.completed_activity_id ? <><Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("выполнено", "completed")}</Badge><Button size="sm" variant="ghost" onClick={() => onUnlinkActivity(workout)}>{uiText("Снять отметку", "Remove completion")}</Button></> : <><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "missed")}>{uiText("Пропустил", "Missed")}</Button><Button size="sm" variant="ghost" onClick={() => onUpdate(workout, "skipped")}>{uiText("Отменить", "Cancel")}</Button></>}<Button size="sm" variant="ghost" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? uiText("Ищем...", "Searching...") : uiText("Найти выполненную тренировку", "Find completed workout")}</Button></div>
         </CollapsibleSection>
         {candidateErrors[workout.id] ? <p className="mt-2 text-[11px] text-orange-200" translate="no">{candidateErrors[workout.id]}</p> : null}
         {candidates.length ? <div className="mt-2 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 p-2">
           {candidates.map((candidate) => <div key={candidate.activity.id} className="grid gap-2 rounded-md bg-zinc-900/70 p-2 md:grid-cols-[1fr_auto] md:items-center">
-            <div translate="no"><p className="font-medium text-white">{candidate.activity.title}<span className="ml-2 font-mono text-[10px] text-zinc-500">#{candidate.activity.id}</span></p><p className="mt-1 text-zinc-500">{candidate.activity.started_at ? formatLocalDate(candidate.activity.started_at) : noDateLabel()} · {formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><p className="mt-1 text-[11px] text-zinc-500">{candidate.reasons.slice(0, 2).join(" · ")}</p></div>
-            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Badge className="border-zinc-700 bg-zinc-950 text-zinc-300" translate="no">{Math.round(candidate.score * 100)}% {candidate.confidence}</Badge><Button size="sm" aria-label={`Link activity ${candidate.activity.title} #${candidate.activity.id} to planned workout ${workout.title} #${workout.id}`} onClick={() => onLinkCandidate(workout, candidate.activity.id)}>Link</Button></div>
+            <div><p className="font-medium text-white">{runKindLabel(candidate.activity)} · {candidate.activity.started_at ? formatLocalDate(candidate.activity.started_at) : noDateLabel()}</p><p className="mt-1 text-zinc-500">{formatDistance(candidate.activity.distance_km)} · {formatDuration(candidate.activity.duration_seconds)}</p><CollapsibleSection title={uiText("Почему подходит", "Why it matches")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}><p className="text-[11px] text-zinc-500" translate="no">{candidate.reasons.slice(0, 2).join(" · ")} · {Math.round(candidate.score * 100)}% {candidate.confidence}</p></CollapsibleSection></div>
+            <div className="flex flex-wrap items-center gap-2 md:justify-end"><Button size="sm" aria-label={uiText("Отметить тренировку выполненной", "Mark workout as completed")} onClick={() => onLinkCandidate(workout, candidate.activity.id)}>{uiText("Отметить выполненной", "Mark completed")}</Button></div>
           </div>)}
         </div> : null}
       </div>
@@ -4480,9 +4833,18 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
     }
   }
 
+  const defaultProvider = providers.find((provider) => provider.is_default)
+  const readyProviders = providers.filter((provider) => provider.has_api_key).length
+
   return <div className="grid gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className="text-xs font-semibold text-orange-200">{uiText("Продвинутые настройки", "Advanced settings")}</p><h2 className="mt-1 text-lg font-semibold text-white">{uiText("Готовность тренера и данных", "Coach and data readiness")}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">{uiText("Эти настройки нужны редко: провайдеры распознавания, интеграции, экспорт и журнал действий.", "These settings are rarely needed: recognition providers, integrations, exports and audit log.")}</p></div>
+        <div className="flex flex-wrap gap-2"><Badge className={readyProviders ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-orange-400/40 bg-orange-400/15 text-orange-100"}>{readyProviders ? uiText("распознавание готово", "recognition ready") : uiText("нужен ключ", "key needed")}</Badge>{defaultProvider ? <Badge translate="no">{defaultProvider.display_name}</Badge> : null}</div>
+      </div>
+    </Card>
     <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-    <CollapsibleSection title="Add LLM provider" summary={<Badge>6.17</Badge>}><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
+    <CollapsibleSection title="Add LLM provider" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">advanced</Badge>}><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
       <Field label="Provider"><Select name="provider"><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></Select></Field>
       <Field label="Display name"><Input name="display_name" placeholder="Display name" required /></Field>
       <Field label="Base URL"><Input name="base_url" placeholder="Gateway root or /v1 URL optional" /></Field>
@@ -4524,7 +4886,7 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         </div>)}{!integrations.length ? <p className="p-4 text-xs text-zinc-500">No integration data loaded.</p> : null}</div>
       </Card>
       <Card>
-        <CardHeader><div><CardTitle>Data management</CardTitle><p className="text-xs text-zinc-500">Export current user data or wipe account-scoped records.</p></div><Badge>6.18</Badge></CardHeader>
+        <CardHeader><div><CardTitle>Data management</CardTitle><p className="text-xs text-zinc-500">Export current user data or wipe account-scoped records.</p></div><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">advanced</Badge></CardHeader>
         <div className="grid gap-3 p-4 text-xs">
           <div className="flex flex-wrap gap-2"><Button type="button" disabled={dataBusy} onClick={downloadExport}>{dataBusy ? "Working..." : "Download JSON export"}</Button><Button type="button" variant="secondary" disabled={dataBusy} onClick={downloadActivitiesCsv}>{dataBusy ? "Working..." : "Download activities CSV"}</Button></div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-400">Export omits API keys and local screenshot file paths. It includes user-scoped activities, plans, goals, profile, providers without secrets, imports and audit log.</div>
@@ -4538,10 +4900,12 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         </div>
       </Card>
     </div>
+    <CollapsibleSection title="Audit log" summary={<Badge>{auditLog.length} events</Badge>}>
     <Card>
       <CardHeader><div><CardTitle>Audit log</CardTitle><p className="text-xs text-zinc-500">Recent user-scoped import, provider, export and delete events.</p></div><Badge>{auditLog.length} events</Badge></CardHeader>
       <div className="grid min-w-0 gap-2 p-4 md:hidden">{auditLog.map((event) => <div key={`audit-mobile-${event.id}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs" translate="no"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words text-zinc-500">{formatLocalDateTime(event.created_at)}</p><p className="mt-1 break-words text-zinc-400">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</p></div><Badge className="max-w-full border-zinc-700 bg-zinc-900 text-zinc-300">{event.action}</Badge></div><p className="mt-2 max-w-full overflow-hidden break-all text-zinc-500">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</p></div>)}{!auditLog.length ? <p className="text-xs text-zinc-500">Audit log is empty.</p> : null}</div><div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.14em] text-zinc-500"><tr><th className="px-4 py-2">Time</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead><tbody>{auditLog.map((event) => <tr key={event.id} className="border-b border-zinc-900 last:border-0 align-top"><td className="px-4 py-2 text-zinc-500" translate="no">{formatLocalDateTime(event.created_at)}</td><td><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300" translate="no">{event.action}</Badge></td><td className="text-zinc-400" translate="no">{event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""}</td><td className="max-w-[28rem] break-words text-zinc-500" translate="no">{event.metadata_json ? JSON.stringify(event.metadata_json) : "--"}</td></tr>)}</tbody></table>{!auditLog.length ? <p className="p-4 text-xs text-zinc-500">Audit log is empty.</p> : null}</div>
     </Card>
+    </CollapsibleSection>
   </div>
 }
 

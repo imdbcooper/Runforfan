@@ -505,6 +505,23 @@ def confirm_import(batch_id: int, user: User = Depends(get_current_user), db: Se
     return import_result(db, user, batch, matched_workout, include_candidate=True)
 
 
+@router.post("/{batch_id}/retry")
+def retry_import(batch_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    batch = import_batch_for_user(db, user, batch_id, for_update=True)
+    retryable_statuses = {"retry_scheduled", "validation_failed", "recognition_failed", "rejected_no_llm_template"}
+    if batch.status not in retryable_statuses:
+        raise HTTPException(status_code=409, detail="Import batch cannot be retried in its current state")
+    if batch.created_activity_id is not None:
+        raise HTTPException(status_code=409, detail="Import batch already created an activity")
+    if not batch.sources:
+        raise HTTPException(status_code=409, detail="Import batch has no screenshots to retry")
+    enqueue_recognition_batch(db, batch, get_settings())
+    batch.recognition_message = "Распознавание повторно поставлено в очередь."
+    log_audit_event(db, user.id, "import.recognition.requeued", "import_batch", batch.id, {})
+    db.commit()
+    return import_result(db, user, batch)
+
+
 @router.patch("/{batch_id}/candidate")
 def patch_import_candidate(batch_id: int, patch: ImportCandidatePatchIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     batch = import_batch_for_user(db, user, batch_id, for_update=True)

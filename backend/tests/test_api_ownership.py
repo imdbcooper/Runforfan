@@ -127,6 +127,23 @@ class ImportUploadDb(CommitDb):
         self.committed = True
 
 
+class ImportRetryDb(ImportRejectDb):
+    def __init__(self):
+        super().__init__()
+        self.batch.status = "recognition_failed"
+        self.batch.created_activity_id = None
+        self.batch.sources = [SimpleNamespace(source_id=101)]
+        self.batch.queued_at = None
+        self.batch.recognition_started_at = None
+        self.batch.recognition_finished_at = None
+        self.batch.recognition_retry_at = None
+        self.batch.recognition_attempt_count = 3
+        self.batch.recognition_max_attempts = 3
+        self.batch.recognition_locked_at = None
+        self.batch.recognition_locked_by = None
+        self.batch.recognition_last_error = "Provider timed out"
+
+
 class ActivityWriteDb(CommitDb):
     def __init__(self, activity=None):
         self.activity = activity
@@ -493,6 +510,21 @@ class ApiOwnershipTests(unittest.TestCase):
         self.assertEqual(body["recognition_engine"], "queued")
         self.assertTrue(db.committed)
         audit.assert_called_once()
+
+    def test_failed_screenshot_import_can_be_requeued(self):
+        db = ImportRetryDb()
+        app = app_with_router(imports_routes.router, imports_routes.get_current_user, imports_routes.get_db, db)
+        settings = SimpleNamespace(import_recognition_max_attempts=4)
+
+        with patch.object(imports_routes, "get_settings", return_value=settings), patch.object(imports_routes, "log_audit_event") as audit:
+            response = TestClient(app).post("/api/imports/7/retry")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertEqual(response.json()["recognition_attempt_count"], 0)
+        self.assertIsNone(response.json()["recognition_last_error"])
+        self.assertTrue(db.committed)
+        audit.assert_called_once_with(db, 42, "import.recognition.requeued", "import_batch", 7, {})
 
     def test_account_delete_passes_current_user_to_deletion_service(self):
         db = CommitDb()

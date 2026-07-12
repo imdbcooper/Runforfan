@@ -829,11 +829,11 @@
           <p>Тестер вошел через Telegram, заполнил минимальный профиль, создал или активировал план, импортировал одну тренировку, связал план и факт, проверил расчеты на здравый смысл и оформил отдельный report на каждую найденную проблему.</p>
         </div>
         <div class="rules route-list">
-          <div class="rule"><strong>Войти и выбрать русский язык.</strong><p>Ожидаемо: открыт dashboard, topbar показывает Telegram имя, язык сохраняется после refresh.</p></div>
+          <div class="rule"><strong>Войти и выбрать русский язык.</strong><p>Ожидаемо: открыт раздел «Сегодня», в topbar виден текущий раздел, язык сохраняется после refresh.</p></div>
           <div class="rule"><strong>Заполнить минимальный профиль.</strong><p>Ожидаемо: после Save profile появляется понятный completeness, HR/HRR/Pace zones либо объяснение, каких данных не хватает.</p></div>
-          <div class="rule"><strong>Создать план.</strong><p>Ожидаемо: preview не создает active plan, а созданный active plan виден на Dashboard, Plans и Calendar.</p></div>
-          <div class="rule"><strong>Импортировать одну тренировку.</strong><p>Ожидаемо: один upload batch создает одну activity; Huawei/iPhone templates работают без LLM, unknown screenshots требуют понятного blocked state или confirmation.</p></div>
-          <div class="rule"><strong>Проверить activity и связать ее с workout.</strong><p>Ожидаемо: details показывают pace, duration, distance, validation и source; Calendar/Plans видят связь после Link.</p></div>
+          <div class="rule"><strong>Создать план.</strong><p>Ожидаемо: preview не создает active plan, а созданная программа видна в разделах «Сегодня», «План» и «Календарь».</p></div>
+          <div class="rule"><strong>Добавить одну тренировку.</strong><p>Ожидаемо: один набор скриншотов создает одну тренировку; Huawei/iPhone templates работают без LLM, неизвестные скриншоты требуют понятной проверки или показывают действие «Повторить сейчас».</p></div>
+          <div class="rule"><strong>Проверить тренировку и отметить ее в плане.</strong><p>Ожидаемо: детали показывают темп, длительность, дистанцию и качество данных; «Календарь» и «План» видят выполнение после действия «Отметить в плане».</p></div>
           <div class="rule"><strong>Сверить аналитику и нагрузку.</strong><p>Ожидаемо: недельный объем, pace, zones, load и warnings согласованы с тестовой историей и не звучат как медицинский диагноз.</p></div>
           <div class="rule"><strong>Проверить настройки и экспорт.</strong><p>Ожидаемо: API keys не возвращаются в UI/export, опасные действия требуют явного подтверждения, audit log фиксирует действия.</p></div>
           <div class="rule"><strong>Оформить баг-репорт.</strong><p>Ожидаемо: один report описывает одну проблему, содержит шаг, устройство, данные, expected/actual, важность и вложение без секретов.</p></div>
@@ -947,11 +947,11 @@
         <article class="step-card" id="step-1">
           <div class="step-body">
             <div class="copy">
-              <span class="step-kicker">Шаг 1 / Dashboard</span>
-              <h3>Откройте dashboard и оцените готовность недели</h3>
+              <span class="step-kicker">Шаг 1 / Сегодня</span>
+              <h3>Откройте «Сегодня» и посмотрите ближайшую тренировку</h3>
               <p>Начните с главного экрана. Он должен быстро объяснить, готов ли профиль, есть ли активный план, что запланировано на текущую неделю и где следующий полезный action.</p>
               <ol class="action-list">
-                <li>Откройте приложение и убедитесь, что попали на dashboard.</li>
+                <li>Откройте приложение и убедитесь, что попали в раздел «Сегодня».</li>
                 <li>Посмотрите readiness/completeness, текущую неделю и ближайшие тренировки.</li>
                 <li>Проверьте, что карточки читаются без приближения и не создают горизонтальный скролл.</li>
               </ol>
@@ -1018,14 +1018,14 @@
         <article class="step-card" id="step-3">
           <div class="step-body">
             <div class="copy">
-              <span class="step-kicker">Шаг 3 / Plans</span>
+              <span class="step-kicker">Шаг 3 / План</span>
               <h3>Создайте или внимательно проверьте план</h3>
               <p>Plan builder должен объяснять, из каких вводных строится план и чем preview отличается от создания активного плана.</p>
               <ol class="action-list">
                 <li>Укажите цель, дистанцию гонки, дату старта и доступные тренировочные дни.</li>
                 <li>Добавьте performance inputs, текущий недельный объем, ограничения и support/OFP.</li>
                 <li>Сначала нажмите preview и проверьте риски, объем и первые тренировки.</li>
-                <li>Создайте draft или active plan и убедитесь, что dashboard/calendar его видят.</li>
+                <li>Создайте программу и убедитесь, что разделы «Сегодня» и «Календарь» ее видят.</li>
               </ol>
               <div class="check"><strong>Что проверить</strong><ul><li>Preview не сохраняет план как активный.</li><li>Risk flags и safety notes заметны на узком экране.</li><li>Карточки недель и тренировок раскрываются предсказуемо.</li></ul></div>
             </div>
@@ -1040,15 +1040,15 @@
         <article class="step-card" id="step-4">
           <div class="step-body">
             <div class="copy">
-              <span class="step-kicker">Шаг 4 / Imports</span>
-              <h3>Импортируйте тренировки со скриншота или CSV</h3>
-              <p>Импорт должен быть безопасным: Huawei и iPhone/Apple Fitness examples распознаются шаблоном, а неизвестные скрины проходят через vision LLM и требуют проверки candidate.</p>
+              <span class="step-kicker">Шаг 4 / Добавить тренировку</span>
+              <h3>Добавьте тренировку со скриншотов или из CSV</h3>
+              <p>Добавление должно быть безопасным: Huawei и iPhone/Apple Fitness examples обрабатываются шаблоном, а неизвестные скриншоты проходят через vision LLM и требуют проверки данных.</p>
               <ol class="action-list">
                 <li>Загрузите PNG/JPEG/WEBP через gallery/file picker.</li>
                 <li>Для iPhone загрузите оба Apple Fitness скрина: summary и splits/HR/map.</li>
                 <li>Не смешивайте несколько разных тренировок в одном upload: Runforfan создаёт одну activity на batch.</li>
-                <li>Проверьте статус batch и сообщение распознавания.</li>
-                <li>Если recognition неверный, исправьте поля или зафиксируйте ошибку.</li>
+                <li>Проверьте понятный статус и следующий шаг.</li>
+                <li>Если данные неверны, исправьте поля. Для retryable ошибки нажмите «Повторить сейчас» и убедитесь, что обработка началась заново.</li>
                 <li>Проверьте CSV fallback: created, duplicates, matched, failed.</li>
               </ol>
               <div class="check"><strong>Что проверить</strong><ul><li>Huawei и iPhone examples создают корректную activity без LLM.</li><li>LLM candidate не превращается в activity без подтверждения.</li><li>Ошибки recognition объясняют, что пошло не так.</li><li>История импорта помещается в мобильные карточки.</li></ul></div>
@@ -1064,9 +1064,9 @@
         <article class="step-card" id="step-5">
           <div class="step-body">
             <div class="copy">
-              <span class="step-kicker">Шаг 5 / Activities</span>
-              <h3>Проверьте список и детали активностей</h3>
-              <p>Activities - место, где импортированные и ручные тренировки должны стать понятными мобильными карточками с валидацией и деталями.</p>
+              <span class="step-kicker">Шаг 5 / Тренировки</span>
+              <h3>Проверьте историю и детали тренировок</h3>
+              <p>Раздел «Тренировки» находится в группе «Еще». Здесь загруженные и ручные тренировки должны стать понятными мобильными карточками с проверкой и деталями.</p>
               <ol class="action-list">
                 <li>Найдите активность после импорта и откройте detail panel.</li>
                 <li>Создайте manual activity: title, started, type, duration, distance, avg HR.</li>
@@ -1252,7 +1252,7 @@
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>Auth gate</h4><ul><li>Production: Telegram Login Widget отображается и не перекрывается на 360-430px.</li><li>Dev/local: dev login работает, статус показывает <code>DEMO USER</code>.</li><li>Если нет <code>VITE_TELEGRAM_BOT_USERNAME</code>, текст ошибки понятен.</li><li>Auth error показывает сообщение, но не ломает layout.</li></ul></div>
               <div class="formula-card"><h4>Session states</h4><ul><li><code>LOADING</code>: виден skeleton/loading, нет прыжков layout.</li><li><code>LOGIN REQUIRED</code>: пользователь понимает, как войти.</li><li><code>API ERROR</code>: есть понятное объяснение, а не пустая страница.</li><li>Expired token очищает сессию и возвращает к login без бесконечного цикла.</li></ul></div>
-              <div class="formula-card"><h4>Navigation</h4><ul><li>Desktop sidebar и mobile drawer ведут на все 12 разделов приложения.</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активный раздел подсвечивается.</li><li>Переходы Dashboard -> Imports/Plans работают одним tap.</li></ul></div>
+              <div class="formula-card"><h4>Navigation</h4><ul><li>Основные разделы: «Сегодня», «План», «Добавить тренировку», «Прогресс», «Профиль»; остальные доступны через «Еще».</li><li>Mobile menu overlay закрывается по крестику и tap вне drawer.</li><li>Активный раздел подсвечивается, а topbar показывает его название.</li><li>Direct URL, refresh и Back/Forward сохраняют выбранный раздел.</li></ul></div>
               <div class="formula-card"><h4>Topbar</h4><ul><li>RU/EN переключатель меняет язык и сохраняется.</li><li>Status badge не обрезается на узкой ширине.</li><li>Telegram имя пользователя отображается аккуратно и не ломает header.</li><li>Theme icon переключает dark/light режим и сохраняет выбор.</li></ul></div>
               <div class="formula-card"><h4>Shared components</h4><ul><li>Collapsible sections раскрываются/закрываются без reset состояния.</li><li>DataTable mobile cards имеют search, sort и pagination.</li><li>Responsive detail panel закрывается и не оставляет scroll lock.</li><li>Calculation explainers раскрываются пальцем и читаются без horizontal scroll.</li></ul></div>
               <div class="formula-card"><h4>Глобальные баги</h4><ul><li>Любой горизонтальный скролл body на 360-430px.</li><li>Tap targets меньше удобного пальцем размера.</li><li>Metadata с ID/source/hash переводится или переносится нечитаемо.</li><li>Ошибка API выглядит как успешный ноль.</li></ul></div>
@@ -1262,7 +1262,7 @@
           </details>
 
           <details class="appendix-item">
-            <summary><strong>G1. Dashboard / Overview</strong><span>Главная: readiness, week focus, alerts и быстрые действия.</span></summary>
+            <summary><strong>G1. Сегодня</strong><span>Ближайшая тренировка, текущая неделя, история и полезные предупреждения.</span></summary>
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>Hero и summary</h4><ul><li>Проверить readiness badge: <code>ok</code>, <code>watch</code>, <code>risk</code>.</li><li>Active plan title или <code>no active plan</code> должны быть понятны.</li><li>Summary stats: activities, distance, week done, providers.</li><li>Кнопки <code>+ Add screenshots</code> и <code>Open plans</code> ведут в правильные pages.</li></ul></div>
               <div class="formula-card"><h4>Workout focus</h4><ul><li>Есть today workout: видны type, target, date, status, score/risk.</li><li>Есть только next workout: copy не обещает тренировку сегодня.</li><li>Нет active workout: есть action <code>Create or activate plan</code>.</li><li>Linked actual не смешивается с planned target.</li></ul></div>
@@ -1276,7 +1276,7 @@
           </details>
 
           <details class="appendix-item">
-            <summary><strong>G2. Activities</strong><span>Список, ручное создание, detail overlay, validation и metadata.</span></summary>
+            <summary><strong>G2. Тренировки</strong><span>История, ручное добавление, detail overlay, validation и metadata.</span></summary>
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>List и mobile cards</h4><ul><li>Search/filter по title/date/id работает.</li><li>Sort на mobile доступен отдельным select.</li><li>Pagination не теряет filter.</li><li>Empty filter показывает <code>No activities match this filter</code> и import action.</li></ul></div>
               <div class="formula-card"><h4>Manual activity</h4><ul><li>Форма раскрывается в collapsible, не перегружает страницу.</li><li>Required: duration min.</li><li>Поля: title, started, type, distance, duration, avg HR, source note.</li><li>Success сообщает created ID, ошибка API не создает phantom row.</li></ul></div>
@@ -1291,12 +1291,13 @@
           </details>
 
           <details class="appendix-item">
-            <summary><strong>G3. Imports</strong><span>Скриншоты, CSV, confirmation, correction, matching и history.</span></summary>
+            <summary><strong>G3. Добавить тренировку</strong><span>Скриншоты, CSV, проверка, retry, отметка в плане и история.</span></summary>
             <div class="appendix-content formula-grid">
               <div class="formula-card"><h4>Screenshot upload</h4><ul><li>Нет файла: понятное сообщение, submit не создает batch.</li><li>Один batch должен содержать скрины только одной тренировки.</li><li>Несколько тренировок за период загружаются отдельными batches или CSV.</li><li>PNG/JPEG/WEBP принимаются через mobile file picker.</li><li>Processing state блокирует повторный submit.</li></ul></div>
               <div class="formula-card"><h4>Supported templates</h4><ul><li>Huawei interval 3 x 2 km и iPhone Apple Fitness run работают без LLM.</li><li>iPhone example состоит из двух screenshots: summary и splits/HR/map.</li><li>Unknown screenshots require active vision LLM provider.</li></ul></div>
               <div class="formula-card"><h4>Candidate review</h4><ul><li>Если <code>requires_confirmation</code>, candidate не создает activity сам.</li><li>Видны title, distance, duration, pace, HR, uncertainty notes.</li><li>Estimated fields помечены отдельно.</li><li>Reject candidate оставляет понятную запись в history.</li></ul></div>
               <div class="formula-card"><h4>Corrections</h4><ul><li>Перед confirm можно исправить title, started, distance, duration, pace, HR.</li><li>Save corrections не должен подтверждать candidate автоматически.</li><li>Ошибки в коррекциях возвращаются в этой же карточке.</li></ul></div>
+              <div class="formula-card"><h4>Retry</h4><ul><li><code>retry_scheduled</code> показывает, что предыдущая попытка завершилась ошибкой и будет повторена автоматически.</li><li>Для retryable state видна кнопка <code>Повторить сейчас</code>.</li><li>После ручного retry batch возвращается в <code>queued</code>, attempts и last error сбрасываются.</li><li>Неизвестная программная ошибка не должна повторяться автоматически бесконечно.</li></ul></div>
               <div class="formula-card"><h4>Plan matching</h4><ul><li>Auto-match явно показывает matched workout.</li><li>Unmatched result показывает candidate list или no confident candidates.</li><li>Link action связывает activity и workout один раз.</li><li>Candidate API error не скрывает успешно созданную activity.</li></ul></div>
               <div class="formula-card"><h4>CSV import</h4><ul><li>Created, duplicates, matched, failed видны отдельными stat cards.</li><li>Ошибки CSV показываются списком, не всей сырой простыней.</li><li>Duplicate rows не создают новые activities.</li><li>Source app сохраняется как metadata.</li></ul></div>
               <div class="formula-card"><h4>Import history</h4><ul><li>Empty: <code>История импортов пока пуста</code>.</li><li>Refresh не сбрасывает last result.</li><li>History cards показывают status, engine, activity, created_at.</li><li>Pending confirmation доступна из history.</li></ul></div>

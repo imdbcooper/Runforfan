@@ -101,27 +101,22 @@ PWA boundaries:
 - Offline fallback должен объяснять, что Telegram login, profile, plans, imports, calculations и exports требуют интернет и backend.
 - `/admin/` остается compatibility redirect на `/app/`, но PWA не использует `/admin/` как start URL.
 
-Целевые routes:
+Текущие routes:
 
-- `/app/` - Dashboard.
-- `/app/onboarding` - первичная настройка профиля.
-- `/app/activities` - список тренировок.
-- `/app/activities/:id` - детальная тренировка.
-- `/app/imports` - импорт и подтверждение распознавания.
+- `/app/` - `Сегодня`: ближайшая тренировка, неделя и последние тренировки.
+- `/app/planning` - `План`.
+- `/app/imports` - `Добавить тренировку`.
+- `/app/analytics` - `Прогресс`.
+- `/app/profile` - `Профиль`.
 - `/app/calendar` - календарь тренировок и плана.
-- `/app/plans` - список планов.
-- `/app/plans/new` - мастер создания плана.
-- `/app/plans/:id` - план по неделям.
-- `/app/workouts/:id` - запланированная тренировка и факт выполнения.
-- `/app/analytics` - общий analytics hub.
-- `/app/analytics/performance` - результаты, VDOT, прогнозы.
-- `/app/analytics/load` - нагрузка, fatigue, monotony, strain.
-- `/app/analytics/zones` - зоны, распределение интенсивности.
+- `/app/activities` - история тренировок.
 - `/app/goals` - цели и забеги.
-- `/app/profile` - профиль, физиология, ограничения.
-- `/app/settings/llm` - LLM providers.
-- `/app/settings/integrations` - источники данных.
-- `/app/settings/data` - экспорт, удаление, audit.
+- `/app/load` - нагрузка и восстановление.
+- `/app/zones` - аналитика зон.
+- `/app/performance` - результаты, VDOT и прогнозы.
+- `/app/settings` - providers, integrations, export, delete и audit.
+
+Первые пять routes являются primary navigation. Остальные находятся в группе `Еще`. Навигация URL-based; refresh, direct links и Back/Forward сохраняют раздел. `/app/dashboard` и `/app/overview` остаются aliases для `Сегодня`.
 
 ## 6. Страницы и профессиональный функционал
 
@@ -159,7 +154,7 @@ Acceptance criteria:
 - Все оценочные поля помечены `estimated`.
 - Планировщик получает structured athlete context.
 
-### 6.2. Dashboard
+### 6.2. Сегодня
 
 Цель страницы: быстрый ответ на вопросы: что делать сегодня, как идет прогресс, есть ли риск перегруза.
 
@@ -175,7 +170,7 @@ Acceptance criteria:
 
 Профессиональная логика:
 
-- Dashboard не должен показывать один общий score без объяснения. Любой score раскрывается через факторы.
+- Экран `Сегодня` не должен показывать один общий score без объяснения. Любой score раскрывается через факторы.
 - Если план есть, показывать plan adherence и planned vs actual.
 - Если плана нет, показывать CTA `Create plan` и recommended next safe step.
 
@@ -253,20 +248,22 @@ API:
 
 ### 6.5. Imports
 
-Цель страницы: безопасный импорт скриншотов и контроль распознавания.
+Цель страницы: понятное добавление тренировки из скриншотов с проверкой данных и восстановлением после ошибок.
 
 Функции:
 
 - Upload drag-and-drop, до 6 файлов на batch в MVP.
 - Source app selector: Huawei Health, Garmin, Strava, manual, unknown.
 - Recognition mode: default provider, selected provider, template only.
-- Batch status: uploaded, recognizing, recognized_candidate, pending_confirmation, validation_failed, rejected_no_template, confirmed.
+- Batch status включает `queued`, `retry_scheduled`, `recognizing`, `pending_confirmation`, `recognized`, `validation_failed`, `recognition_failed`, `rejected_no_llm_template`, `duplicate`, `rejected_by_user`, `imported`.
 - Candidate review: пользователь видит распознанные поля до записи в analytics.
 - Field-level confidence: distance, duration, pace, HR, date, segments.
 - Manual corrections: редактирование candidate до подтверждения.
 - Validation report: consistency checks.
 - Confirm creates activity.
 - Reject keeps screenshots but не создает activity.
+- Известные временные provider failures автоматически переходят в `retry_scheduled` и повторяются worker-ом.
+- Для retryable состояний пользователь видит действие `Повторить сейчас`; raw engine/errors скрыты в технических деталях.
 
 Validation checks:
 
@@ -286,6 +283,7 @@ API:
 - `PATCH /api/imports/{id}/candidate`
 - `POST /api/imports/{id}/confirm`
 - `POST /api/imports/{id}/reject`
+- `POST /api/imports/{id}/retry`
 - `GET /api/imports/{id}/validation`
 
 ### 6.6. Calendar

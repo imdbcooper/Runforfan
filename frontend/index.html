@@ -9,9 +9,22 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Runforfan" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
-    <link rel="icon" type="image/svg+xml" href="%BASE_URL%icons/runforfan-icon.svg" />
-    <link rel="apple-touch-icon" href="%BASE_URL%icons/runforfan-apple-touch-icon.png" />
+    <script>
+      const assetBase = "%BASE_URL%"
+      const manifest = document.createElement("link")
+      manifest.rel = "manifest"
+      manifest.href = `${assetBase}manifest.webmanifest`
+      document.head.appendChild(manifest)
+      const icon = document.createElement("link")
+      icon.rel = "icon"
+      icon.type = "image/svg+xml"
+      icon.href = `${assetBase}icons/runforfan-icon.svg`
+      document.head.appendChild(icon)
+      const appleIcon = document.createElement("link")
+      appleIcon.rel = "apple-touch-icon"
+      appleIcon.href = `${assetBase}icons/runforfan-apple-touch-icon.png`
+      document.head.appendChild(appleIcon)
+    </script>
     <title>Runforfan</title>
     <script>
       (() => {
