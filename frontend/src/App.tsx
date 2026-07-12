@@ -1502,8 +1502,8 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
       {detail ? <ResponsiveDetailPanel title={uiText("Детали тренировки", "Workout details")} onClose={closeActivityDetail}><ActivityDetailPanel activity={detail} validation={validation} loading={detailLoading} error={detailError} onClose={closeActivityDetail} onRefresh={() => void openActivityDetail(detail.id)} onUpdate={updateActivity} /></ResponsiveDetailPanel> : null}
       {activities.some((activity) => activity.workout_blocks?.length) && <CollapsibleSection title="Interval structures" summary={<Badge>{activities.filter((activity) => activity.workout_blocks?.length).length}</Badge>} className="mx-4 mb-4"><div className="grid gap-3 lg:grid-cols-2">
         {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
-          <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
+          <div className="mb-2 flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge className="shrink-0" translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+          <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-2 gap-x-2 gap-y-1 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px] sm:grid-cols-[minmax(5rem,1fr)_auto_auto_auto] sm:items-center"><span className={cn("min-w-0 break-words font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-right text-zinc-500 sm:text-left">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span className="text-right sm:text-left">{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
         </div>)}
       </div></CollapsibleSection>}
     </Card>
@@ -1534,8 +1534,8 @@ function Activities({ activities, compact = false, onImport, onChanged }: { acti
     </div>
     {!compact && activities.some((activity) => activity.workout_blocks?.length) && <div className="grid gap-3 border-t border-zinc-800 p-4 lg:grid-cols-2">
       {activities.filter((activity) => activity.workout_blocks?.length).map((activity) => <div key={`blocks-${activity.id}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-        <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
-        <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-[5rem_1fr_4rem_4rem] gap-2 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px]"><span className={cn("font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-zinc-500">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span>{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
+        <div className="mb-2 flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words text-sm font-medium text-white" translate="no">{activity.title}</p><p className="text-[11px] text-zinc-500">Интервальная структура</p></div><Badge className="shrink-0" translate="no">{workoutBlockSummary(activity) || "blocks"}</Badge></div>
+        <div className="grid gap-1" translate="no">{activity.workout_blocks.map((block) => <div key={block.id} className="grid grid-cols-2 gap-x-2 gap-y-1 rounded-md bg-zinc-900/60 px-2 py-1.5 text-[11px] sm:grid-cols-[minmax(5rem,1fr)_auto_auto_auto] sm:items-center"><span className={cn("min-w-0 break-words font-medium", block.block_type === "work" ? "text-orange-300" : "text-zinc-400")}>{block.title}</span><span className="text-right text-zinc-500 sm:text-left">{formatDuration(block.duration_seconds)}</span><span>{formatDistance(block.distance_km)}</span><span className="text-right sm:text-left">{formatPace(block.pace_seconds_per_km)}{perKmUnit()}</span></div>)}</div>
       </div>)}
     </div>}
   </Card>
@@ -3836,7 +3836,6 @@ function workoutSafetyNote(workout: PlanWorkout) {
 }
 
 function Planning() {
-  const [plans, setPlans] = useState<Plan[]>([])
   const [result, setResult] = useState<Plan | null>(null)
   const [builderPreview, setBuilderPreview] = useState<PlanBuilderPreview | null>(null)
   const [builderPreviewError, setBuilderPreviewError] = useState("")
@@ -3861,9 +3860,6 @@ function Planning() {
   const [previewingRecommendations, setPreviewingRecommendations] = useState(false)
   const [applyingRecommendations, setApplyingRecommendations] = useState(false)
   const [loadingCandidates, setLoadingCandidates] = useState<number | null>(null)
-  const [busyPlan, setBusyPlan] = useState<number | null>(null)
-  const [planActionError, setPlanActionError] = useState("")
-  const [renameDrafts, setRenameDrafts] = useState<Record<number, string>>({})
   const [quickGoal, setQuickGoal] = useState("marathon")
   const [quickDays, setQuickDays] = useState(4)
   const planBuilderForm = useRef<HTMLFormElement>(null)
@@ -3873,21 +3869,10 @@ function Planning() {
   async function loadPlans(preferredPlanId?: number | null) {
     await devLogin()
     const nextPlans = await api.plans()
-    const previousTitles = new Map(plans.map((plan) => [plan.id, plan.title]))
-    setPlans(nextPlans)
-    setRenameDrafts((current) => {
-      const next: Record<number, string> = {}
-      for (const plan of nextPlans) {
-        const currentDraft = current[plan.id]
-        const previousTitle = previousTitles.get(plan.id)
-        next[plan.id] = currentDraft === undefined || currentDraft === previousTitle ? plan.title : currentDraft
-      }
-      return next
-    })
     setResult((current) => {
-      if (preferredPlanId === null) return nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
-      if (preferredPlanId !== undefined) return nextPlans.find((plan) => plan.id === preferredPlanId) || nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
-      return current ? nextPlans.find((plan) => plan.id === current.id) || current : nextPlans.find((plan) => plan.status === "active") || nextPlans[0] || null
+      if (preferredPlanId === null) return nextPlans[0] || null
+      if (preferredPlanId !== undefined) return nextPlans.find((plan) => plan.id === preferredPlanId) || nextPlans[0] || null
+      return nextPlans[0] || current
     })
   }
 
@@ -3898,6 +3883,7 @@ function Planning() {
 
   async function createPlan(activatePlan = false) {
     if (!planBuilderForm.current) return
+    if (result && !window.confirm(uiText("Заменить текущую программу? Выполненные тренировки сохранятся в истории.", "Replace the current plan? Completed workouts will stay in your history."))) return
     setCreatingPlan(true)
     setBuilderPreviewError("")
     try {
@@ -3933,69 +3919,6 @@ function Planning() {
     await loadPlans(plan.id)
     await loadRecommendations(plan.id)
     await loadPlanVersions(plan.id)
-  }
-
-  async function updatePlanStatus(plan: Plan, status: "completed" | "archived") {
-    setBusyPlan(plan.id)
-    setPlanActionError("")
-    try {
-      const updated = await api.updatePlan(plan.id, { status })
-      await loadPlans(updated.id)
-      await loadRecommendations(updated.id)
-      await loadRecommendationAudits(updated.id)
-      await loadPlanVersions(updated.id)
-    } catch (error) {
-      console.error(error)
-      setPlanActionError(uiText("Не удалось обновить программу", "Could not update the plan"))
-    } finally {
-      setBusyPlan(null)
-    }
-  }
-
-  async function renamePlan(plan: Plan) {
-    const title = (renameDrafts[plan.id] || plan.title).trim()
-    if (!title || title === plan.title) return
-    setBusyPlan(plan.id)
-    setPlanActionError("")
-    try {
-      const updated = await api.updatePlan(plan.id, { title })
-      await loadPlans(updated.id)
-      await loadPlanVersions(updated.id)
-    } catch (error) {
-      console.error(error)
-      setPlanActionError(uiText("Не удалось переименовать программу", "Could not rename the plan"))
-    } finally {
-      setBusyPlan(null)
-    }
-  }
-
-  async function duplicatePlan(plan: Plan) {
-    setBusyPlan(plan.id)
-    setPlanActionError("")
-    try {
-      const duplicated = await api.duplicatePlan(plan.id)
-      await loadPlans(duplicated.id)
-    } catch (error) {
-      console.error(error)
-      setPlanActionError(uiText("Не удалось создать копию программы", "Could not duplicate the plan"))
-    } finally {
-      setBusyPlan(null)
-    }
-  }
-
-  async function deleteSelectedPlan(plan: Plan) {
-    if (!window.confirm(uiText("Удалить эту программу? Это действие нельзя отменить.", "Delete this plan? This cannot be undone."))) return
-    setBusyPlan(plan.id)
-    setPlanActionError("")
-    try {
-      await api.deletePlan(plan.id)
-      await loadPlans(null)
-    } catch (error) {
-      console.error(error)
-      setPlanActionError(plan.status === "active" ? uiText("Активную программу нельзя удалить: сначала архивируйте ее", "The active plan cannot be deleted: archive it first") : uiText("Не удалось удалить программу", "Could not delete the plan"))
-    } finally {
-      setBusyPlan(null)
-    }
   }
 
   async function loadPlanWeeks(planId: number) {
@@ -4267,7 +4190,7 @@ function Planning() {
   return <div className="grid gap-4">
     <Card className="overflow-hidden border-orange-400/25 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,0.14),transparent_32%),#0b0b0b] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="text-xs font-semibold text-orange-200">{uiText("Моя программа", "My plan")}</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{result ? uiText("Следующий шаг уже в плане", "Your next step is already in the plan") : uiText("Сначала создайте программу", "Create a plan first")}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">{result ? uiText("Сначала смотрите ближайшую тренировку и текущую неделю. Создание другой программы ниже свернуто как вторичное действие.", "Start with the next workout and current week. Creating another plan is collapsed below as a secondary action.") : uiText("Ответьте на несколько вопросов, и программа появится здесь.", "Answer a few questions and the plan will appear here.")}</p></div>
+        <div><p className="text-xs font-semibold text-orange-200">{uiText("Моя программа", "My plan")}</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{result ? uiText("Следующий шаг уже в плане", "Your next step is already in the plan") : uiText("Сначала создайте программу", "Create a plan first")}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">{result ? uiText("У вас одна текущая программа. Здесь всегда показаны ближайшая тренировка и актуальная неделя.", "You have one current plan. The next workout and current week are always shown here.") : uiText("Ответьте на несколько вопросов, и программа появится здесь.", "Answer a few questions and the plan will appear here.")}</p></div>
         {result ? <Badge className={planStatusClass(result.status)}>{planStatusLabel(result.status)}</Badge> : null}
       </div>
       <div className="mt-4">
@@ -4306,9 +4229,9 @@ function Planning() {
       </div>
     </Card>
 
-    <CollapsibleSection key={result ? "secondary-plan-builder" : "primary-plan-builder"} title={result ? uiText("Создать или выбрать другую программу", "Create or choose another plan") : uiText("Создать программу", "Create a plan")} summary={result ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("после текущего плана", "after current plan")}</Badge> : <Badge>{uiText("начать", "start")}</Badge>} defaultOpen={!result}>
+    <CollapsibleSection key={result ? "secondary-plan-builder" : "primary-plan-builder"} title={result ? uiText("Пересобрать текущую программу", "Rebuild current plan") : uiText("Создать программу", "Create a plan")} summary={result ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("заменит текущую", "replaces current")}</Badge> : <Badge>{uiText("начать", "start")}</Badge>} defaultOpen={!result}>
     <Card>
-      <CardHeader><div><CardTitle>{uiText("Создать программу", "Create a plan")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Мы берем последние пробежки, зоны и ограничения. Если данных мало, программа будет осторожнее.", "Runforfan uses recent runs, zones and constraints. If data is limited, the plan stays conservative.")}</p></div>{result && <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("вторично", "secondary")}</Badge>}</CardHeader>
+      <CardHeader><div><CardTitle>{result ? uiText("Пересобрать программу", "Rebuild plan") : uiText("Создать программу", "Create a plan")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Мы берем только беговые тренировки, зоны и ограничения. Новая программа заменит текущую, а выполненные тренировки останутся в истории.", "Runforfan uses running workouts, zones and constraints. A new plan replaces the current one while completed workouts stay in history.")}</p></div>{result && <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("одна программа", "one plan")}</Badge>}</CardHeader>
       <form ref={planBuilderForm} onSubmit={generate} className="grid gap-3 p-4 text-xs">
         <div className="grid gap-2">
           <p className="font-semibold text-white">{uiText("К чему готовимся?", "What are you preparing for?")}</p>
@@ -4343,16 +4266,11 @@ function Planning() {
             <div className="grid gap-2 sm:grid-cols-3"><Field label={uiText("Приоритет", "Priority")}><Select name="priority" defaultValue="b"><option value="a">{uiText("главный старт", "main race")}</option><option value="b">{uiText("обычный старт", "normal race")}</option><option value="c">{uiText("тренировочный старт", "training race")}</option></Select></Field><Field label={uiText("Рост нагрузки", "Load growth")}><Select name="aggressiveness" defaultValue="auto"><option value="auto">{uiText("авто", "auto")}</option><option value="beginner">{uiText("осторожнее", "more careful")}</option><option value="intermediate">{uiText("средне", "moderate")}</option><option value="advanced">{uiText("смелее, если история позволяет", "bolder if history allows")}</option></Select></Field><Field label={uiText("Ориентир", "Intensity guide")}><Select name="intensity_mode" defaultValue="mixed"><option value="mixed">{uiText("смешанный", "mixed")}</option><option value="pace">{uiText("темп", "pace")}</option><option value="hr">{uiText("пульс", "heart rate")}</option><option value="rpe">{uiText("ощущения", "feel")}</option></Select></Field></div>
           </div>
         </CollapsibleSection>
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Button type="submit" className="text-sm" disabled={creatingPlan}>{creatingPlan ? uiText("Создаем программу...", "Creating plan...") : uiText("Создать и открыть программу", "Create and open plan")}</Button><Button type="button" variant="secondary" disabled={previewingBuilder || creatingPlan} onClick={previewBuilder}>{previewingBuilder ? uiText("Готовим проверку...", "Preparing preview...") : uiText("Проверить план", "Preview plan")}</Button></div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Button type="submit" className="text-sm" disabled={creatingPlan}>{creatingPlan ? uiText("Сохраняем программу...", "Saving plan...") : result ? uiText("Заменить текущую программу", "Replace current plan") : uiText("Создать и открыть программу", "Create and open plan")}</Button><Button type="button" variant="secondary" disabled={previewingBuilder || creatingPlan} onClick={previewBuilder}>{previewingBuilder ? uiText("Готовим проверку...", "Preparing preview...") : uiText("Проверить план", "Preview plan")}</Button></div>
       </form>
       {builderPreviewError ? <div className="mx-4 mb-4 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{builderPreviewError}</div> : null}
       {builderPreview ? <PlanBuilderPreviewCard preview={builderPreview} /> : null}
-      <div className="border-t border-zinc-800 p-4">
-        <CollapsibleSection title={uiText("Мои программы", "My programs")} summary={<Badge>{plans.length}</Badge>}>
-          {planActionError ? <p className="mb-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-xs text-orange-100">{planActionError}</p> : null}
-          <div className="grid gap-2">{plans.map((plan) => <PlanListCard key={plan.id} plan={plan} selected={result?.id === plan.id} busy={busyPlan === plan.id} renameDraft={renameDrafts[plan.id] ?? plan.title} onSelect={() => setResult(plan)} onRenameDraft={(value) => setRenameDrafts((current) => ({ ...current, [plan.id]: value }))} onRename={() => renamePlan(plan)} onActivate={() => activate(plan.id)} onArchive={() => updatePlanStatus(plan, "archived")} onComplete={() => updatePlanStatus(plan, "completed")} onDuplicate={() => duplicatePlan(plan)} onDelete={() => deleteSelectedPlan(plan)} />)}</div>
-        </CollapsibleSection>
-      </div>
+      {result ? <div className="border-t border-zinc-800 p-4 text-xs text-zinc-500">{uiText("После замены здесь останется только новая текущая программа. Прошлые выполненные тренировки не удаляются.", "After replacement, only the new current plan is shown here. Past completed workouts are not deleted.")}</div> : null}
     </Card>
     </CollapsibleSection>
   </div>
@@ -4407,30 +4325,6 @@ function PlanBuilderPreviewCard({ preview }: { preview: PlanBuilderPreview }) {
     {remainingWorkouts.length ? <CollapsibleSection title={uiText("Остальные тренировки в проверке", "Other preview workouts")} className="mt-3" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{remainingWorkouts.length}</Badge>}>
       <div className="grid gap-1.5">{remainingWorkouts.map((workout) => <div key={`${workout.week_index}-${workout.day_index}-${workout.title}`} className="rounded-md border border-zinc-900 bg-zinc-950 px-2 py-1.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{uiText("Неделя", "Week")} {workout.week_index} · {coachPreviewWorkoutTitle(workout)}</p><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge></div><p className="mt-1 text-zinc-500">{formatDate(workout.scheduled_date)} · {formatWorkoutTarget(workout)}</p></div>)}</div>
     </CollapsibleSection> : null}
-  </div>
-}
-
-function PlanListCard({ plan, selected, busy, renameDraft, onSelect, onRenameDraft, onRename, onActivate, onArchive, onComplete, onDuplicate, onDelete }: { plan: Plan; selected: boolean; busy: boolean; renameDraft: string; onSelect: () => void; onRenameDraft: (value: string) => void; onRename: () => void; onActivate: () => void; onArchive: () => void; onComplete: () => void; onDuplicate: () => void; onDelete: () => void }) {
-  const weeks = planWeekCount(plan)
-  const plannedKm = planPlannedDistance(plan)
-  const adherence = Math.round((plan.adherence?.completion_rate || 0) * 100)
-  const renameChanged = renameDraft.trim() && renameDraft.trim() !== plan.title
-  return <div className={cn("rounded-md border p-2 text-xs", selected ? "border-orange-400/40 bg-orange-400/10" : "border-zinc-800 bg-zinc-950")}>
-    <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect() }} className="cursor-pointer rounded-sm outline-none focus:ring-1 focus:ring-orange-400/60">
-      <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{displayPlanTitle(plan)}</p><p className="mt-1 text-zinc-500">{planGoalTypeLabel(plan.goal_type)} · {uiText("старт", "start")} {formatDate(plan.target_date)} · {planCurrentWeekLabel(plan)}</p></div><Badge className={planStatusClass(plan.status)}>{planStatusLabel(plan.status)}</Badge></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label={uiText("недель", "weeks")} value={weeks} /><Stat label={kmUnit()} value={plannedKm.toFixed(1)} /><Stat label={uiText("готово", "done")} value={`${adherence}%`} /></div>
-    </div>
-    <CollapsibleSection title={uiText("Управление", "Manage")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("действия", "actions")}</Badge>}>
-      <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]"><Input value={renameDraft} onChange={(event) => onRenameDraft(event.target.value)} placeholder={uiText("Название программы", "Program name")} /><Button size="sm" variant="ghost" disabled={busy || !renameChanged} onClick={onRename}>{busy ? uiText("Сохраняем...", "Saving...") : uiText("Переименовать", "Rename")}</Button></div>
-      <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]"><Stat label={uiText("тренировок", "workouts")} value={plan.workouts.length} /><Stat label="ОФП" value={planSupportWorkouts(plan)} /><Stat label={uiText("время", "time")} value={formatDuration(planPlannedDuration(plan))} /></div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {plan.status !== "active" ? <Button size="sm" disabled={busy} onClick={onActivate}>{uiText("Сделать активной", "Make active")}</Button> : null}
-        {plan.status !== "completed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onComplete}>{uiText("Завершить", "Complete")}</Button> : null}
-        {plan.status !== "archived" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onArchive}>{uiText("В архив", "Archive")}</Button> : null}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>{uiText("Копия", "Duplicate")}</Button>
-        <Button size="sm" variant="ghost" disabled={busy || plan.status === "active"} onClick={onDelete}>{uiText("Удалить", "Delete")}</Button>
-      </div>
-    </CollapsibleSection>
   </div>
 }
 
@@ -4582,7 +4476,7 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
       const targetSupportWorkout = isSupportWorkoutType(targetDraft.workout_type)
       const actualSupportWorkout = isSupportWorkoutType(workout.workout_type)
       return <div key={workout.id} className={cn("rounded-md border bg-zinc-950 p-3 text-xs", isNextWorkout ? "border-orange-400/50 ring-1 ring-orange-400/30" : "border-zinc-900")}>
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-medium text-white">{coachWorkoutTitle(workout)}</p><p className="mt-1 text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · {workoutPurpose(workout)}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("ближайшая", "nearest")}</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workoutStatusLabel(workout.status)}</Badge></div></div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="break-words font-medium text-white">{coachWorkoutTitle(workout)}</p><p className="mt-1 break-words text-zinc-500">{workout.scheduled_date ? formatLocalDate(workout.scheduled_date) : noDateLabel()} · {workoutPurpose(workout)}</p></div><div className="flex flex-wrap gap-1.5">{isNextWorkout ? <Badge className="border-orange-400/40 bg-orange-400/15 text-orange-100">{uiText("ближайшая", "nearest")}</Badge> : null}<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{workoutTypeLabel(workout.workout_type)}</Badge><Badge className={workout.status === "done" ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{workoutStatusLabel(workout.status)}</Badge></div></div>
         <div className="mt-3 flex flex-wrap gap-2">
           {canCompleteManually ? <Button size="sm" onClick={() => setOpenCompletionWorkoutId(workout.id)}>{uiText("Отметить", "Mark done")}</Button> : null}
           {!workout.completed_activity_id ? <Button size="sm" variant="secondary" disabled={loadingCandidates === workout.id} onClick={() => onFindCandidates(workout)}>{loadingCandidates === workout.id ? uiText("Ищем...", "Searching...") : uiText("Найти выполненную тренировку", "Find completed workout")}</Button> : <Button size="sm" variant="secondary" onClick={() => onUnlinkActivity(workout)}>{uiText("Снять отметку", "Remove completion")}</Button>}
@@ -4593,8 +4487,8 @@ function PlanWeek({ summary, defaultOpen, nextWorkoutId, candidatesByWorkout, ca
             <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">зачем</span><p className="mt-1 text-zinc-400">{workoutPurpose(workout)}</p></div>
             <div className="rounded-md border border-zinc-900 bg-zinc-950/80 px-2 py-1.5 md:col-span-2"><span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-600">безопасность</span><p className="mt-1 text-zinc-400">{workoutSafetyNote(workout)}</p></div>
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">{workoutBlocks(workout).map((block) => <Badge key={block} className="border-zinc-700 bg-zinc-900 text-zinc-300">{block}</Badge>)}</div>
-          {workout.description ? <CollapsibleSection title={uiText("Текст из плана", "Original plan text")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}><p className="leading-5 text-zinc-500" translate="no">{workout.description}</p></CollapsibleSection> : null}
+          <div className="mt-2 grid gap-1.5">{workoutBlocks(workout).map((block) => <p key={block} className="min-w-0 break-words rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px] leading-4 text-zinc-300">{block}</p>)}</div>
+          {workout.description ? <CollapsibleSection title={uiText("Текст из плана", "Original plan text")} className="mt-2" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("детали", "details")}</Badge>}><p className="break-words leading-5 text-zinc-500" translate="no">{workout.description}</p></CollapsibleSection> : null}
         </CollapsibleSection>
         {workout.completed_activity_id ? <div className="mt-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-2 py-1.5 text-[11px] text-orange-100">{uiText("Тренировка выполнена", "Workout completed")}: {formatWorkoutActual(workout)}</div> : null}
         {workout.execution_score?.score !== null && workout.execution_score ? <CollapsibleSection title="Оценка выполнения" className="mt-2" summary={<Badge className={workout.execution_score.score && workout.execution_score.score >= 0.8 ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : workout.execution_score.subjective_risk === "high" ? "border-rose-400/40 bg-rose-400/15 text-rose-100" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{Math.round((workout.execution_score.score || 0) * 100)}% · {workout.execution_score.status}</Badge>}>

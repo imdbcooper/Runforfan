@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Activity, AthleteProfile, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutUpdate
-from app.services.activity_metrics import sync_derived_activity_metrics
+from app.services.activity_metrics import is_running_activity_type, sync_derived_activity_metrics
 from app.services.plan_versions import create_plan_version
 from app.services.profile import get_or_create_profile, profile_completeness, safety_check
 from app.services.training_load import sync_daily_training_loads_for_activity
@@ -489,12 +489,12 @@ def estimated_volume_from_sparse_history(recent_run_distances: list[float], acti
         return DEFAULT_WEEKLY_VOLUME_KM, "fallback"
     typical_run = float(median(recent_run_distances))
     recent_long = max(recent_run_distances)
-    frequency_floor = 2 if len(recent_run_distances) == 1 else min(requested_days or 3, max(2, len(recent_run_distances)))
-    estimated_volume = max(DEFAULT_WEEKLY_VOLUME_KM, typical_run * frequency_floor, recent_long * 1.6)
+    frequency_floor = min(requested_days or 2, 2)
+    estimated_volume = max(DEFAULT_WEEKLY_VOLUME_KM, typical_run * frequency_floor, recent_long * 1.1)
     return estimated_volume, "estimated_from_recent_runs"
 
 
-def plan_builder_training_context(db: Session, user: User, profile: AthleteProfile, today: date) -> dict[str, object]:
+def plan_builder_training_context(db: Session, user: User, profile: AthleteProfile, today: date, requested_days: int | None = None) -> dict[str, object]:
     activities = list(db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id, Activity.started_at.is_not(None))
@@ -505,7 +505,9 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
     dated = [
         (activity, started_date)
         for activity in activities
-        if (started_date := activity_started_date(activity, profile)) is not None and started_date <= today
+        if is_running_activity_type(activity.activity_type)
+        and (started_date := activity_started_date(activity, profile)) is not None
+        and started_date <= today
     ]
     history_span_days = (max(started_date for _, started_date in dated) - min(started_date for _, started_date in dated)).days + 1 if dated else 0
     observed_weekly_volume = [0.0 for _ in range(6)]
@@ -532,7 +534,7 @@ def plan_builder_training_context(db: Session, user: User, profile: AthleteProfi
         current_volume = float(median(active_recent_weeks))
         source = "observed_median_4w"
     else:
-        current_volume, source = estimated_volume_from_sparse_history(recent_run_distances, active_recent_weeks)
+        current_volume, source = estimated_volume_from_sparse_history(recent_run_distances, active_recent_weeks, requested_days)
 
     running_dates = [started_date for activity, started_date in dated if float(activity.distance_km or 0) > 0]
     consistent_weeks = consecutive_active_weeks(running_dates, today)
@@ -612,7 +614,7 @@ def effective_running_days_for_pattern(requested_days: int, max_days: int, curre
     days = min(requested_days, max_days)
     if not recent_run_median or recent_run_median < 8 or current_volume <= 0:
         return days, False
-    primary_floor = float(recent_run_median) * 0.65
+    primary_floor = float(recent_run_median) * 0.85
     if days <= 2 or current_volume / days >= primary_floor:
         return days, False
     feasible_days = max(2, int(current_volume // primary_floor))
@@ -3031,20 +3033,23 @@ def plan_builder_preview(db: Session, user: User, request: PlanGenerateRequest, 
     profile_safety = safety_check(profile)
     zones = zones_for_plan_builder(db, user, profile)
     start_date = today_for_user(db, user)
-    context = plan_builder_training_context(db, user, profile, start_date)
+    context = plan_builder_training_context(db, user, profile, start_date, requested_days=request.available_days_per_week)
     return build_plan_preview_blueprint(request, profile, completeness, profile_safety, zones, context, start_date)
 
 
 def apply_generated_plan_status(db: Session, user: User, plan: TrainingPlan, activate: bool) -> None:
-    if not activate:
-        plan.status = "draft"
-        return
-    active_plans = list(db.scalars(select(TrainingPlan).where(TrainingPlan.user_id == user.id, TrainingPlan.status == "active")))
-    for active_plan in active_plans:
-        if active_plan.id != plan.id:
-            active_plan.status = "archived"
-            create_plan_version(db, user, active_plan, "manual_edit", "Archived because another plan was activated")
-    plan.status = "active"
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    current_plans = list(db.scalars(
+        select(TrainingPlan)
+        .where(TrainingPlan.user_id == user.id, TrainingPlan.status.in_(("active", "draft")))
+        .with_for_update()
+    ))
+    for current_plan in current_plans:
+        if current_plan.id != plan.id:
+            current_plan.status = "archived"
+            create_plan_version(db, user, current_plan, "manual_edit", "Archived because another program was created")
+    db.flush()
+    plan.status = "active" if activate else "draft"
 
 
 def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> TrainingPlan:
@@ -3091,11 +3096,17 @@ def generate_plan(db: Session, user: User, request: PlanGenerateRequest) -> Trai
 
 
 def activate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
-    active_plans = list(db.scalars(select(TrainingPlan).where(TrainingPlan.user_id == user.id, TrainingPlan.status == "active")))
-    for active_plan in active_plans:
-        if active_plan.id != plan.id:
-            active_plan.status = "archived"
-            create_plan_version(db, user, active_plan, "manual_edit", f"Archived because plan #{plan.id} was activated")
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    current_plans = list(db.scalars(
+        select(TrainingPlan)
+        .where(TrainingPlan.user_id == user.id, TrainingPlan.status.in_(("active", "draft")))
+        .with_for_update()
+    ))
+    for current_plan in current_plans:
+        if current_plan.id != plan.id:
+            current_plan.status = "archived"
+            create_plan_version(db, user, current_plan, "manual_edit", f"Archived because plan #{plan.id} was activated")
+    db.flush()
     plan.status = "active"
     create_plan_version(db, user, plan, "manual_edit", "Activated plan")
     db.commit()
@@ -3114,7 +3125,10 @@ def update_plan(db: Session, user: User, plan: TrainingPlan, payload: PlanUpdate
         return activate_plan(db, user, plan)
     if "status" in updates and updates["status"] is not None:
         if plan.status != updates["status"]:
-            plan.status = updates["status"]
+            if updates["status"] == "draft":
+                apply_generated_plan_status(db, user, plan, activate=False)
+            else:
+                plan.status = updates["status"]
             changed_fields.append("status")
     if changed_fields:
         create_plan_version(db, user, plan, "manual_edit", f"Updated {', '.join(changed_fields)}")
@@ -3124,54 +3138,7 @@ def update_plan(db: Session, user: User, plan: TrainingPlan, payload: PlanUpdate
 
 
 def duplicate_plan(db: Session, user: User, plan: TrainingPlan) -> TrainingPlan:
-    duplicate = TrainingPlan(
-        user_id=user.id,
-        title=f"{plan.title} copy",
-        goal_type=plan.goal_type,
-        race_distance_km=plan.race_distance_km,
-        target_date=plan.target_date,
-        target_time_seconds=plan.target_time_seconds,
-        available_days_per_week=plan.available_days_per_week,
-        status="draft",
-        explanation=plan.explanation,
-    )
-    db.add(duplicate)
-    db.flush()
-    for workout in sorted(plan.workouts, key=lambda item: (item.week_index, item.day_index, item.id)):
-        copied_workout = TrainingPlanWorkout(
-            plan_id=duplicate.id,
-            scheduled_date=workout.scheduled_date,
-            status="planned",
-            week_index=workout.week_index,
-            day_index=workout.day_index,
-            workout_type=workout.workout_type,
-            title=workout.title,
-            distance_km=workout.distance_km,
-            duration_seconds=workout.duration_seconds,
-            intensity=workout.intensity,
-            description=workout.description,
-        )
-        duplicate.workouts.append(copied_workout)
-        db.add(copied_workout)
-        for block in sorted(getattr(workout, "blocks", []) or [], key=lambda item: (item.block_index, item.id or 0)):
-            copied_workout.blocks.append(TrainingPlanWorkoutBlock(
-                block_index=block.block_index,
-                block_type=block.block_type,
-                repeat_count=block.repeat_count,
-                target_distance_km=block.target_distance_km,
-                target_duration_seconds=block.target_duration_seconds,
-                target_pace_min_seconds_per_km=block.target_pace_min_seconds_per_km,
-                target_pace_max_seconds_per_km=block.target_pace_max_seconds_per_km,
-                target_hr_min_bpm=block.target_hr_min_bpm,
-                target_hr_max_bpm=block.target_hr_max_bpm,
-                target_rpe_min=block.target_rpe_min,
-                target_rpe_max=block.target_rpe_max,
-                description=block.description,
-            ))
-    create_plan_version(db, user, duplicate, "user_request", f"Duplicated from plan #{plan.id}")
-    db.commit()
-    db.refresh(duplicate)
-    return duplicate
+    raise ValueError("Only one current training program is supported; rebuild the current program instead")
 
 
 def delete_plan(db: Session, user: User, plan: TrainingPlan) -> int:

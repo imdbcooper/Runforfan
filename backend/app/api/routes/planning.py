@@ -62,7 +62,10 @@ def get_user_activity(db: Session, user: User, activity_id: int) -> Activity:
 
 @router.post("/generate", response_model=PlanOut)
 def generate_training_plan(payload: PlanGenerateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    plan = generate_plan(db, user, payload)
+    try:
+        plan = generate_plan(db, user, payload)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     plan = get_user_plan(db, user, plan.id)
     return plan_to_dict(plan)
 
@@ -76,9 +79,10 @@ def preview_training_plan(payload: PlanGenerateRequest, user: User = Depends(get
 def list_training_plans(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plans = list(db.scalars(
         select(TrainingPlan)
-        .where(TrainingPlan.user_id == user.id)
+        .where(TrainingPlan.user_id == user.id, TrainingPlan.status.in_(("active", "draft")))
         .options(*plan_options())
-        .order_by(TrainingPlan.created_at.desc())
+        .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
+        .limit(1)
     ))
     return [plan_to_dict(plan) for plan in plans]
 
@@ -177,7 +181,10 @@ def update_training_plan(plan_id: int, payload: PlanUpdate, user: User = Depends
 
 @router.post("/plans/{plan_id}/duplicate", response_model=PlanOut)
 def duplicate_training_plan(plan_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    plan = duplicate_plan(db, user, get_user_plan(db, user, plan_id))
+    try:
+        plan = duplicate_plan(db, user, get_user_plan(db, user, plan_id))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return plan_to_dict(get_user_plan(db, user, plan.id))
 
 

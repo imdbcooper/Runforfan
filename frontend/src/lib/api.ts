@@ -1320,7 +1320,6 @@ export const api = {
   planVersions: (id: number) => request<PlanVersion[]>(`/planning/plans/${id}/versions`),
   activatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/activate`, { method: "POST", body: "{}" }),
   updatePlan: (id: number, payload: Record<string, unknown>) => request<Plan>(`/planning/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  duplicatePlan: (id: number) => request<Plan>(`/planning/plans/${id}/duplicate`, { method: "POST", body: "{}" }),
   deletePlan: (id: number) => request<{ deleted: boolean; id: number }>(`/planning/plans/${id}`, { method: "DELETE" }),
   workout: (id: number) => request<PlanWorkout>(`/planning/workouts/${id}`),
   completeWorkout: (id: number, payload: Record<string, unknown>) => request<PlanWorkout>(`/planning/workouts/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),

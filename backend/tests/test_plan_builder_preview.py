@@ -1,12 +1,12 @@
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 try:
     from pydantic import ValidationError
 
     from app.models import Activity, ActivityWorkoutBlock, AthleteProfile, TrainingPlan, User
     from app.schemas.common import PlanGenerateRequest
-    from app.services.planning import activity_is_quality_session, apply_generated_plan_status, build_plan_preview_blueprint, classify_training_age_level, estimated_volume_from_sparse_history
+    from app.services.planning import activity_is_quality_session, apply_generated_plan_status, build_plan_preview_blueprint, classify_training_age_level, estimated_volume_from_sparse_history, plan_builder_training_context
     from app.services.profile import profile_completeness, safety_check
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
@@ -148,7 +148,29 @@ class PlanBuilderPreviewTests(unittest.TestCase):
         volume, source = estimated_volume_from_sparse_history([10.2, 11.0, 9.8], [], requested_days=4)
 
         self.assertEqual(source, "estimated_from_recent_runs")
-        self.assertGreaterEqual(volume, 29.0)
+        self.assertGreaterEqual(volume, 20.0)
+        self.assertLess(volume, 25.0)
+
+    def test_training_context_ignores_non_running_activities(self):
+        today = date(2026, 7, 12)
+        activities = [
+            Activity(id=1, user_id=1, activity_type="outdoor_run", title="Run", started_at=datetime(2026, 7, 10, 8), distance_km=10.0, duration_seconds=3600),
+            Activity(id=2, user_id=1, activity_type="cycling", title="Ride", started_at=datetime(2026, 7, 11, 8), distance_km=60.0, duration_seconds=7200),
+            Activity(id=3, user_id=1, activity_type="manual_strength", title="Strength", started_at=datetime(2026, 7, 9, 8), duration_seconds=2700),
+        ]
+        for activity in activities:
+            activity.workout_blocks = []
+
+        class FakeDb:
+            def scalars(self, _query):
+                return activities
+
+        context = plan_builder_training_context(FakeDb(), User(id=1, display_name="Runner"), make_profile(), today, requested_days=4)
+
+        self.assertEqual(context["activity_count"], 1)
+        self.assertEqual(context["recent_long_run_km"], 10.0)
+        self.assertEqual(context["recent_run_count_4w"], 1)
+        self.assertLess(float(context["current_weekly_volume_km"]), 25.0)
 
     def test_recent_quality_history_can_schedule_first_week_interval(self):
         start_date = date(2026, 6, 8)
@@ -186,10 +208,11 @@ class PlanBuilderPreviewTests(unittest.TestCase):
 
         first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1]
         primary_runs = [workout for workout in first_week if workout["workout_type"] not in {"long", "recovery"}]
-        recovery = next(workout for workout in first_week if workout["workout_type"] == "recovery")
         self.assertTrue(primary_runs)
         self.assertTrue(all(float(workout["distance_km"] or 0) >= 7.0 for workout in primary_runs))
-        self.assertGreaterEqual(float(recovery["distance_km"] or 0), 4.5)
+        recovery = next((workout for workout in first_week if workout["workout_type"] == "recovery"), None)
+        if recovery:
+            self.assertGreaterEqual(float(recovery["distance_km"] or 0), 4.5)
         self.assertNotIn("short_runs_vs_recent_pattern", {flag["code"] for flag in preview["risk_flags"]})
 
     def test_running_days_reduce_when_recent_pattern_would_create_tiny_runs(self):
@@ -209,10 +232,10 @@ class PlanBuilderPreviewTests(unittest.TestCase):
 
         first_week = [workout for workout in preview["workouts"] if workout["week_index"] == 1 and workout["distance_km"] is not None]
         primary_runs = [workout for workout in first_week if workout["workout_type"] not in {"long", "recovery"}]
-        self.assertEqual(preview["available_days_per_week"], 3)
+        self.assertEqual(preview["available_days_per_week"], 2)
         self.assertTrue(preview["constraints"]["running_days_capped_by_recent_pattern"])
         self.assertIn("running_days_capped_by_recent_pattern", {flag["code"] for flag in preview["risk_flags"]})
-        self.assertTrue(all(float(workout["distance_km"] or 0) >= 5.5 for workout in primary_runs))
+        self.assertTrue(all(float(workout["distance_km"] or 0) >= 8.5 for workout in primary_runs))
 
     def test_ready_mixed_mode_can_use_rpe_intervals_without_pace_zones(self):
         start_date = date(2026, 6, 8)

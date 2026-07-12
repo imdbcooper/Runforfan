@@ -90,26 +90,17 @@ class PlanManagementTests(unittest.TestCase):
         self.assertEqual(plan.status, "completed")
         self.assertTrue(db.committed)
 
-    def test_duplicate_plan_resets_status_links_and_feedback(self):
+    def test_duplicate_plan_is_rejected_to_keep_one_current_program(self):
         workout = make_workout(1, status="done", linked=True)
         workout.feedback = TrainingPlanWorkoutFeedback(id=1, user_id=1, workout_id=1, rpe=8)
         workout.blocks = [TrainingPlanWorkoutBlock(id=11, workout_id=1, block_index=1, block_type="work", repeat_count=1, target_distance_km=5.0)]
         plan = make_plan(workout, status="active")
         db = FakeDb()
 
-        duplicate = duplicate_plan(db, make_user(), plan)
+        with self.assertRaisesRegex(ValueError, "Only one current training program"):
+            duplicate_plan(db, make_user(), plan)
 
-        self.assertEqual(duplicate.status, "draft")
-        self.assertEqual(duplicate.title, "Base plan copy")
-        self.assertEqual(duplicate.user_id, 1)
-        self.assertEqual(duplicate.target_time_seconds, 2700)
-        self.assertEqual(len(duplicate.workouts), 1)
-        self.assertEqual(duplicate.workouts[0].status, "planned")
-        self.assertIsNone(duplicate.workouts[0].completed_activity_id)
-        self.assertIsNone(duplicate.workouts[0].feedback)
-        self.assertEqual(len(duplicate.workouts[0].blocks), 1)
-        self.assertEqual(duplicate.workouts[0].blocks[0].block_type, "work")
-        self.assertTrue(db.committed)
+        self.assertFalse(db.committed)
 
     def test_delete_plan_rejects_active_plan(self):
         plan = make_plan(make_workout(1), status="active")

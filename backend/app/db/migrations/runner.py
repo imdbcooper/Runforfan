@@ -392,6 +392,25 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_import_recognition_attempts_provider_id ON import_recognition_attempts (provider_id)",
         ),
     ),
+    (
+        "20260712_0019_single_current_training_plan",
+        (
+            """
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY user_id
+                    ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, created_at DESC, id DESC
+                ) AS position
+                FROM training_plans
+                WHERE status IN ('active', 'draft')
+            )
+            UPDATE training_plans
+            SET status = 'archived'
+            WHERE id IN (SELECT id FROM ranked WHERE position > 1)
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_training_plans_one_current_per_user ON training_plans (user_id) WHERE status IN ('active', 'draft')",
+        ),
+    ),
 )
 
 
