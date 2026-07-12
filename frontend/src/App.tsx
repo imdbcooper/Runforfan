@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CsvImportResult, type DailyReadiness, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -812,6 +812,7 @@ function App() {
   const [activities, setActivities] = useState<ActivityType[]>([])
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
+  const [dailyReadiness, setDailyReadiness] = useState<DailyReadiness | null>(null)
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [profile, setProfile] = useState<AthleteProfile | null>(null)
   const [completeness, setCompleteness] = useState<ProfileCompleteness | null>(null)
@@ -858,17 +859,19 @@ function App() {
   async function refreshGlobal() {
     try {
       await devLogin()
-      const [nextUser, nextActivities, nextAnalytics, nextDashboard, nextProviders] = await Promise.all([
+      const [nextUser, nextActivities, nextAnalytics, nextDashboard, nextReadiness, nextProviders] = await Promise.all([
         api.currentUser(),
         api.activities(),
         api.analytics(),
         api.dashboardSummary(),
+        api.todayReadiness(),
         api.providers(),
       ])
       setCurrentUser(nextUser)
       setActivities(nextActivities)
       setAnalytics(nextAnalytics)
       setDashboard(nextDashboard)
+      setDailyReadiness(nextReadiness)
       setProviders(nextProviders)
       setStatus(authenticatedStatus())
     } catch (error) {
@@ -985,7 +988,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} dashboard={dashboard} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} onReadinessChanged={setDailyReadiness} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -1141,7 +1144,7 @@ function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onL
   </header>
 }
 
-function Overview({ activities, dashboard, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, dashboard, dailyReadiness, onReadinessChanged, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; onReadinessChanged: (value: DailyReadiness) => void; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
@@ -1150,12 +1153,118 @@ function Overview({ activities, dashboard, onImport, onPlans }: { activities: Ac
   const showSignals = Boolean(visibleAlertCount || (readiness?.status && readiness.status !== "ok"))
   return <div className="grid gap-4">
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
+    <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} />
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       {currentWeek ? <CurrentWeekCoachCard currentWeek={currentWeek} onPlans={onPlans} /> : <Card className="p-4 text-sm text-zinc-400">{uiText("Создайте план, чтобы видеть неделю целиком.", "Create a plan to see the week at a glance.")}</Card>}
       <RecentRunsCard activities={recentActivities.slice(0, 3)} />
     </div>
     {showSignals ? <CollapsibleSection title={uiText("Перед тренировкой", "Before your workout")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("если нужно", "if needed")}</Badge>}><DashboardSignals dashboard={dashboard} /></CollapsibleSection> : null}
   </div>
+}
+
+type DailyCheckInDraft = {
+  sleep: string
+  fatigue: string
+  soreness: string
+  stress: string
+  pain: boolean
+  painLevel: string
+  illness: boolean
+  notes: string
+}
+
+function dailyDraft(readiness: DailyReadiness | null): DailyCheckInDraft {
+  const checkin = readiness?.checkin
+  return {
+    sleep: checkin?.sleep_quality_0_10?.toString() || "",
+    fatigue: checkin?.fatigue_0_10?.toString() || "",
+    soreness: checkin?.soreness_0_10?.toString() || "",
+    stress: checkin?.stress_0_10?.toString() || "",
+    pain: checkin?.pain || false,
+    painLevel: checkin?.pain_level_0_10?.toString() || "",
+    illness: checkin?.illness_symptoms || false,
+    notes: checkin?.notes || "",
+  }
+}
+
+function dailyStatusClass(status?: string) {
+  if (status === "stop") return "border-rose-400/40 bg-rose-500/10 text-rose-100"
+  if (status === "rest" || status === "modify") return "border-orange-400/40 bg-orange-400/10 text-orange-100"
+  if (status === "proceed") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+  return "border-zinc-700 bg-zinc-900 text-zinc-300"
+}
+
+function dailyStatusLabel(status?: string) {
+  if (status === "stop") return uiText("стоп", "stop")
+  if (status === "rest") return uiText("отдых", "rest")
+  if (status === "modify") return uiText("облегчить", "modify")
+  if (status === "proceed") return uiText("по плану", "on plan")
+  return uiText("нужен check-in", "check-in needed")
+}
+
+function DailyCoachCheckIn({ readiness, onChanged }: { readiness: DailyReadiness | null; onChanged: (value: DailyReadiness) => void }) {
+  const [draft, setDraft] = useState<DailyCheckInDraft>(() => dailyDraft(readiness))
+  const [editing, setEditing] = useState(() => !readiness?.checkin)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    setDraft(dailyDraft(readiness))
+    if (readiness?.checkin) setEditing(false)
+  }, [readiness])
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setError("")
+    try {
+      const value = (raw: string) => raw === "" ? null : Number(raw)
+      const next = await api.saveTodayReadiness({
+        sleep_quality_0_10: value(draft.sleep),
+        fatigue_0_10: value(draft.fatigue),
+        soreness_0_10: value(draft.soreness),
+        stress_0_10: value(draft.stress),
+        pain: draft.pain,
+        pain_level_0_10: draft.pain ? value(draft.painLevel) : null,
+        pain_notes: null,
+        illness_symptoms: draft.illness,
+        illness_notes: null,
+        notes: draft.notes.trim() || null,
+      })
+      onChanged(next)
+      setEditing(false)
+    } catch (caught) {
+      setError(apiErrorMessage(caught, uiText("Не удалось сохранить check-in", "Could not save check-in")))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const recommendation = readiness?.recommendation
+  const scoreOptions = Array.from({ length: 11 }, (_, value) => value)
+  return <Card className="overflow-hidden">
+    <CardHeader className="border-b border-zinc-800"><div><p className="text-xs font-semibold text-orange-200">Daily coach</p><CardTitle className="mt-1">{uiText("Как вы себя чувствуете сегодня?", "How do you feel today?")}</CardTitle><p className="mt-1 text-xs text-zinc-500">{uiText("Четыре сигнала помогают безопасно уточнить сегодняшнюю нагрузку.", "Four signals help safely adjust today's guidance.")}</p></div><Badge className={dailyStatusClass(recommendation?.status)}>{dailyStatusLabel(recommendation?.status)}</Badge></CardHeader>
+    {editing ? <form className="grid gap-4 p-4" onSubmit={submit}>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          ["sleep", uiText("Сон", "Sleep"), uiText("10 = отлично", "10 = excellent")],
+          ["fatigue", uiText("Усталость", "Fatigue"), uiText("10 = очень высокая", "10 = very high")],
+          ["soreness", uiText("Мышцы", "Soreness"), uiText("10 = сильно болят", "10 = very sore")],
+          ["stress", uiText("Стресс", "Stress"), uiText("10 = очень высокий", "10 = very high")],
+        ].map(([field, label, hint]) => <label key={field} className="grid gap-1 text-xs text-zinc-300"><span className="font-medium text-white">{label}</span><Select required value={draft[field as keyof Pick<DailyCheckInDraft, "sleep" | "fatigue" | "soreness" | "stress">]} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))}><option value="">--</option>{scoreOptions.map((value) => <option key={value} value={value}>{value}</option>)}</Select><span className="text-zinc-600">{hint}</span></label>)}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><label className="flex items-center gap-2 text-sm font-medium text-white"><input type="checkbox" checked={draft.pain} onChange={(event) => setDraft((current) => ({ ...current, pain: event.target.checked, painLevel: event.target.checked ? current.painLevel : "" }))} />{uiText("Есть боль", "I have pain")}</label>{draft.pain ? <label className="mt-3 grid gap-1 text-xs text-zinc-400"><span>{uiText("Уровень боли 0-10", "Pain level 0-10")}</span><Select value={draft.painLevel} onChange={(event) => setDraft((current) => ({ ...current, painLevel: event.target.value }))}><option value="">{uiText("Не указан", "Not specified")}</option>{scoreOptions.map((value) => <option key={value} value={value}>{value}</option>)}</Select></label> : null}</div>
+        <label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-sm font-medium text-white"><input type="checkbox" checked={draft.illness} onChange={(event) => setDraft((current) => ({ ...current, illness: event.target.checked }))} />{uiText("Есть симптомы болезни", "I have illness symptoms")}</label>
+      </div>
+      <label className="grid gap-1 text-xs text-zinc-400"><span>{uiText("Комментарий, если нужен", "Optional note")}</span><Input value={draft.notes} maxLength={2000} placeholder={uiText("Например: тяжёлые ноги после вчерашней тренировки", "For example: heavy legs after yesterday's workout")} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} /></label>
+      {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+      <div className="flex flex-wrap gap-2"><Button type="submit" disabled={saving}>{saving ? uiText("Сохраняем...", "Saving...") : uiText("Получить рекомендацию", "Get guidance")}</Button>{readiness?.checkin ? <Button type="button" variant="secondary" onClick={() => { setDraft(dailyDraft(readiness)); setEditing(false) }}>{uiText("Отмена", "Cancel")}</Button> : null}</div>
+    </form> : recommendation ? <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+      <div className="min-w-0"><h3 className="text-lg font-semibold text-white">{recommendation.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">{recommendation.message}</p>{recommendation.prescribed_workout ? <p className="mt-3 rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-sm text-orange-100">{recommendation.prescribed_workout.duration_seconds ? `${formatDuration(recommendation.prescribed_workout.duration_seconds)} · ` : ""}RPE {recommendation.prescribed_workout.rpe_range.join("-")} · {workoutIntensityLabel(recommendation.prescribed_workout.intensity)}</p> : null}<div className="mt-3 grid gap-1">{recommendation.reasons.map((reason) => <p key={reason} className="text-xs leading-5 text-zinc-500">• {reason}</p>)}</div><p className="mt-3 text-[11px] leading-5 text-zinc-600">{recommendation.disclaimer}</p></div>
+      <Button variant="secondary" onClick={() => setEditing(true)}>{uiText("Изменить check-in", "Edit check-in")}</Button>
+    </div> : <div className="p-4 text-sm text-zinc-500">{uiText("Загружаем рекомендацию...", "Loading guidance...")}</div>}
+  </Card>
 }
 
 function signalClass(status?: string) {

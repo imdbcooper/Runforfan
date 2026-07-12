@@ -1051,6 +1051,77 @@ class PlanWorkoutOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DailyReadinessCheckInUpsert(BaseModel):
+    sleep_quality_0_10: StrictInt = Field(ge=0, le=10)
+    fatigue_0_10: StrictInt = Field(ge=0, le=10)
+    soreness_0_10: StrictInt = Field(ge=0, le=10)
+    stress_0_10: StrictInt = Field(ge=0, le=10)
+    pain: bool = False
+    pain_level_0_10: StrictInt | None = Field(default=None, ge=0, le=10)
+    pain_notes: str | None = Field(default=None, max_length=1000)
+    illness_symptoms: bool = False
+    illness_notes: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_checkin(self):
+        if self.pain is False and self.pain_level_0_10 not in {None, 0}:
+            raise ValueError("pain_level_0_10 requires pain=true")
+        if self.illness_symptoms is False and self.illness_notes:
+            raise ValueError("illness_notes requires illness_symptoms=true")
+        return self
+
+
+class DailyReadinessCheckInOut(BaseModel):
+    id: int
+    checkin_date: date
+    sleep_quality_0_10: int | None = None
+    fatigue_0_10: int | None = None
+    soreness_0_10: int | None = None
+    stress_0_10: int | None = None
+    pain: bool
+    pain_level_0_10: int | None = None
+    pain_notes: str | None = None
+    illness_symptoms: bool
+    illness_notes: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DailyReadinessPrescriptionOut(BaseModel):
+    kind: str
+    duration_seconds: int | None = None
+    distance_km: float | None = None
+    intensity: str
+    rpe_range: list[int] = Field(default_factory=list)
+    instructions: list[str] = Field(default_factory=list)
+
+
+class DailyReadinessRecommendationOut(BaseModel):
+    rule_version: str
+    rule_id: str
+    status: str
+    action: str
+    title: str
+    message: str
+    reasons: list[str] = Field(default_factory=list)
+    workout_id: int | None = None
+    prescribed_workout: DailyReadinessPrescriptionOut | None = None
+    disclaimer: str
+    generated_at: datetime
+
+
+class DailyReadinessOut(BaseModel):
+    date: date
+    checkin: DailyReadinessCheckInOut | None = None
+    today_workout: PlanWorkoutOut | None = None
+    recommendation: DailyReadinessRecommendationOut
+    saved_recommendation: DailyReadinessRecommendationOut | None = None
+
+
 class PlanWeekSummaryOut(BaseModel):
     week_index: int
     planned_distance_km: float

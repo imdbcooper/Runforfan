@@ -411,6 +411,35 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_training_plans_one_current_per_user ON training_plans (user_id) WHERE status IN ('active', 'draft')",
         ),
     ),
+    (
+        "20260712_0020_daily_readiness_checkins",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS daily_readiness_checkins (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                checkin_date DATE NOT NULL,
+                sleep_quality_0_10 INTEGER,
+                fatigue_0_10 INTEGER,
+                soreness_0_10 INTEGER,
+                stress_0_10 INTEGER,
+                pain BOOLEAN NOT NULL DEFAULT FALSE,
+                pain_level_0_10 INTEGER,
+                pain_notes TEXT,
+                illness_symptoms BOOLEAN NOT NULL DEFAULT FALSE,
+                illness_notes TEXT,
+                notes TEXT,
+                recommendation_snapshot JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT uq_daily_readiness_checkins_user_date UNIQUE (user_id, checkin_date)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_checkins_user_id ON daily_readiness_checkins (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_checkins_checkin_date ON daily_readiness_checkins (checkin_date)",
+            "CREATE INDEX IF NOT EXISTS ix_daily_readiness_checkins_user_date ON daily_readiness_checkins (user_id, checkin_date)",
+        ),
+    ),
 )
 
 

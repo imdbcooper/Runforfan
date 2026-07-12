@@ -11,6 +11,10 @@ def get_or_create_profile(db: Session, user: User, commit: bool = False) -> Athl
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     if profile:
         return profile
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
+    if profile:
+        return profile
     profile = AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", unit_system="metric", recovery_status="normal")
     db.add(profile)
     db.flush()

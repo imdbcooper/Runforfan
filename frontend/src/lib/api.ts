@@ -698,6 +698,54 @@ export type CurrentWeek = {
   next_workout: PlanWorkout | null
 }
 
+export type DailyReadinessCheckIn = {
+  id: number
+  checkin_date: string
+  sleep_quality_0_10: number | null
+  fatigue_0_10: number | null
+  soreness_0_10: number | null
+  stress_0_10: number | null
+  pain: boolean
+  pain_level_0_10: number | null
+  pain_notes: string | null
+  illness_symptoms: boolean
+  illness_notes: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type DailyReadinessPrescription = {
+  kind: string
+  duration_seconds: number | null
+  distance_km: number | null
+  intensity: string
+  rpe_range: number[]
+  instructions: string[]
+}
+
+export type DailyReadinessRecommendation = {
+  rule_version: string
+  rule_id: string
+  status: "checkin_required" | "proceed" | "modify" | "rest" | "stop" | string
+  action: string
+  title: string
+  message: string
+  reasons: string[]
+  workout_id: number | null
+  prescribed_workout: DailyReadinessPrescription | null
+  disclaimer: string
+  generated_at: string
+}
+
+export type DailyReadiness = {
+  date: string
+  checkin: DailyReadinessCheckIn | null
+  today_workout: PlanWorkout | null
+  recommendation: DailyReadinessRecommendation
+  saved_recommendation: DailyReadinessRecommendation | null
+}
+
 export type DashboardPlanSummary = {
   id: number
   title: string
@@ -1296,6 +1344,8 @@ export const api = {
   completeGoal: (id: number, payload: Record<string, unknown> = {}) => request<RunningGoal>(`/goals/${id}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   deleteGoal: (id: number) => request<{ deleted: boolean; id: number }>(`/goals/${id}`, { method: "DELETE" }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
+  todayReadiness: () => request<DailyReadiness>("/readiness/today"),
+  saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),

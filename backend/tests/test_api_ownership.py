@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -15,6 +15,7 @@ try:
     from app.api.routes import goals as goals_routes
     from app.api.routes import imports as imports_routes
     from app.api.routes import planning as planning_routes
+    from app.api.routes import readiness as readiness_routes
     from app.models import Activity
 except ModuleNotFoundError as exc:
     if exc.name in {"fastapi", "httpx", "pydantic", "pydantic_core", "sqlalchemy", "starlette", "multipart"}:
@@ -220,6 +221,22 @@ class ApiOwnershipTests(unittest.TestCase):
         query = compiled_query(db.scalar_queries[0])
         self.assertIn("activities.id = 11", query)
         self.assertIn("activities.user_id = 42", query)
+
+    def test_readiness_checkin_lookup_is_user_and_date_scoped(self):
+        db = CapturingDb()
+        app = app_with_router(readiness_routes.router, readiness_routes.get_current_user, readiness_routes.get_db, db)
+
+        with (
+            patch("app.services.readiness.today_for_user", return_value=date(2026, 7, 12)),
+            patch("app.services.readiness.get_or_create_profile", return_value=SimpleNamespace(recovery_status="normal")),
+            patch("app.services.readiness.active_training_plan", return_value=None),
+        ):
+            response = TestClient(app).get("/api/readiness/today")
+
+        self.assertEqual(response.status_code, 200)
+        query = compiled_query(db.scalar_queries[0])
+        self.assertIn("daily_readiness_checkins.user_id = 42", query)
+        self.assertIn("daily_readiness_checkins.checkin_date = '2026-07-12'", query)
 
     def test_activity_delete_is_user_scoped(self):
         db = CapturingDb()

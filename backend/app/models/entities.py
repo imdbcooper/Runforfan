@@ -35,6 +35,7 @@ class User(Base, TimestampMixin):
     performance_results: Mapped[list["PerformanceResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -298,6 +299,28 @@ class DailyTrainingLoad(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     user: Mapped[User] = relationship(back_populates="daily_training_loads")
+
+
+class DailyReadinessCheckIn(Base, TimestampMixin):
+    __tablename__ = "daily_readiness_checkins"
+    __table_args__ = (UniqueConstraint("user_id", "checkin_date", name="uq_daily_readiness_checkins_user_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    checkin_date: Mapped[date] = mapped_column(Date, index=True)
+    sleep_quality_0_10: Mapped[int | None] = mapped_column(Integer)
+    fatigue_0_10: Mapped[int | None] = mapped_column(Integer)
+    soreness_0_10: Mapped[int | None] = mapped_column(Integer)
+    stress_0_10: Mapped[int | None] = mapped_column(Integer)
+    pain: Mapped[bool] = mapped_column(Boolean, default=False)
+    pain_level_0_10: Mapped[int | None] = mapped_column(Integer)
+    pain_notes: Mapped[str | None] = mapped_column(Text)
+    illness_symptoms: Mapped[bool] = mapped_column(Boolean, default=False)
+    illness_notes: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    recommendation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    user: Mapped[User] = relationship(back_populates="daily_readiness_checkins")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):
