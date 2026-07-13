@@ -81,6 +81,7 @@ jobs:
       RUNFORFAN_TELEGRAM_BOT_PROXY_URL: ${{ vars.RUNFORFAN_TELEGRAM_BOT_PROXY_URL || 'http://31.57.118.44:3128' }}
       RUNFORFAN_TELEGRAM_POLLING_ENABLED: ${{ vars.RUNFORFAN_TELEGRAM_POLLING_ENABLED || 'true' }}
       RUNFORFAN_LLM_TIMEOUT: ${{ vars.RUNFORFAN_LLM_TIMEOUT || '120' }}
+      RUNFORFAN_COACH_ENABLED: ${{ vars.RUNFORFAN_COACH_ENABLED || 'false' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
@@ -130,6 +131,7 @@ jobs:
           RUNFORFAN_TELEGRAM_BOT_PROXY_URL=$RUNFORFAN_TELEGRAM_BOT_PROXY_URL
           RUNFORFAN_TELEGRAM_POLLING_ENABLED=$RUNFORFAN_TELEGRAM_POLLING_ENABLED
           RUNFORFAN_LLM_TIMEOUT=$RUNFORFAN_LLM_TIMEOUT
+          RUNFORFAN_COACH_ENABLED=$RUNFORFAN_COACH_ENABLED
           RUNFORFAN_FRONTEND_URL=$RUNFORFAN_FRONTEND_URL
           RUNFORFAN_TELEGRAM_LOGIN_CODE_TTL_SECONDS=300
           RUNFORFAN_APP_ENV=$RUNFORFAN_APP_ENV
@@ -188,6 +190,8 @@ jobs:
       - name: Verify deployment
         run: |
           ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose ps"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T backend python -c 'from app.core.settings import get_settings; assert get_settings().coach_enabled'"
+          test "$(ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T db psql -U runforfan -d runforfan -tAc \"SELECT 1 FROM schema_migrations WHERE version = '20260713_0027_conversational_coach'\"")" = "1"
           curl -fsS --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/health"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/")" = "302:https://$RUNFORFAN_DOMAIN/app/"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"

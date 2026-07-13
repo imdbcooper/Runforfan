@@ -298,6 +298,8 @@ UI-стиль frontend:
 
 Production deployment выполняет `.github/workflows/deploy.yml` при push в `master` или через `workflow_dispatch`. Workflow собирает и публикует backend/frontend images, обновляет production compose/Caddy и проверяет `/health`, redirects, app shell, alpha guide, manifest, service worker и Telegram bot link.
 
+Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Release workflow передаёт её из одноимённой GitHub Actions variable, проверяет effective setting внутри backend-контейнера и подтверждает migration `20260713_0027_conversational_coach` до успешного завершения deploy.
+
 ## Что уже обработано
 
 В папке `scrins/` лежат исходные скриншоты тренировок и измерения порога.
