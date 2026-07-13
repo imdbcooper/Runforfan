@@ -2,12 +2,13 @@ from datetime import UTC, date, datetime, timedelta
 from math import ceil
 from statistics import median
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.timezone import resolved_zoneinfo
 from app.models import Activity, AthleteProfile, CoachingEvent, TrainingPlan, TrainingPlanRecommendationAudit, TrainingPlanWorkout, TrainingPlanWorkoutBlock, TrainingPlanWorkoutFeedback, TrainingZone, User
 from app.schemas.common import PlanGenerateRequest, PlanUpdate, PlanWorkoutCompleteIn, PlanWorkoutFeedbackIn, PlanWorkoutFeedbackPatchIn, PlanWorkoutMissIn, PlanWorkoutUpdate
 from app.services.activity_metrics import is_running_activity_type, sync_derived_activity_metrics
@@ -471,10 +472,7 @@ def zones_for_plan_builder(db: Session, user: User, profile: AthleteProfile) -> 
 
 
 def plan_builder_timezone(profile: AthleteProfile) -> ZoneInfo:
-    try:
-        return ZoneInfo(profile.timezone or "Europe/Moscow")
-    except (ZoneInfoNotFoundError, ValueError):
-        return ZoneInfo("UTC")
+    return resolved_zoneinfo(profile.timezone)[1]
 
 
 def activity_started_date(activity: Activity, profile: AthleteProfile) -> date | None:
@@ -1616,11 +1614,8 @@ def payload_bool(payload: dict[str, object], key: str, default: bool) -> bool:
 
 
 def today_for_user(db: Session, user: User) -> date:
-    timezone_name = db.scalar(select(AthleteProfile.timezone).where(AthleteProfile.user_id == user.id)) or "Europe/Moscow"
-    try:
-        return datetime.now(ZoneInfo(timezone_name)).date()
-    except (ZoneInfoNotFoundError, ValueError):
-        return datetime.now(UTC).date()
+    timezone_name = db.scalar(select(AthleteProfile.timezone).where(AthleteProfile.user_id == user.id))
+    return datetime.now(resolved_zoneinfo(timezone_name)[1]).date()
 
 
 def plan_adjustment_recommendations(db: Session, user: User, plan: TrainingPlan, limit: int | None = 6) -> dict[str, object]:

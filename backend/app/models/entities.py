@@ -42,6 +42,8 @@ class User(Base, TimestampMixin):
     plan_recalculation_requests: Mapped[list["PlanRecalculationRequest"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coaching_events: Mapped[list["CoachingEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     athlete_state_snapshots: Mapped[list["AthleteStateSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    weekly_reviews: Mapped[list["WeeklyReview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    weekly_strategy_previews: Mapped[list["WeeklyStrategyPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -465,6 +467,60 @@ class AthleteStateSnapshot(Base):
     trigger_type: Mapped[str] = mapped_column(String(64), default="on_read")
 
     user: Mapped[User] = relationship(back_populates="athlete_state_snapshots")
+
+
+class WeeklyReview(Base):
+    __tablename__ = "weekly_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "week_start",
+            "review_version",
+            "input_fingerprint",
+            name="uq_weekly_review_input",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("training_plans.id", ondelete="SET NULL"), index=True)
+    week_start: Mapped[date] = mapped_column(Date, index=True)
+    week_end: Mapped[date] = mapped_column(Date)
+    timezone: Mapped[str] = mapped_column(String(100))
+    review_version: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    resolution_status: Mapped[str] = mapped_column(String(32), index=True)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    as_of_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(64), default="on_read")
+
+    user: Mapped[User] = relationship(back_populates="weekly_reviews")
+
+
+class WeeklyStrategyPreview(Base):
+    __tablename__ = "weekly_strategy_previews"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("weekly_reviews.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id", ondelete="CASCADE"), index=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    rule_version: Mapped[str] = mapped_column(String(64))
+    request_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    preview_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    state_fingerprint: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recommendation_audit_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_recommendation_audits.id", ondelete="SET NULL"))
+    plan_version_id: Mapped[int | None] = mapped_column(ForeignKey("plan_versions.id", ondelete="SET NULL"))
+    audit_log_id: Mapped[int | None] = mapped_column(ForeignKey("audit_log.id", ondelete="SET NULL"))
+    coaching_event_id: Mapped[int | None] = mapped_column(ForeignKey("coaching_events.id", ondelete="SET NULL"))
+    applied_response_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="weekly_strategy_previews")
 
 
 class LactateThresholdMeasurement(Base, TimestampMixin):

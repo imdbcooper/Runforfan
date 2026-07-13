@@ -74,6 +74,9 @@ GET /health
 - `GET /api/plan-recalculations/latest` — получить последнюю persisted read-only переоценку плана, созданную после изменившегося post-workout feedback или нового импорта активности. Переоценка никогда не применяет изменения без отдельного preview/confirmation.
 - `GET /api/coaching-events` — получить user-scoped typed timeline; поддерживает фильтры `event_type` и `workout_id`, пагинацию `limit/offset`.
 - `GET /api/athlete-state/today` — материализовать или переиспользовать объяснимый read-only snapshot текущего состояния на локальную дату с evidence, freshness/confidence, трендами и версией правил. `as_of_at` отмечает завершение сбора текущих mutable inputs, но не обещает историческую реконструкцию БД.
+- `GET /api/weekly-reviews/current?week_start=YYYY-MM-DD` — материализовать или переиспользовать immutable deterministic review завершённой локальной Monday-Sunday недели. Historical resolver использует plan version ledger и append-only events; неполная реконструкция возвращает `partial_legacy` и блокирует повышение нагрузки.
+- `POST /api/weekly-reviews/{review_id}/strategy-preview` — создать persisted 10-минутный preview только для server-recommended стратегии `hold`, `deload`, `resume` или `conservative_progression`, с before/after недельной нагрузки и safety facts.
+- `POST /api/weekly-reviews/strategy-previews/{preview_id}/apply` — явно подтвердить недельную стратегию. Backend повторно проверяет historical fingerprint, active plan, current safety и preview state; retry идемпотентен. `hold` пишет audit/event без plan version, mutation создаёт immutable plan version и поддерживает compensating rollback.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
@@ -207,6 +210,8 @@ API настроек AI:
 - Подтверждаемые действия сохраняют immutable pre/post snapshots. Rollback доступен только для action-derived версий, повторно проходит safety/stale checks и создаёт новую компенсирующую версию, не переписывая историю.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Athlete State хранится отдельно от исходных фактов как immutable materialized projection с input fingerprint. Overview явно показывает missing/stale данные, confidence и источники; snapshot не ставит диагнозы и не меняет план.
+- Weekly Review хранится отдельно как immutable snapshot завершённой локальной недели с input fingerprint, plan-at-start/end provenance, planned-vs-actual metrics, readiness trends, evidence, coverage и limitations. Поздно записанный исторический факт создаёт новый review fingerprint и делает старый strategy preview stale.
+- Недельные стратегии не догоняют пропущенный объём и не меняют completed/past workouts. `deload` снижает targets на 20-30% и заменяет hard sessions на easy; `resume` ограничен prior safe baseline и 5%; `conservative_progression` ограничен 5% и актуальными safety constraints.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
 - Analytics Overview показывает выбор периода, KPI, weekly/monthly trends, best efforts, consistency, explainable insights и VO2max/VDOT estimate с confidence/source.
 - Training Load & Recovery показывает daily/weekly load, CTL/ATL/TSB, monotony/strain, hard-session spacing, recovery days и explainable load alerts.

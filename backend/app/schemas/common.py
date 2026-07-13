@@ -1278,6 +1278,63 @@ class AthleteStateOut(BaseModel):
     disclaimer: str
 
 
+class WeeklyReviewOut(BaseModel):
+    review_id: int
+    review_version: str
+    rule_version: str
+    input_fingerprint: str
+    resolution_status: str
+    computed_at: datetime
+    window: dict[str, object]
+    historical_resolution: dict[str, object]
+    plan: dict[str, object] | None = None
+    metrics: dict[str, object]
+    plan_changes: list[dict[str, object]] = Field(default_factory=list)
+    readiness_trends: dict[str, object]
+    recommended_strategy: Literal["hold", "deload", "resume", "conservative_progression"]
+    strategy_reason: str
+    rejected_strategies: list[str]
+    evidence: list[AthleteStateSourceRefOut]
+    coverage: dict[str, object]
+    limitations: list[str] = Field(default_factory=list)
+    disclaimer: str
+
+
+class WeeklyStrategyPreviewRequest(BaseModel):
+    strategy: Literal["hold", "deload", "resume", "conservative_progression"]
+    model_config = {"extra": "forbid"}
+
+
+class WeeklyStrategyPreviewOut(BaseModel):
+    preview_id: str
+    expires_at: datetime
+    review_id: int
+    plan_id: int
+    strategy: Literal["hold", "deload", "resume", "conservative_progression"]
+    rule_version: str
+    review: WeeklyReviewOut
+    changes: list[dict[str, object]]
+    weekly_effect: dict[str, object]
+    constraint_facts: list[str]
+    summary: str
+
+
+class WeeklyStrategyApplyOut(BaseModel):
+    status: str
+    preview_id: str
+    review_id: int
+    plan_id: int
+    strategy: str
+    changes: list[dict[str, object]]
+    weekly_effect: dict[str, object]
+    plan_version_id: int | None = None
+    plan_version_number: int | None = None
+    recommendation_audit_id: int
+    audit_log_id: int
+    coaching_event_id: int
+    summary: str
+
+
 class PlanWeekSummaryOut(BaseModel):
     week_index: int
     planned_distance_km: float

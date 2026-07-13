@@ -1,0 +1,133 @@
+{
+  "resolver_version": "historical-state-v1",
+  "as_of_at": "2026-07-13T08:00:00+00:00",
+  "timezone": "Europe/Moscow",
+  "week_start": "2026-07-06",
+  "week_end": "2026-07-12",
+  "target_week_start": "2026-07-13",
+  "target_week_end": "2026-07-19",
+  "resolution": {
+    "status": "complete",
+    "plan_id": 20,
+    "week_start_plan_version_id": 30,
+    "week_end_plan_version_id": 30,
+    "resolved_from": "plan_version_ledger",
+    "limitations": []
+  },
+  "profile": {
+    "id": 2,
+    "timezone": "Europe/Moscow",
+    "recovery_status": "normal",
+    "conservative_mode": false,
+    "max_run_duration_minutes": 90,
+    "updated_at": "2026-07-01T08:00:00+00:00"
+  },
+  "plan": {
+    "id": 20,
+    "title": "10K plan",
+    "goal_type": "10k",
+    "status": "active",
+    "target_date": "2026-08-30"
+  },
+  "review_workouts": [
+    {
+      "id": 101,
+      "scheduled_date": "2026-07-07",
+      "status": "done",
+      "workout_type": "easy",
+      "intensity": "easy",
+      "distance_km": 8.0,
+      "duration_seconds": 3000,
+      "completed_activity_id": 501,
+      "actual": {
+        "activity_id": 501,
+        "distance_km": 8.1,
+        "duration_seconds": 2980
+      },
+      "execution": {
+        "score": 0.95,
+        "adherence_status": "completed",
+        "subjective_risk": "low"
+      }
+    },
+    {
+      "id": 102,
+      "scheduled_date": "2026-07-10",
+      "status": "done",
+      "workout_type": "tempo",
+      "intensity": "threshold",
+      "distance_km": 6.0,
+      "duration_seconds": 2400,
+      "completed_activity_id": 502,
+      "actual": {
+        "activity_id": 502,
+        "distance_km": 6.0,
+        "duration_seconds": 2380
+      },
+      "execution": {
+        "score": 0.9,
+        "adherence_status": "completed",
+        "subjective_risk": "low"
+      }
+    }
+  ],
+  "planned_review_workouts": [],
+  "plan_changes": [],
+  "target_workouts": [],
+  "events": [
+    {
+      "id": 801,
+      "event_type": "workout_completed",
+      "occurred_at": "2026-07-07T06:00:00+00:00",
+      "payload": {}
+    },
+    {
+      "id": 802,
+      "event_type": "readiness_checkin_saved",
+      "occurred_at": "2026-07-07T04:00:00+00:00",
+      "payload": {
+        "checkin_date": "2026-07-07",
+        "signals": {
+          "sleep_quality_0_10": 8,
+          "fatigue_0_10": 3,
+          "soreness_0_10": 2,
+          "stress_0_10": 3,
+          "pain": false,
+          "illness_symptoms": false
+        }
+      }
+    },
+    {
+      "id": 803,
+      "event_type": "readiness_checkin_saved",
+      "occurred_at": "2026-07-09T04:00:00+00:00",
+      "payload": {
+        "checkin_date": "2026-07-09",
+        "signals": {
+          "sleep_quality_0_10": 7,
+          "fatigue_0_10": 3,
+          "soreness_0_10": 3,
+          "stress_0_10": 2,
+          "pain": false,
+          "illness_symptoms": false
+        }
+      }
+    },
+    {
+      "id": 804,
+      "event_type": "readiness_checkin_saved",
+      "occurred_at": "2026-07-11T04:00:00+00:00",
+      "payload": {
+        "checkin_date": "2026-07-11",
+        "signals": {
+          "sleep_quality_0_10": 8,
+          "fatigue_0_10": 2,
+          "soreness_0_10": 2,
+          "stress_0_10": 2,
+          "pain": false,
+          "illness_symptoms": false
+        }
+      }
+    }
+  ]
+}

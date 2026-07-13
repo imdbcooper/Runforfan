@@ -34,4 +34,6 @@ from app.models.entities import (  # noqa: F401
     TrainingZone,
     TelegramLoginCode,
     User,
+    WeeklyReview,
+    WeeklyStrategyPreview,
 )

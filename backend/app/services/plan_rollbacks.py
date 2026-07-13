@@ -18,7 +18,7 @@ from app.services.profile import safety_check
 
 
 ROLLBACK_PREVIEW_TTL_MINUTES = 10
-ROLLBACK_REASONS = {"auto_adaptation", "daily_readiness_action", "coach_action_skip", "coach_action_reschedule"}
+ROLLBACK_REASONS = {"auto_adaptation", "daily_readiness_action", "coach_action_skip", "coach_action_reschedule", "weekly_strategy_deload", "weekly_strategy_resume", "weekly_strategy_conservative_progression"}
 WORKOUT_FIELDS = (
     "scheduled_date",
     "status",

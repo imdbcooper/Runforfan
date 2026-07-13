@@ -198,7 +198,7 @@ def list_training_plan_versions(plan_id: int, user: User = Depends(get_current_u
             "pre_snapshot_json": version.pre_snapshot_json,
             "post_snapshot_json": version.post_snapshot_json,
             "rollback_of_version_id": version.rollback_of_version_id,
-            "rollback_supported": version.id not in rolled_back_version_ids and version.reason in {"auto_adaptation", "daily_readiness_action", "coach_action_skip", "coach_action_reschedule"} and version.pre_snapshot_json is not None and version.post_snapshot_json is not None,
+            "rollback_supported": version.id not in rolled_back_version_ids and version.reason in {"auto_adaptation", "daily_readiness_action", "coach_action_skip", "coach_action_reschedule", "weekly_strategy_deload", "weekly_strategy_resume", "weekly_strategy_conservative_progression"} and version.pre_snapshot_json is not None and version.post_snapshot_json is not None,
             "created_at": version.created_at,
         }
         for version in versions

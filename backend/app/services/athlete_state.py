@@ -3,11 +3,12 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from statistics import mean
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.timezone import resolved_zoneinfo
 from app.models import (
     AthleteProfile,
     AthleteStateSnapshot,
@@ -28,11 +29,7 @@ SAFETY_EVENT_TYPES = {"pain_reported", "illness_reported"}
 
 
 def resolved_timezone(profile: AthleteProfile | None) -> tuple[str, ZoneInfo]:
-    timezone_name = profile.timezone if profile and profile.timezone else "UTC"
-    try:
-        return timezone_name, ZoneInfo(timezone_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return "UTC", ZoneInfo("UTC")
+    return resolved_zoneinfo(profile.timezone if profile else None)
 
 
 def local_date_for(profile: AthleteProfile | None, as_of_at: datetime) -> tuple[date, str]:

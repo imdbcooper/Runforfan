@@ -11,6 +11,7 @@ from app.models import (
     AuditLog,
     AthleteMeasurement,
     AthleteProfile,
+    AthleteStateSnapshot,
     CoachActionPreview,
     CoachingEvent,
     DailyReadinessActionPreview,
@@ -33,6 +34,8 @@ from app.models import (
     TrainingPlanWorkoutFeedback,
     TrainingZone,
     User,
+    WeeklyReview,
+    WeeklyStrategyPreview,
 )
 
 
@@ -134,7 +137,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-13.0025",
+        "version": "2026-07-13.0026",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -150,6 +153,9 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "coach_action_previews": [model_to_dict(item) for item in db.scalars(select(CoachActionPreview).where(CoachActionPreview.user_id == user.id).order_by(CoachActionPreview.created_at.asc()))],
         "plan_rollback_previews": [model_to_dict(item) for item in db.scalars(select(PlanRollbackPreview).where(PlanRollbackPreview.user_id == user.id).order_by(PlanRollbackPreview.created_at.asc()))],
         "plan_recalculation_requests": [model_to_dict(item) for item in db.scalars(select(PlanRecalculationRequest).where(PlanRecalculationRequest.user_id == user.id).order_by(PlanRecalculationRequest.requested_at.asc()))],
+        "athlete_state_snapshots": [model_to_dict(item) for item in db.scalars(select(AthleteStateSnapshot).where(AthleteStateSnapshot.user_id == user.id).order_by(AthleteStateSnapshot.computed_at.asc()))],
+        "weekly_reviews": [model_to_dict(item) for item in db.scalars(select(WeeklyReview).where(WeeklyReview.user_id == user.id).order_by(WeeklyReview.week_start.asc(), WeeklyReview.id.asc()))],
+        "weekly_strategy_previews": [model_to_dict(item) for item in db.scalars(select(WeeklyStrategyPreview).where(WeeklyStrategyPreview.user_id == user.id).order_by(WeeklyStrategyPreview.created_at.asc()))],
         "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -173,6 +179,9 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 
 
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
+    ("weekly_strategy_previews", WeeklyStrategyPreview),
+    ("weekly_reviews", WeeklyReview),
+    ("athlete_state_snapshots", AthleteStateSnapshot),
     ("plan_rollback_previews", PlanRollbackPreview),
     ("plan_recalculation_requests", PlanRecalculationRequest),
     ("coach_action_previews", CoachActionPreview),

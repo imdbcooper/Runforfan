@@ -18,9 +18,10 @@ EVENT_TYPES = {
     "workout_completion_removed",
     "workout_feedback_saved",
     "workout_missed",
+    "weekly_strategy_applied",
 }
 CATEGORIES = {"fact", "outcome", "user_input"}
-SOURCES = {"activity_import", "coach_action_preview", "daily_readiness", "manual_activity_link", "manual_completion", "plan_rollback_preview", "post_workout_feedback", "user"}
+SOURCES = {"activity_import", "coach_action_preview", "daily_readiness", "manual_activity_link", "manual_completion", "plan_rollback_preview", "post_workout_feedback", "user", "weekly_strategy_preview"}
 
 
 def record_coaching_event(

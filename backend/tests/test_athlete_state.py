@@ -255,11 +255,11 @@ class AthleteStateTests(unittest.TestCase):
         self.assertEqual(local_day, TODAY)
         self.assertEqual(timezone_name, "Europe/Moscow")
 
-    def test_invalid_timezone_falls_back_to_utc(self):
+    def test_invalid_timezone_uses_canonical_fallback(self):
         local_day, timezone_name = local_date_for(SimpleNamespace(timezone="Invalid/Timezone"), datetime(2026, 7, 12, 1, tzinfo=UTC))
 
         self.assertEqual(local_day, TODAY)
-        self.assertEqual(timezone_name, "UTC")
+        self.assertEqual(timezone_name, "Europe/Moscow")
 
     def test_future_same_day_activity_is_excluded_from_as_of_workout(self):
         cutoff = datetime(2026, 7, 12, 8, tzinfo=UTC)

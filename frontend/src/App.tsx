@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
 import { cn } from "@/lib/utils"
@@ -818,6 +818,8 @@ function App() {
   const [dailyReadiness, setDailyReadiness] = useState<DailyReadiness | null>(null)
   const [athleteState, setAthleteState] = useState<AthleteState | null>(null)
   const [athleteStateError, setAthleteStateError] = useState("")
+  const [weeklyReview, setWeeklyReview] = useState<WeeklyReview | null>(null)
+  const [weeklyReviewError, setWeeklyReviewError] = useState("")
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [profile, setProfile] = useState<AthleteProfile | null>(null)
   const [completeness, setCompleteness] = useState<ProfileCompleteness | null>(null)
@@ -831,6 +833,7 @@ function App() {
   const [authError, setAuthError] = useState("")
   const [status, setStatus] = useState("LOADING")
   const athleteStateRequests = useRef(createLatestRequestGate())
+  const weeklyReviewRequests = useRef(createLatestRequestGate())
 
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
@@ -876,6 +879,20 @@ function App() {
     }
   }
 
+  async function refreshWeeklyReview() {
+    const requestId = weeklyReviewRequests.current.begin()
+    try {
+      const nextWeeklyReview = await api.currentWeeklyReview()
+      if (!weeklyReviewRequests.current.isLatest(requestId)) return
+      setWeeklyReview(nextWeeklyReview)
+      setWeeklyReviewError("")
+    } catch (error) {
+      if (!weeklyReviewRequests.current.isLatest(requestId)) return
+      console.error(error)
+      setWeeklyReviewError(apiErrorMessage(error, uiText("Недельный разбор временно недоступен.", "Weekly review is temporarily unavailable.")))
+    }
+  }
+
   async function refreshGlobal({ throwOnError = false }: { throwOnError?: boolean } = {}) {
     try {
       await devLogin()
@@ -894,7 +911,7 @@ function App() {
       setDailyReadiness(nextReadiness)
       setProviders(nextProviders)
       setStatus(authenticatedStatus())
-      await refreshAthleteState()
+      await Promise.all([refreshAthleteState(), refreshWeeklyReview()])
     } catch (error) {
       if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
         clearAuthToken()
@@ -1011,7 +1028,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} athleteState={athleteState} athleteStateError={athleteStateError} onRetryAthleteState={refreshAthleteState} onReadinessChanged={(value) => { setDailyReadiness(value); void refreshAthleteState() }} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} athleteState={athleteState} athleteStateError={athleteStateError} weeklyReview={weeklyReview} weeklyReviewError={weeklyReviewError} onRetryAthleteState={refreshAthleteState} onRetryWeeklyReview={refreshWeeklyReview} onReadinessChanged={(value) => { setDailyReadiness(value); void refreshAthleteState(); void refreshWeeklyReview() }} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -1167,7 +1184,7 @@ function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onL
   </header>
 }
 
-function Overview({ activities, dashboard, dailyReadiness, athleteState, athleteStateError, onRetryAthleteState, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; athleteState: AthleteState | null; athleteStateError: string; onRetryAthleteState: () => Promise<void>; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, dashboard, dailyReadiness, athleteState, athleteStateError, weeklyReview, weeklyReviewError, onRetryAthleteState, onRetryWeeklyReview, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; athleteState: AthleteState | null; athleteStateError: string; weeklyReview: WeeklyReview | null; weeklyReviewError: string; onRetryAthleteState: () => Promise<void>; onRetryWeeklyReview: () => Promise<void>; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
@@ -1178,6 +1195,7 @@ function Overview({ activities, dashboard, dailyReadiness, athleteState, athlete
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
     <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} onActionApplied={onActionApplied} />
     <AthleteStateCard athleteState={athleteState} error={athleteStateError} onRetry={onRetryAthleteState} />
+    <WeeklyReviewCard review={weeklyReview} error={weeklyReviewError} onRetry={onRetryWeeklyReview} onApplied={onActionApplied} />
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       {currentWeek ? <CurrentWeekCoachCard currentWeek={currentWeek} onPlans={onPlans} /> : <Card className="p-4 text-sm text-zinc-400">{uiText("Создайте план, чтобы видеть неделю целиком.", "Create a plan to see the week at a glance.")}</Card>}
       <RecentRunsCard activities={recentActivities.slice(0, 3)} />
@@ -1710,6 +1728,142 @@ function AthleteStateCard({ athleteState, error, onRetry }: { athleteState: Athl
         <p className="mt-3 text-[11px] leading-5 text-zinc-600">{athleteState.disclaimer} · {uiText("Снимок", "Snapshot")} #{athleteState.snapshot_id} · {athleteState.rule_version}</p>
       </CollapsibleSection>
     </div>
+  </Card>
+}
+
+function reviewNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === "number" ? value : null
+}
+
+function reviewText(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === "string" ? value : ""
+}
+
+function weeklyStrategyLabel(strategy: WeeklyReview["recommended_strategy"]) {
+  const labels = {
+    hold: uiText("Сохранить нагрузку", "Hold"),
+    deload: uiText("Разгрузка", "Deload"),
+    resume: uiText("Вернуться к базе", "Resume"),
+    conservative_progression: uiText("Осторожное увеличение", "Conservative progression"),
+  }
+  return labels[strategy]
+}
+
+function weeklyStrategyClass(strategy: WeeklyReview["recommended_strategy"], caution: boolean, highConfidence: boolean) {
+  if (strategy === "deload") return "border-rose-400/40 bg-rose-500/10 text-rose-100"
+  if (caution || !highConfidence) return "border-orange-600 bg-orange-100 text-orange-950 dark:border-orange-400/70 dark:bg-orange-500/15 dark:text-orange-50"
+  return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+}
+
+function reviewChangeValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "--"
+  if (Array.isArray(value)) return `${value.length} ${uiText("блоков", "blocks")}`
+  if (typeof value === "object") return uiText("структура обновлена", "structure updated")
+  return String(value)
+}
+
+function weeklyEffectValue(effect: Record<string, unknown>, key: string, format: (value: number | null) => string) {
+  return format(reviewNumber(effect, `${key}_before`)) + " → " + format(reviewNumber(effect, `${key}_after`))
+}
+
+function WeeklyStrategyDialog({ preview, applying, error, onApply, onClose }: { preview: WeeklyStrategyPreview; applying: boolean; error: string; onApply: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const applyRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef(onClose)
+  const applyingRef = useRef(applying)
+  closeRef.current = onClose
+  applyingRef.current = applying
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    applyRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !applyingRef.current) closeRef.current()
+      if (event.key !== "Tab" || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => { document.removeEventListener("keydown", onKeyDown); requestAnimationFrame(() => previousFocus?.focus()) }
+  }, [])
+
+  const isHold = preview.strategy === "hold"
+  return <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/80 p-3 backdrop-blur-sm" onMouseDown={(event) => { if (event.currentTarget === event.target && !applying) onClose() }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="weekly-strategy-title" aria-describedby="weekly-strategy-summary" className="my-auto flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-2xl border border-orange-400/30 bg-[#111] shadow-2xl shadow-black/50">
+      <div className="shrink-0 border-b border-zinc-800 p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-300">Weekly review · server preview</p><h2 id="weekly-strategy-title" className="mt-2 text-lg font-semibold text-white">{isHold ? uiText("Подтвердите фиксацию стратегии", "Confirm strategy record") : uiText("Проверьте изменения следующей недели", "Review next-week changes")}</h2><p id="weekly-strategy-summary" className="mt-2 text-xs leading-5 text-zinc-400">{preview.review.strategy_reason}</p></div>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
+        <div className="grid gap-4 text-xs">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><p className="font-medium text-white">{preview.summary}</p><p className="mt-2 leading-5 text-zinc-500">{isHold ? uiText("Тренировки не изменяются. Подтверждение только фиксирует проверенную стратегию и аудит решения.", "No workouts change. Confirmation only records the reviewed strategy and its audit trail.") : uiText("Будет создана новая неизменяемая версия плана. Ее можно компенсировать через историю версий, но исходная запись не перезаписывается.", "A new immutable plan version will be created. It can be compensated through version history, but the original record is not overwritten.")}</p></div>
+          <div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">{uiText("Оставшаяся нагрузка с", "Remaining load from")} {formatDate(reviewText(preview.weekly_effect, "effective_from"))}</p><div className="grid gap-2 rounded-xl border border-zinc-800 p-3 sm:grid-cols-3"><div><p className="text-zinc-500">{uiText("Дистанция", "Distance")}</p><p className="mt-1 break-words text-white">{weeklyEffectValue(preview.weekly_effect, "planned_distance_km", formatDistance)}</p></div><div><p className="text-zinc-500">{uiText("Время", "Duration")}</p><p className="mt-1 break-words text-white">{weeklyEffectValue(preview.weekly_effect, "planned_duration_seconds", formatDuration)}</p></div><div><p className="text-zinc-500">{uiText("Тяжелые", "Hard sessions")}</p><p className="mt-1 break-words text-white">{weeklyEffectValue(preview.weekly_effect, "hard_sessions", formatOptionalNumber)}</p></div></div></div>
+          {preview.changes.length ? <div className="grid gap-2">{preview.changes.map((change, index) => <div key={`${reviewText(change, "workout_id")}-${reviewText(change, "field")}-${index}`} className="grid min-w-0 gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"><span className="font-mono text-[10px] text-zinc-500">{reviewNumber(change, "workout_id") ? `#${reviewNumber(change, "workout_id")}` : uiText("план", "plan")}</span><span className="min-w-0 break-words text-zinc-500">{reviewChangeValue(change.before)}</span><span className="text-orange-300">→</span><span className="min-w-0 break-words text-white">{reviewChangeValue(change.after)}</span></div>)}</div> : <p className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-zinc-400">{uiText("Изменений тренировок нет.", "There are no workout changes.")}</p>}
+          <div className="grid gap-1"><p className="font-medium text-zinc-300">{uiText("Проверенные ограничения", "Checked constraints")}</p>{preview.constraint_facts.map((fact) => <p key={fact} className="leading-5 text-zinc-500">• {fact}</p>)}</div>
+          {error ? <p role="alert" aria-live="assertive" className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-rose-200">{error}</p> : null}
+        </div>
+      </div>
+      <div className="shrink-0 flex flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button variant="secondary" disabled={applying} onClick={onClose}>{uiText("Оставить как есть", "Keep current plan")}</Button><Button ref={applyRef} disabled={applying} onClick={onApply}>{applying ? uiText("Фиксируем...", "Applying...") : isHold ? uiText("Подтвердить и записать", "Confirm and record") : uiText("Создать версию плана", "Create plan version")}</Button></div>
+    </div>
+  </div>
+}
+
+function WeeklyReviewCard({ review, error, onRetry, onApplied }: { review: WeeklyReview | null; error: string; onRetry: () => Promise<void>; onApplied: () => Promise<void> }) {
+  const [preview, setPreview] = useState<WeeklyStrategyPreview | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [actionError, setActionError] = useState("")
+  const [fingerprintExpanded, setFingerprintExpanded] = useState(false)
+  const strategyButtonRef = useRef<HTMLButtonElement | null>(null)
+  if (error && !review) return <Card className="grid gap-3 p-4 text-sm sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="font-medium text-white">{uiText("Недельный разбор недоступен", "Weekly review unavailable")}</p><p className="mt-1 text-xs leading-5 text-zinc-500">{error}</p></div><Button size="sm" variant="secondary" onClick={() => void onRetry()}>{uiText("Повторить", "Retry")}</Button></Card>
+  if (!review) return <Card className="p-4 text-sm text-zinc-500">{uiText("Собираем завершенную тренировочную неделю...", "Building your completed training week...")}</Card>
+  const metrics = review.metrics
+  const readiness = review.readiness_trends
+  const coverage = review.coverage
+  const resolution = review.historical_resolution
+  const lowConfidence = reviewText(coverage, "confidence") === "low"
+  const highConfidence = reviewText(coverage, "confidence") === "high"
+  const partial = reviewText(resolution, "status") !== "complete" || review.resolution_status !== "complete"
+  const caution = lowConfidence || partial
+  const noPlan = !review.plan
+  const reviewId = review.review_id
+  const strategy = review.recommended_strategy
+  async function createPreview() {
+    setPreviewing(true); setActionError("")
+    try { setPreview(await api.previewWeeklyStrategy(reviewId, strategy)) }
+    catch (caught) { setActionError(apiErrorMessage(caught, uiText("Не удалось подготовить безопасный preview.", "Could not prepare a safe preview."))) }
+    finally { setPreviewing(false) }
+  }
+  async function applyPreview() {
+    if (!preview) return
+    setApplying(true); setActionError("")
+    try { await api.applyWeeklyStrategy(preview.preview_id); await onApplied(); closePreview() }
+    catch (caught) { setActionError(apiErrorMessage(caught, uiText("Preview устарел или стратегию нельзя применить.", "The preview expired or the strategy cannot be applied."))) }
+    finally { setApplying(false) }
+  }
+  function closePreview() {
+    setPreview(null)
+    setActionError("")
+    requestAnimationFrame(() => strategyButtonRef.current?.focus())
+  }
+  return <Card className="overflow-hidden border-zinc-700">
+    <CardHeader><div className="min-w-0"><p className="font-mono text-[10px] uppercase tracking-[0.2em] text-orange-300">Completed week · evidence ledger</p><CardTitle className="mt-1">{uiText("Недельный разбор", "Weekly review")}</CardTitle><p className="mt-1 text-xs text-zinc-500">{formatDate(reviewText(review.window, "week_start"))} - {formatDate(reviewText(review.window, "week_end"))}</p></div><Badge className={weeklyStrategyClass(review.recommended_strategy, caution, highConfidence)}>{weeklyStrategyLabel(review.recommended_strategy)}</Badge></CardHeader>
+    <div className="grid gap-4 p-4">
+      {error ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-xs text-orange-100"><span>{error} {uiText("Показан предыдущий разбор.", "Showing the previous review.")}</span><Button size="sm" variant="secondary" onClick={() => void onRetry()}>{uiText("Повторить", "Retry")}</Button></div> : null}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 border-l-2 border-orange-400/60 pl-3 lg:grid-cols-4">{[[uiText("сессии", "sessions"), `${formatOptionalNumber(reviewNumber(metrics, "completed_sessions"))}/${formatOptionalNumber(reviewNumber(metrics, "planned_sessions"))}`], [uiText("дистанция: план / факт", "distance: planned / actual"), `${formatDistance(reviewNumber(metrics, "planned_distance_km"))} / ${formatDistance(reviewNumber(metrics, "actual_distance_km"))}`], [uiText("время: план / факт", "duration: planned / actual"), `${formatDuration(reviewNumber(metrics, "planned_duration_seconds"))} / ${formatDuration(reviewNumber(metrics, "actual_duration_seconds"))}`], [uiText("дни readiness", "readiness days"), formatOptionalNumber(reviewNumber(readiness, "complete_checkin_days"))]].map(([label, value]) => <div key={label} className="min-w-0 py-1"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">{label}</p><p className="mt-0.5 truncate text-sm font-semibold text-white" title={value}>{value}</p></div>)}</div>
+      <div className={cn("rounded-xl border p-3", caution ? "border-2 border-orange-600 bg-orange-100 text-orange-950 dark:border-orange-400/70 dark:bg-orange-500/15 dark:text-orange-50" : "border-zinc-800 bg-zinc-950/70")}>
+        {caution ? <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em]">{uiText("Неполные доказательства", "Incomplete evidence")}</p> : null}
+        <p className={cn("text-sm font-medium", caution ? "text-inherit" : "text-white")}>{review.strategy_reason}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5"><Badge className={caution ? "border-orange-700/50 bg-orange-200/70 text-orange-950 dark:border-orange-300/40 dark:bg-orange-950/50 dark:text-orange-50" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{uiText("покрытие", "coverage")}: {formatOptionalNumber(reviewNumber(coverage, "score"))}</Badge><Badge className={caution ? "border-orange-700/50 bg-orange-200/70 text-orange-950 dark:border-orange-300/40 dark:bg-orange-950/50 dark:text-orange-50" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{athleteConfidenceLabel(reviewText(coverage, "confidence"))}</Badge><Badge className={caution ? "border-orange-700/50 bg-orange-200/70 text-orange-950 dark:border-orange-300/40 dark:bg-orange-950/50 dark:text-orange-50" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{freshnessLabel(reviewText(coverage, "freshness"))}</Badge><Badge className={partial ? "border-orange-700/50 bg-orange-200/70 text-orange-950 dark:border-orange-300/40 dark:bg-orange-950/50 dark:text-orange-50" : "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"}>{partial ? uiText("частично legacy", "partial legacy") : uiText("полная история", "complete")}</Badge><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{review.evidence.length} {uiText("источников", "sources")}</Badge></div>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs leading-5 text-zinc-500">{noPlan ? uiText("Нет активного плана: стратегию нельзя применить.", "There is no active plan, so this strategy cannot be applied.") : uiText("Стратегия сформирована сервером из завершенной недели и ограничений.", "The server formed this strategy from the completed week and its constraints.")}</p>{!noPlan ? <Button ref={strategyButtonRef} disabled={previewing} onClick={createPreview}>{previewing ? uiText("Готовим preview...", "Preparing preview...") : review.recommended_strategy === "hold" ? uiText("Записать сохранение", "Record hold") : uiText("Посмотреть изменения плана", "Preview plan changes")}</Button> : null}</div>
+      {actionError && !preview ? <p role="alert" aria-live="assertive" className="text-xs text-rose-300">{actionError}</p> : null}
+      <CollapsibleSection title={uiText("Доказательства и аудит", "Evidence and audit")} summary={<Badge className={caution ? "border-orange-600 bg-orange-100 text-orange-950 dark:border-orange-400/70 dark:bg-orange-500/15 dark:text-orange-50" : "border-zinc-700 bg-zinc-900 text-zinc-300"}>{review.plan_changes.length} {uiText("изменений", "changes")}</Badge>}><div className="grid gap-3 text-xs"><div><p className="font-medium text-zinc-300">{uiText("Ограничения", "Limitations")}</p>{review.limitations.length ? review.limitations.map((item) => <p key={item} className="mt-1 leading-5 text-zinc-500">• {item}</p>) : <p className="mt-1 text-zinc-500">{uiText("Не указаны.", "None recorded.")}</p>}</div>{review.plan_changes.length ? <div><p className="font-medium text-zinc-300">{uiText("Предыдущие изменения плана", "Prior plan changes")}</p><div className="mt-2 grid gap-1">{review.plan_changes.map((change, index) => <p key={`${reviewText(change, "field")}-${index}`} className="rounded-md border border-zinc-800 bg-zinc-950/70 px-2 py-1.5 leading-5 text-zinc-500">{reviewText(change, "field") || uiText("изменение", "change")}: {reviewChangeValue(change.before)} → {reviewChangeValue(change.after)}</p>)}</div></div> : null}<div><p className="font-medium text-zinc-300">{uiText("Источники", "Source refs")}</p><p className="mt-1 leading-5 text-zinc-500">{review.evidence.map((item) => `${item.model}#${item.id}${item.field ? `.${item.field}` : ""}`).join(" · ") || "--"}</p></div><div className="flex flex-wrap items-center gap-2 font-mono text-[10px] leading-5 text-zinc-600"><span>{uiText("resolver", "resolver")}: {review.resolution_status}</span><span>{uiText("review", "review")} {review.review_version}</span><span>{uiText("rule", "rule")} {review.rule_version}</span><span>{uiText("input", "input")}: {fingerprintExpanded ? review.input_fingerprint : `${review.input_fingerprint.slice(0, 12)}...`}</span><Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-[10px]" onClick={() => setFingerprintExpanded((current) => !current)}>{fingerprintExpanded ? uiText("скрыть", "hide") : uiText("показать", "show")}</Button></div><p className="leading-5 text-zinc-600">{review.disclaimer}</p></div></CollapsibleSection>
+    </div>
+    {preview ? <WeeklyStrategyDialog preview={preview} applying={applying} error={actionError} onApply={applyPreview} onClose={closePreview} /> : null}
   </Card>
 }
 

@@ -917,6 +917,66 @@ export type AthleteState = {
   disclaimer: string
 }
 
+export type WeeklyStrategy = "hold" | "deload" | "resume" | "conservative_progression"
+
+export type WeeklyEvidenceRef = {
+  model: string
+  id: number | string
+  field: string | null
+}
+
+export type WeeklyReview = {
+  review_id: number
+  review_version: string
+  rule_version: string
+  input_fingerprint: string
+  resolution_status: string
+  computed_at: string
+  window: Record<string, unknown>
+  historical_resolution: Record<string, unknown>
+  plan: Record<string, unknown> | null
+  metrics: Record<string, unknown>
+  plan_changes: Record<string, unknown>[]
+  readiness_trends: Record<string, unknown>
+  recommended_strategy: WeeklyStrategy
+  strategy_reason: string
+  rejected_strategies: string[]
+  evidence: WeeklyEvidenceRef[]
+  coverage: Record<string, unknown>
+  limitations: string[]
+  disclaimer: string
+}
+
+export type WeeklyStrategyPreview = {
+  preview_id: string
+  expires_at: string
+  review_id: number
+  plan_id: number
+  strategy: WeeklyStrategy
+  rule_version: string
+  review: WeeklyReview
+  changes: Record<string, unknown>[]
+  weekly_effect: Record<string, unknown>
+  constraint_facts: string[]
+  summary: string
+}
+
+export type WeeklyStrategyApplyResult = {
+  status: string
+  preview_id: string
+  review_id: number
+  plan_id: number
+  strategy: WeeklyStrategy
+  changes: Record<string, unknown>[]
+  weekly_effect: Record<string, unknown>
+  plan_version_id: number | null
+  plan_version_number: number | null
+  recommendation_audit_id: number
+  audit_log_id: number
+  coaching_event_id: number
+  summary: string
+}
+
 export type DashboardPlanSummary = {
   id: number
   title: string
@@ -1516,6 +1576,9 @@ export const api = {
   deleteGoal: (id: number) => request<{ deleted: boolean; id: number }>(`/goals/${id}`, { method: "DELETE" }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   todayAthleteState: () => request<AthleteState>("/athlete-state/today"),
+  currentWeeklyReview: () => request<WeeklyReview>("/weekly-reviews/current"),
+  previewWeeklyStrategy: (reviewId: number, strategy: WeeklyStrategy) => request<WeeklyStrategyPreview>(`/weekly-reviews/${reviewId}/strategy-preview`, { method: "POST", body: JSON.stringify({ strategy }) }),
+  applyWeeklyStrategy: (previewId: string) => request<WeeklyStrategyApplyResult>(`/weekly-reviews/strategy-previews/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   todayReadiness: () => request<DailyReadiness>("/readiness/today"),
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
   previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),

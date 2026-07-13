@@ -615,6 +615,62 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_plan_recalculation_requests_requested_at ON plan_recalculation_requests (requested_at)",
         ),
     ),
+    (
+        "20260713_0026_weekly_reviews",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS weekly_reviews (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plan_id INTEGER REFERENCES training_plans(id) ON DELETE SET NULL,
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                timezone VARCHAR(100) NOT NULL,
+                review_version VARCHAR(64) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                resolution_status VARCHAR(32) NOT NULL,
+                snapshot_json JSONB NOT NULL,
+                as_of_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                computed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                trigger_type VARCHAR(64) NOT NULL DEFAULT 'on_read',
+                CONSTRAINT uq_weekly_review_input UNIQUE (user_id, week_start, review_version, input_fingerprint)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_user_id ON weekly_reviews (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_plan_id ON weekly_reviews (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_week_start ON weekly_reviews (week_start)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_resolution_status ON weekly_reviews (resolution_status)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_computed_at ON weekly_reviews (computed_at)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_reviews_user_week ON weekly_reviews (user_id, week_start DESC, id DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS weekly_strategy_previews (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                review_id INTEGER NOT NULL REFERENCES weekly_reviews(id) ON DELETE CASCADE,
+                plan_id INTEGER NOT NULL REFERENCES training_plans(id) ON DELETE CASCADE,
+                strategy VARCHAR(64) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                request_snapshot JSONB NOT NULL,
+                preview_snapshot JSONB NOT NULL,
+                state_fingerprint VARCHAR(64) NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                applied_at TIMESTAMP WITH TIME ZONE,
+                recommendation_audit_id INTEGER REFERENCES training_plan_recommendation_audits(id) ON DELETE SET NULL,
+                plan_version_id INTEGER REFERENCES plan_versions(id) ON DELETE SET NULL,
+                audit_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL,
+                coaching_event_id INTEGER REFERENCES coaching_events(id) ON DELETE SET NULL,
+                applied_response_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_user_id ON weekly_strategy_previews (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_review_id ON weekly_strategy_previews (review_id)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_plan_id ON weekly_strategy_previews (plan_id)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_strategy ON weekly_strategy_previews (strategy)",
+            "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_expires_at ON weekly_strategy_previews (expires_at)",
+        ),
+    ),
 )
 
 
