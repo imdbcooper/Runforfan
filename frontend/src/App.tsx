@@ -1,4 +1,4 @@
-import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
+import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Send, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 
@@ -10,9 +10,11 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { coachPreviewExpired } from "@/lib/coach-preview"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
+import { trustedTelegramUrl } from "@/lib/trusted-url"
 import { cn } from "@/lib/utils"
 
 type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
@@ -1020,7 +1022,7 @@ function App() {
         {mobileOpen && <>
           <button aria-label={uiText("Закрыть меню", "Close menu overlay")} className="fixed inset-0 z-40 bg-black/70" onClick={() => setMobileOpen(false)} />
           <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[86vw] overflow-y-auto border-r border-zinc-800 bg-[#111] lg:hidden">
-            <div className="flex h-12 items-center justify-end border-b border-zinc-800 px-2"><Button variant="ghost" size="icon" onClick={() => setMobileOpen(false)}><X /></Button></div>
+            <div className="flex h-12 items-center justify-end border-b border-zinc-800 px-2"><Button variant="ghost" size="icon" aria-label={uiText("Закрыть меню", "Close menu")} onClick={() => setMobileOpen(false)}><X /></Button></div>
             <Sidebar page={page} setPage={(next) => { setPage(next); setMobileOpen(false) }} />
           </aside>
         </>}
@@ -1052,6 +1054,7 @@ function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, o
   const [error, setError] = useState(initialError || "")
   const [botUrl, setBotUrl] = useState("")
   const botUsername = authConfig.telegramBotUsername
+  const trustedBotUrl = trustedTelegramUrl(botUrl)
 
   useEffect(() => setError(initialError || ""), [initialError])
 
@@ -1106,7 +1109,7 @@ function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, o
         <p className="mt-3 text-sm leading-6 text-zinc-400">{uiText("Откройте бота в Telegram, нажмите Start и вернитесь по ссылке из сообщения.", "Open the Telegram bot, press Start, then return through the link from the bot message.")}</p>
         <div className="mt-5 space-y-3 rounded-lg border border-zinc-800 bg-black/30 p-4">
           {loading ? <p className="text-sm text-orange-100">{uiText("Завершаем вход через Telegram...", "Finishing Telegram login...")}</p> : null}
-          {botUrl ? <a className="inline-flex h-11 items-center justify-center rounded-md bg-orange-400 px-4 text-sm font-semibold text-black transition-colors hover:bg-orange-300 md:h-10" href={botUrl} target="_blank" rel="noreferrer">{uiText("Открыть Telegram-бота", "Open Telegram bot")}</a> : <p className="text-sm text-orange-100">{uiText("Бот временно недоступен. Попробуйте позже.", "Telegram bot is temporarily unavailable. Try again later.")}</p>}
+          {trustedBotUrl ? <a className="inline-flex h-11 items-center justify-center rounded-md bg-orange-400 px-4 text-sm font-semibold text-black transition-colors hover:bg-orange-300 md:h-10" href={trustedBotUrl} target="_blank" rel="noreferrer">{uiText("Открыть Telegram-бота", "Open Telegram bot")}</a> : <p className="text-sm text-orange-100">{uiText("Бот временно недоступен. Попробуйте позже.", "Telegram bot is temporarily unavailable. Try again later.")}</p>}
           {botUsername ? <div ref={containerRef} className="min-h-10" /> : null}
           {error ? <p className="mt-3 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-1.5 text-xs text-rose-100">{error}</p> : null}
         </div>
@@ -1194,6 +1197,7 @@ function Overview({ activities, dashboard, dailyReadiness, athleteState, athlete
   return <div className="grid gap-4">
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
     <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} onActionApplied={onActionApplied} />
+    <CoachConversationCard onActionApplied={onActionApplied} />
     <AthleteStateCard athleteState={athleteState} error={athleteStateError} onRetry={onRetryAthleteState} />
     <WeeklyReviewCard review={weeklyReview} error={weeklyReviewError} onRetry={onRetryWeeklyReview} onApplied={onActionApplied} />
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -1628,13 +1632,222 @@ function DailyCoachCheckIn({ readiness, onChanged, onActionApplied }: { readines
         <label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-sm font-medium text-white"><input type="checkbox" checked={draft.illness} onChange={(event) => setDraft((current) => ({ ...current, illness: event.target.checked }))} />{uiText("Есть симптомы болезни", "I have illness symptoms")}</label>
       </div>
       <label className="grid gap-1 text-xs text-zinc-400"><span>{uiText("Комментарий, если нужен", "Optional note")}</span><Input value={draft.notes} maxLength={2000} placeholder={uiText("Например: тяжёлые ноги после вчерашней тренировки", "For example: heavy legs after yesterday's workout")} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} /></label>
-      {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+      {error ? <p role="alert" aria-live="assertive" className="text-xs text-rose-300">{error}</p> : null}
       <div className="flex flex-wrap gap-2"><Button type="submit" disabled={saving}>{saving ? uiText("Сохраняем...", "Saving...") : uiText("Получить рекомендацию", "Get guidance")}</Button>{readiness?.checkin ? <Button type="button" variant="secondary" onClick={() => { setDraft(dailyDraft(readiness)); setEditing(false) }}>{uiText("Отмена", "Cancel")}</Button> : null}</div>
     </form> : recommendation ? <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
       <div className="min-w-0"><h3 className="text-lg font-semibold text-white">{recommendation.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">{recommendation.message}</p>{recommendation.prescribed_workout ? <p className="mt-3 rounded-xl border border-orange-400/20 bg-orange-400/10 p-3 text-sm text-orange-100">{recommendation.prescribed_workout.duration_seconds ? `${formatDuration(recommendation.prescribed_workout.duration_seconds)} · ` : ""}RPE {recommendation.prescribed_workout.rpe_range.join("-")} · {workoutIntensityLabel(recommendation.prescribed_workout.intensity)}</p> : null}<div className="mt-3 grid gap-1">{recommendation.reasons.map((reason) => <p key={reason} className="text-xs leading-5 text-zinc-500">• {reason}</p>)}</div><p className="mt-3 text-[11px] leading-5 text-zinc-600">{recommendation.disclaimer}</p></div>
       <div className="grid gap-2">{["shorten_easy", "easy_replacement"].includes(recommendation.action) && recommendation.workout_id === readiness?.today_workout?.id ? <Button disabled={previewingAction} onClick={previewAction}>{previewingAction ? uiText("Готовим preview...", "Preparing preview...") : uiText("Изменить тренировку", "Change workout")}</Button> : null}<Button variant="secondary" onClick={() => setEditing(true)}>{uiText("Изменить check-in", "Edit check-in")}</Button>{actionError && !actionPreview ? <p className="max-w-xs text-xs leading-5 text-rose-300">{actionError}</p> : null}</div>
     </div> : <div className="p-4 text-sm text-zinc-500">{uiText("Загружаем рекомендацию...", "Loading guidance...")}</div>}
     {actionPreview ? <ReadinessActionDialog preview={actionPreview} applying={applyingAction} error={actionError} onApply={applyAction} onClose={() => { setActionPreview(null); setActionError("") }} /> : null}
+  </Card>
+}
+
+function coachSafetyClass(status?: string) {
+  if (status === "medical_boundary") return "border-rose-400/40 bg-rose-500/10 text-rose-100"
+  if (status === "caution") return "border-orange-400/40 bg-orange-400/10 text-orange-100"
+  return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+}
+
+function coachSafetyLabel(status?: string) {
+  if (status === "medical_boundary") return uiText("медицинская граница", "medical boundary")
+  if (status === "caution") return uiText("осторожно", "caution")
+  return uiText("проверено", "normal")
+}
+
+function coachMemoryLabel(candidate: CoachMemoryUpdate) {
+  const items: string[] = []
+  if (candidate.communication_style) items.push(candidate.communication_style === "brief" ? uiText("краткие ответы", "brief answers") : uiText("подробные ответы", "detailed answers"))
+  if (candidate.coaching_focus) items.push({ consistency: uiText("фокус: регулярность", "focus: consistency"), race_goal: uiText("фокус: цель старта", "focus: race goal"), recovery: uiText("фокус: восстановление", "focus: recovery"), general: uiText("фокус: общий", "focus: general") }[candidate.coaching_focus])
+  if (candidate.confirmed_available_days) {
+    const weekdays = isEnglishLanguage() ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] : ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    items.push(`${uiText("дни", "days")}: ${candidate.confirmed_available_days.map((day) => weekdays[day]).join(", ")}`)
+  }
+  return items.join(" · ")
+}
+
+function CoachPreviewDialog({ preview, applying, applied, error, onApply, onClose }: { preview: CoachPreviewResult; applying: boolean; applied: string; error: string; onApply: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const applyRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef(onClose)
+  const applyingRef = useRef(applying)
+  closeRef.current = onClose
+  applyingRef.current = applying
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    applyRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !applyingRef.current) closeRef.current()
+      if (event.key !== "Tab" || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => { document.removeEventListener("keydown", onKeyDown); document.body.style.overflow = previousOverflow; previousFocus?.focus() }
+  }, [])
+
+  const payload = preview.payload
+  const changes = Array.isArray(payload.changes) ? payload.changes : []
+  const weeklyEffect = payload.weekly_effect
+  const expired = !applied && coachPreviewExpired(payload.expires_at)
+  const kindLabel = preview.kind === "readiness_action" ? uiText("действие readiness", "readiness action") : preview.kind === "coach_action" ? uiText("действие тренера", "coach action") : uiText("стратегия недели", "weekly strategy")
+  return <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/80 p-3 backdrop-blur-sm" onMouseDown={(event) => { if (event.currentTarget === event.target && !applying) onClose() }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="coach-preview-title" aria-describedby="coach-preview-summary" className="my-auto flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-2xl border border-orange-400/30 bg-[#111] shadow-2xl shadow-black/50">
+      <header className="shrink-0 border-b border-zinc-800 p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-300">SERVER PREVIEW · {kindLabel}</p><h2 id="coach-preview-title" className="mt-2 text-lg font-semibold text-white">{uiText("Подтвердите изменение", "Confirm change")}</h2><p id="coach-preview-summary" className="mt-2 text-sm leading-6 text-zinc-300">{payload.summary}</p></header>
+      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4">
+        <div className="border-l-2 border-orange-400 pl-3 text-xs leading-5 text-zinc-400">{uiText("Сервер подготовил этот preview без изменения плана. При применении сервер повторно проверит актуальность и ограничения.", "The server prepared this preview without changing the plan. It rechecks freshness and constraints when applying.")}</div>
+        <div className="grid gap-2">{changes.map((change, index) => <div key={`${String(change.field)}-${index}`} className="grid min-w-0 gap-1 border-b border-zinc-800 py-2 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-2"><span className="font-medium text-zinc-500">{coachActionChangeLabel(String(change.field))}</span><span className="min-w-0 break-words text-zinc-500">{formatChangeValue(change.before)}</span><span className="text-orange-300">→</span><span className="min-w-0 break-words text-white">{formatChangeValue(change.after)}</span></div>)}</div>
+        <div className="grid gap-2 border border-zinc-800 bg-zinc-950/60 p-3 text-xs sm:grid-cols-2"><p className="text-zinc-400">{uiText("Изменения", "Changes")}: <span className="text-white">{changes.length}</span></p><p className="min-w-0 break-words text-zinc-400">{uiText("Эффект недели", "Weekly effect")}: <span className="text-white">{weeklyEffect ? JSON.stringify(weeklyEffect) : "--"}</span></p></div>
+        <p className="text-xs text-zinc-500">{uiText("Действует до", "Expires at")}: <span className={expired ? "text-rose-300" : "text-zinc-300"}>{formatDateTime(payload.expires_at)}</span></p>
+        {"constraint_facts" in payload && Array.isArray(payload.constraint_facts) && payload.constraint_facts.length ? <div className="grid gap-1 text-xs text-zinc-500">{payload.constraint_facts.map((fact) => <p key={fact}>• {coachActionConstraintFact(fact)}</p>)}</div> : null}
+        {expired ? <p role="status" className="border border-orange-400/30 bg-orange-500/10 p-3 text-xs text-orange-100">{uiText("Preview истёк. Закройте его и подготовьте новый из сообщения тренера.", "This preview expired. Close it and prepare a fresh one from the coach message.")}</p> : null}
+        {applied ? <p role="status" aria-live="polite" className="border border-emerald-400/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">{applied}</p> : null}
+        {error ? <p role="alert" aria-live="assertive" className="border border-rose-400/30 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p> : null}
+      </div>
+      <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-zinc-800 p-4 sm:flex-row sm:justify-end"><Button className="w-full sm:w-auto" variant="secondary" disabled={applying} onClick={onClose}>{applied ? uiText("Закрыть", "Close") : uiText("Оставить как есть", "Keep original")}</Button>{!applied ? <Button className="w-full sm:w-auto" ref={applyRef} disabled={applying || expired} onClick={onApply}>{applying ? uiText("Применяем...", "Applying...") : uiText("Применить изменение", "Apply change")}</Button> : null}</footer>
+    </div>
+  </div>
+}
+
+function CoachConversationCard({ onActionApplied }: { onActionApplied: () => Promise<void> }) {
+  const [conversation, setConversation] = useState<CoachConversation | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [unavailable, setUnavailable] = useState(false)
+  const [error, setError] = useState("")
+  const [draft, setDraft] = useState("")
+  const [context, setContext] = useState<CoachContext>("general")
+  const [sending, setSending] = useState(false)
+  const [memoryState, setMemoryState] = useState<Record<number, "saving" | "saved" | "error">>({})
+  const [preview, setPreview] = useState<CoachPreviewResult | null>(null)
+  const [previewingId, setPreviewingId] = useState<number | null>(null)
+  const [applying, setApplying] = useState(false)
+  const [applied, setApplied] = useState("")
+  const [previewError, setPreviewError] = useState("")
+  const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const conversationPromiseRef = useRef<Promise<CoachConversation | null> | null>(null)
+  const sendingRef = useRef(false)
+  const applyingRef = useRef(false)
+  const previewRequestRef = useRef(0)
+
+  async function ensureConversation() {
+    if (conversation || unavailable) return conversation
+    if (conversationPromiseRef.current) return conversationPromiseRef.current
+    const request = (async () => {
+      setLoading(true); setError("")
+      try {
+        const latest = await api.coachConversations(20, 0)
+        const selected = latest.find((item) => item.status === "active") || await api.createCoachConversation()
+        const full = selected.messages ? selected : await api.coachConversation(selected.id)
+        setConversation(full)
+        return full
+      } catch (caught) {
+        if (caught instanceof Error && caught.message.startsWith("503:")) setUnavailable(true)
+        else setError(apiErrorMessage(caught, uiText("AI-тренер временно недоступен.", "AI coach is temporarily unavailable.")))
+        return null
+      } finally { setLoading(false) }
+    })()
+    conversationPromiseRef.current = request
+    try { return await request }
+    finally { if (conversationPromiseRef.current === request) conversationPromiseRef.current = null }
+  }
+
+  useEffect(() => { if (conversation) transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight }) }, [conversation?.messages?.length])
+
+  async function send(message = draft) {
+    const content = message.trim()
+    if (!content || sendingRef.current) return
+    sendingRef.current = true
+    setSending(true); setError("")
+    try {
+      const active = await ensureConversation()
+      if (!active) return
+      const assistant = await api.submitCoachTurn(active.id, { message: content, context })
+      setDraft("")
+      setConversation((current) => current ? { ...current, messages: [...(current.messages || []), { id: -Date.now(), role: "user", content, created_at: new Date().toISOString(), response: null }, assistant] } : current)
+    } catch (caught) {
+      setError(apiErrorMessage(caught, uiText("Не удалось отправить вопрос. Попробуйте позже.", "Could not send the question. Try again later.")))
+    } finally { sendingRef.current = false; setSending(false) }
+  }
+
+  async function saveMemory(message: CoachMessage) {
+    const candidate = message.response?.output.memory_candidate
+    if (!candidate) return
+    setMemoryState((current) => ({ ...current, [message.id]: "saving" }))
+    try {
+      await api.updateCoachMemory({ ...candidate, source_message_id: message.id })
+      setMemoryState((current) => ({ ...current, [message.id]: "saved" }))
+    } catch {
+      setMemoryState((current) => ({ ...current, [message.id]: "error" }))
+    }
+  }
+
+  async function preparePreview(message: CoachMessage) {
+    if (!conversation) return
+    const requestId = ++previewRequestRef.current
+    setPreviewingId(message.id); setPreviewError(""); setApplied("")
+    try {
+      const result = await api.createCoachPreview(conversation.id, message.id)
+      if (previewRequestRef.current === requestId) setPreview(result)
+    } catch (caught) {
+      if (previewRequestRef.current === requestId) setPreviewError(apiErrorMessage(caught, uiText("Не удалось подготовить preview.", "Could not prepare the preview.")))
+    } finally { if (previewRequestRef.current === requestId) setPreviewingId(null) }
+  }
+
+  async function applyPreview() {
+    if (!preview || applyingRef.current || applied) return
+    applyingRef.current = true
+    setApplying(true); setPreviewError("")
+    try {
+      let result: { status?: string; audit_log_id?: number | null; plan_version_id?: number | null } | null = null
+      if (preview.kind === "readiness_action") result = await api.applyTodayReadinessAction(preview.payload.preview_id)
+      if (preview.kind === "coach_action") result = await api.applyCoachAction(preview.payload.preview_id)
+      if (preview.kind === "weekly_strategy") result = await api.applyWeeklyStrategy(preview.payload.preview_id)
+      const reference = result?.audit_log_id ? ` · audit #${result.audit_log_id}` : result?.plan_version_id ? ` · plan version #${result.plan_version_id}` : ""
+      setApplied(`${uiText("Изменение подтверждено сервером", "The server confirmed the change")}${reference}.`)
+    } catch (caught) {
+      setPreviewError(apiErrorMessage(caught, uiText("Preview устарел или изменение нельзя применить.", "The preview expired or the change can no longer be applied.")))
+      setApplying(false)
+      applyingRef.current = false
+      return
+    }
+    try {
+      await onActionApplied()
+      if (conversation) setConversation(await api.coachConversation(conversation.id))
+    } catch {
+      setError(uiText("Изменение применено, но экран не удалось обновить.", "The change was applied, but the screen could not be refreshed."))
+    } finally { setApplying(false); applyingRef.current = false }
+  }
+
+  const prompts = [uiText("Почему такая рекомендация сегодня?", "Why this recommendation today?"), uiText("Что важно в завершённой неделе?", "What matters in the completed week?"), uiText("Как безопасно поступить с пропущенной тренировкой?", "How should I safely handle a missed workout?"), uiText("Объясни стратегию следующей недели.", "Explain next week's strategy.")]
+  const messages = conversation?.messages || []
+  return <Card className="overflow-hidden border-zinc-800">
+    <CardHeader className="border-b border-zinc-800"><div className="border-l-2 border-orange-400 pl-3"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-orange-300">COACH CONSOLE · SERVER EVIDENCE</p><CardTitle className="mt-1">{uiText("AI-тренер", "AI coach")}</CardTitle><p className="mt-2 text-xs leading-5 text-orange-100">{uiText("Объясняет решения сервера. Любое изменение требует отдельного подтверждения.", "Explains server decisions. Every change requires separate confirmation.")}</p></div></CardHeader>
+    <div className="grid gap-3 p-4">
+      {unavailable ? <p className="text-xs text-zinc-500">{uiText("AI-тренер сейчас выключен. Остальные решения и план работают как обычно.", "AI coach is currently disabled. Your plan and other decisions work as usual.")}</p> : null}
+      {!unavailable && !conversation && !loading ? <div className="grid gap-2"><p className="text-sm text-zinc-400">{uiText("Спросите о решении, которое уже подготовил сервер.", "Ask about a decision the server has already prepared.")}</p><div className="grid gap-2 sm:grid-cols-2">{prompts.map((prompt) => <Button key={prompt} variant="secondary" className="h-auto justify-start whitespace-normal px-3 py-2 text-left text-xs" onClick={() => void send(prompt)}>{prompt}</Button>)}</div></div> : null}
+      {loading ? <p aria-live="polite" className="text-xs text-zinc-500">{uiText("Подключаем журнал решений...", "Opening decision log...")}</p> : null}
+      {conversation ? <><p className="sr-only" role="status" aria-live="polite">{sending ? uiText("Тренер готовит ответ", "Coach is preparing a response") : ""}</p><div ref={transcriptRef} className="grid max-h-96 gap-3 overflow-y-auto border-y border-zinc-800 py-3">
+        {messages.map((message) => {
+          const response = message.response
+          const output = response?.output
+          const memory = output?.memory_candidate
+          return <article key={message.id} className={cn("min-w-0 border-l-2 px-3 py-1", message.role === "assistant" ? "border-orange-400 bg-zinc-950/50" : "border-zinc-700")}> <div className="flex flex-wrap items-center gap-2"><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{message.role === "assistant" ? "COACH" : uiText("ВЫ", "YOU")}</span>{response ? <><Badge className={coachSafetyClass(response.authoritative_safety_status)}>{coachSafetyLabel(response.authoritative_safety_status)}</Badge><span className="font-mono text-[10px] text-zinc-600">{response.mode === "llm" ? "LLM" : uiText("ДЕТЕРМИНИРОВАННЫЙ FALLBACK", "DETERMINISTIC FALLBACK")} · {response.provider || "server"}{response.provider_model ? `/${response.provider_model}` : ""} · #{response.attempt_count}</span></> : null}</div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">{message.content}</p>
+            {output?.safety_status === "medical_boundary" ? <p className="mt-3 border border-rose-400/40 bg-rose-500/10 p-3 text-xs leading-5 text-rose-100">{uiText("Это не медицинская диагностика. При боли, головокружении или ухудшении самочувствия остановитесь и обратитесь к специалисту.", "This is not medical diagnosis. Stop for pain, dizziness, or worsening symptoms and consult a professional.")}</p> : null}
+            {Array.isArray(output?.citations) && output.citations.length ? <div className="mt-3 flex flex-wrap gap-1">{output.citations.map((citation) => <span key={citation.source_key} className="border border-zinc-700 px-2 py-1 font-mono text-[10px] text-zinc-500">{citation.source_key}</span>)}</div> : null}
+            {output?.clarification ? <div className="mt-3 border border-zinc-700 bg-black/20 p-3"><p className="text-xs text-zinc-300">{output.clarification.question}</p><div className="mt-2 flex flex-wrap gap-2">{output.clarification.options.map((option) => <Button key={option} size="sm" variant="secondary" disabled={sending} onClick={() => void send(option)}>{option}</Button>)}</div></div> : null}
+            {memory ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t-2 border-orange-400/60 bg-zinc-900 p-3"><p className="text-xs text-zinc-300">{coachMemoryLabel(memory)}</p><div className="flex items-center gap-2"><Button size="sm" disabled={memoryState[message.id] === "saving" || memoryState[message.id] === "saved"} onClick={() => void saveMemory(message)}>{memoryState[message.id] === "saved" ? uiText("Сохранено", "Saved") : memoryState[message.id] === "saving" ? uiText("Сохраняем...", "Saving...") : uiText("Сохранить предпочтение", "Save preference")}</Button>{memoryState[message.id] === "error" ? <span className="text-xs text-rose-300">{uiText("Не сохранено", "Not saved")}</span> : null}</div></div> : null}
+            {output?.preview_request ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t-2 border-orange-400/60 bg-zinc-900 p-3"><p className="text-xs text-zinc-400">{uiText("Изменение ещё не создано.", "No change has been created yet.")}</p><Button size="sm" disabled={previewingId === message.id} onClick={() => void preparePreview(message)}>{previewingId === message.id ? uiText("Готовим...", "Preparing...") : uiText("Подготовить server preview", "Prepare server preview")}</Button></div> : null}
+          </article>
+        })}</div>
+        <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); void send() }}><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]"><label className="sr-only" htmlFor="coach-message">{uiText("Вопрос тренеру", "Question for coach")}</label><textarea id="coach-message" value={draft} maxLength={4000} disabled={sending} rows={3} placeholder={uiText("Спросите о решении сервера...", "Ask about a server decision...")} className="min-w-0 resize-y border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-orange-400 disabled:opacity-60" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send() } }} /><label className="grid gap-1 text-xs text-zinc-500"><span>{uiText("Контекст", "Context")}</span><Select value={context} disabled={sending} onChange={(event) => setContext(event.target.value as CoachContext)}><option value="general">{uiText("Общий", "General")}</option><option value="pre_workout">{uiText("Перед тренировкой", "Pre-workout")}</option><option value="post_workout">{uiText("После тренировки", "Post-workout")}</option><option value="missed_workout">{uiText("Пропуск", "Missed workout")}</option><option value="weekly_review">{uiText("Неделя", "Weekly review")}</option></Select></label></div><div className="flex items-center justify-between gap-2"><span className="text-[10px] text-zinc-600">{draft.length}/4000 · Enter {uiText("отправить", "sends")} · Shift+Enter {uiText("новая строка", "new line")}</span><Button type="submit" disabled={sending || !draft.trim()}>{sending ? uiText("Отправляем...", "Sending...") : <><Send className="h-4 w-4" />{uiText("Отправить", "Send")}</>}</Button></div></form></> : null}
+      {error ? <p role="alert" aria-live="assertive" className="border border-rose-400/30 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p> : null}
+    </div>
+    {preview ? <CoachPreviewDialog preview={preview} applying={applying} applied={applied} error={previewError} onApply={applyPreview} onClose={() => { if (!applying) { setPreview(null); setPreviewError(""); setApplied("") } }} /> : null}
   </Card>
 }
 

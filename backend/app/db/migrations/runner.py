@@ -671,6 +671,104 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_weekly_strategy_previews_expires_at ON weekly_strategy_previews (expires_at)",
         ),
     ),
+    (
+        "20260713_0027_conversational_coach",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS coach_conversations (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                status VARCHAR(32) NOT NULL,
+                surface VARCHAR(64) NOT NULL,
+                title VARCHAR(255),
+                last_message_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_conversations_status CHECK (status IN ('active', 'archived')),
+                CONSTRAINT ck_coach_conversations_surface CHECK (surface IN ('overview')),
+                CONSTRAINT uq_coach_conversations_id_user UNIQUE (id, user_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_conversations_user_id ON coach_conversations (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_conversations_status ON coach_conversations (status)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_conversations_last_message_at ON coach_conversations (last_message_at)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_conversations_user_created ON coach_conversations (user_id, created_at DESC, id DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS coach_messages (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(64) NOT NULL,
+                role VARCHAR(32) NOT NULL,
+                turn_status VARCHAR(32) NOT NULL DEFAULT 'completed',
+                content TEXT,
+                content_redacted BOOLEAN NOT NULL DEFAULT FALSE,
+                response_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_messages_role CHECK (role IN ('user', 'assistant')),
+                CONSTRAINT ck_coach_messages_turn_status CHECK (turn_status IN ('pending', 'completed')),
+                CONSTRAINT ck_coach_messages_assistant_completed CHECK (role = 'user' OR turn_status = 'completed'),
+                CONSTRAINT fk_coach_messages_conversation_owner FOREIGN KEY (conversation_id, user_id) REFERENCES coach_conversations(id, user_id) ON DELETE CASCADE,
+                CONSTRAINT uq_coach_messages_id_user UNIQUE (id, user_id),
+                CONSTRAINT uq_coach_messages_id_user_conversation UNIQUE (id, user_id, conversation_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_messages_user_id ON coach_messages (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_messages_conversation_id ON coach_messages (conversation_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_messages_turn_status ON coach_messages (turn_status)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_messages_conversation_created ON coach_messages (conversation_id, created_at ASC, id ASC)",
+            """
+            CREATE TABLE IF NOT EXISTS coach_memory (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                memory_key VARCHAR(128) NOT NULL,
+                value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                status VARCHAR(32) NOT NULL DEFAULT 'confirmed',
+                source_message_id BIGINT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_memory_key CHECK (memory_key IN ('communication_style', 'coaching_focus', 'confirmed_available_days')),
+                CONSTRAINT ck_coach_memory_status CHECK (status IN ('confirmed')),
+                CONSTRAINT fk_coach_memory_source_owner FOREIGN KEY (source_message_id, user_id) REFERENCES coach_messages(id, user_id) ON DELETE CASCADE,
+                CONSTRAINT uq_coach_memory_user_key UNIQUE (user_id, memory_key)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_memory_user_id ON coach_memory (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_memory_source_message_id ON coach_memory (source_message_id)",
+            """
+            CREATE TABLE IF NOT EXISTS coach_llm_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(64) NOT NULL,
+                message_id BIGINT NOT NULL,
+                provider VARCHAR(64) NOT NULL,
+                provider_id INTEGER REFERENCES llm_provider_settings(id) ON DELETE SET NULL,
+                model VARCHAR(255),
+                attempt_number INTEGER NOT NULL,
+                request_phase VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                failure_class VARCHAR(64),
+                started_at TIMESTAMP WITH TIME ZONE,
+                completed_at TIMESTAMP WITH TIME ZONE,
+                duration_ms INTEGER,
+                request_fingerprint VARCHAR(128),
+                output_fingerprint VARCHAR(128),
+                validation_errors JSONB,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_llm_attempt_number CHECK (attempt_number > 0),
+                CONSTRAINT ck_coach_llm_attempt_status CHECK (status IN ('success', 'failed')),
+                CONSTRAINT ck_coach_llm_attempt_phase CHECK (request_phase IN ('initial', 'repair')),
+                CONSTRAINT ck_coach_llm_attempt_duration CHECK (duration_ms IS NULL OR duration_ms >= 0),
+                CONSTRAINT fk_coach_llm_attempt_conversation_owner FOREIGN KEY (conversation_id, user_id) REFERENCES coach_conversations(id, user_id) ON DELETE CASCADE,
+                CONSTRAINT fk_coach_llm_attempt_message_owner FOREIGN KEY (message_id, user_id, conversation_id) REFERENCES coach_messages(id, user_id, conversation_id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_user_id ON coach_llm_attempts (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_conversation_id ON coach_llm_attempts (conversation_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_message_id ON coach_llm_attempts (message_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_status ON coach_llm_attempts (status)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_user_created ON coach_llm_attempts (user_id, created_at DESC, id DESC)",
+        ),
+    ),
 )
 
 

@@ -3,6 +3,8 @@ import socket
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
+import httpx
+
 from app.core.settings import Settings
 from app.models import LlmProviderSetting
 
@@ -60,6 +62,42 @@ def validate_provider_base_url(raw_url: str, allow_private: bool = False) -> str
         for address in addresses:
             reject_private_address(address)
     return raw_url
+
+
+def pinned_provider_request(endpoint: str, *, allow_private: bool, json: object, headers: dict[str, str], timeout: int) -> httpx.Response:
+    """Resolve and pin public provider hosts to close the DNS-rebinding window."""
+    parsed = urlparse(endpoint)
+    if allow_private:
+        with httpx.Client(trust_env=False, follow_redirects=False) as client:
+            return client.post(endpoint, json=json, headers=headers, timeout=timeout)
+
+    if not parsed.hostname:
+        raise ValueError("Provider endpoint must include a host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        records = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as dns_error:
+        raise ValueError("Provider endpoint host could not be resolved") from dns_error
+    addresses = sorted({record[4][0] for record in records})
+    if not addresses:
+        raise ValueError("Provider endpoint host could not be resolved")
+    for address in addresses:
+        reject_private_address(address)
+
+    pinned_url = httpx.URL(endpoint).copy_with(host=addresses[0])
+    default_port = 443 if parsed.scheme == "https" else 80
+    host_header = parsed.hostname if port == default_port else f"{parsed.hostname}:{port}"
+    request_headers = {**headers, "Host": host_header}
+    with httpx.Client(trust_env=False, follow_redirects=False) as client:
+        request = client.build_request(
+            "POST",
+            pinned_url,
+            json=json,
+            headers=request_headers,
+            timeout=timeout,
+            extensions={"sni_hostname": parsed.hostname},
+        )
+        return client.send(request)
 
 
 def _append_endpoint_path(raw_url: str, default_versioned_path: str, endpoint_suffix: str) -> str:

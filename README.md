@@ -77,6 +77,11 @@ GET /health
 - `GET /api/weekly-reviews/current?week_start=YYYY-MM-DD` — материализовать или переиспользовать immutable deterministic review завершённой локальной Monday-Sunday недели. Historical resolver использует plan version ledger и append-only events; неполная реконструкция возвращает `partial_legacy` и блокирует повышение нагрузки.
 - `POST /api/weekly-reviews/{review_id}/strategy-preview` — создать persisted 10-минутный preview только для server-recommended стратегии `hold`, `deload`, `resume` или `conservative_progression`, с before/after недельной нагрузки и safety facts.
 - `POST /api/weekly-reviews/strategy-previews/{preview_id}/apply` — явно подтвердить недельную стратегию. Backend повторно проверяет historical fingerprint, active plan, current safety и preview state; retry идемпотентен. `hold` пишет audit/event без plan version, mutation создаёт immutable plan version и поддерживает compensating rollback.
+- `POST /api/coach/conversations` — создать opaque user-scoped беседу Hybrid Conversational Coach; feature включается отдельно через `RUNFORFAN_COACH_ENABLED` и по умолчанию выключен.
+- `GET /api/coach/conversations` и `GET /api/coach/conversations/{id}` — получить свои беседы и append-only transcript с provenance `llm`/`deterministic_fallback`, safety status и evidence citations.
+- `POST /api/coach/conversations/{id}/turns` — получить русскоязычное explanation/clarification поверх Athlete State, readiness и Weekly Review. Endpoint не создаёт preview, не применяет изменение и при отказе provider сохраняет детерминированный fallback.
+- `GET /api/coach/memory`, `PUT /api/coach/memory`, `DELETE /api/coach/memory` — управлять только явно подтверждёнными allowlisted предпочтениями: стиль ответа, coaching focus и доступные дни. Медицинские заметки и произвольный sensitive text в coach memory не сохраняются.
+- `POST /api/coach/conversations/{id}/previews` — по отдельному user click повторно авторизовать typed handoff из сохранённого assistant message и создать существующий readiness/coach-action/weekly preview без apply. Применение остаётся только в соответствующем доменном endpoint и требует отдельного подтверждения.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
@@ -149,6 +154,8 @@ AI provider settings:
 - API-ключи не возвращаются на frontend и хранятся зашифрованно через Fernet.
 - Один provider можно пометить как default.
 - Recognition pipeline берет default provider текущего пользователя.
+- Conversational Coach использует только активные provider-настройки текущего пользователя: сначала default, затем остальные. Внешнему provider передаётся ограниченный typed context, текущий вопрос и bounded transcript; API keys, provider configuration, raw notes, screenshots, filesystem paths и raw event payloads исключены.
+- Provider output проходит strict schema, citation, safety и preview authorization. Ошибка schema получает одну repair-попытку; safety rejection переключает на следующего provider без repair. В `coach_llm_attempts` сохраняются только operational metadata и fingerprints, без raw prompt/response.
 
 API настроек AI:
 
@@ -185,6 +192,7 @@ API настроек AI:
 
 - Для локальной разработки по умолчанию включен `RUNFORFAN_AUTO_CREATE_SCHEMA=true`, поэтому пустая база может быть создана через SQLAlchemy metadata.
 - Новые таблицы profile/measurements/zones также создаются явной версионированной миграцией `20260607_0001_profile_measurements_zones` через `schema_migrations`.
+- Hybrid Conversational Coach создаётся миграцией `20260713_0027_conversational_coach`: `coach_conversations`, `coach_messages`, `coach_memory`, `coach_llm_attempts` с ownership/check constraints и dependency-safe export/delete lifecycle.
 - Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
@@ -217,7 +225,7 @@ API настроек AI:
 - Training Load & Recovery показывает daily/weekly load, CTL/ATL/TSB, monotony/strain, hard-session spacing, recovery days и explainable load alerts.
 - Zones Analytics показывает HR/pace/RPE zones, 3-zone Seiler distribution, 5-zone detailed distribution, time-in-zones by week/month и planned-vs-actual intensity split.
 - Performance Analytics хранит race/time trial results, считает VDOT только из eligible hard sources, показывает Riegel predictions, PBs, threshold trend и pace zones derived from threshold/VDOT.
-- LLM-слой предусмотрен для будущих пояснений, адаптации и корректировок.
+- Hybrid Conversational Coach реализован как explanation/clarification layer над детерминированными решениями. LLM не имеет доступа к apply services, не назначает произвольную нагрузку и может только запросить отдельный server-generated preview разрешённого действия.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
 ## Новый frontend

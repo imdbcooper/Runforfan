@@ -26,6 +26,7 @@ services:
       RUNFORFAN_AUTO_CREATE_SCHEMA: "true"
       RUNFORFAN_DEMO_SEED: "true"
       RUNFORFAN_UPLOAD_DIR: /app/storage/uploads
+      RUNFORFAN_COACH_ENABLED: "true"
     ports:
       - "8080:8080"
     volumes:

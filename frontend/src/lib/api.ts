@@ -1,3 +1,5 @@
+import { parseCoachPreviewResult } from "@/lib/coach-preview"
+
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080/api"
 const DEV_LOGIN_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"
 const TELEGRAM_BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || ""
@@ -879,6 +881,69 @@ export type DailyReadinessActionApplyResult = {
   summary: string
 }
 
+export type CoachContext = "general" | "pre_workout" | "post_workout" | "missed_workout" | "weekly_review"
+export type CoachSafetyStatus = "normal" | "caution" | "medical_boundary"
+export type CoachMemoryWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
+export type CoachMemoryUpdate = {
+  communication_style?: "brief" | "detailed"
+  coaching_focus?: "consistency" | "race_goal" | "recovery" | "general"
+  confirmed_available_days?: CoachMemoryWeekday[]
+  source_message_id?: number
+}
+
+export type CoachClarification = {
+  id: string
+  question: string
+  options: string[]
+}
+
+export type CoachPreviewRequest =
+  | { kind: "readiness_action"; action: "shorten_easy" | "easy_replacement" }
+  | { kind: "coach_action"; workout_id: number; action: CoachAction; reason: WorkoutMissReason; target_date: string | null }
+  | { kind: "weekly_strategy"; review_id: number; strategy: WeeklyStrategy }
+
+export type CoachProviderOutput = {
+  intent: "explain_decision" | "ask_clarification" | "request_preview" | "inform"
+  answer: string
+  citations: { source_key: string }[]
+  safety_status: CoachSafetyStatus
+  clarification: CoachClarification | null
+  preview_request: CoachPreviewRequest | null
+  memory_candidate: CoachMemoryUpdate | null
+}
+
+export type CoachAssistantResponse = {
+  output: CoachProviderOutput
+  mode: "llm" | "deterministic_fallback"
+  provider: string | null
+  provider_model: string | null
+  attempt_count: number
+  authoritative_safety_status: CoachSafetyStatus
+}
+
+export type CoachMessage = {
+  id: number
+  role: "user" | "assistant" | string
+  content: string | null
+  created_at: string | null
+  response: CoachAssistantResponse | null
+}
+
+export type CoachConversation = {
+  id: string
+  status: string
+  title: string | null
+  created_at: string | null
+  updated_at: string | null
+  messages: CoachMessage[] | null
+}
+
+export type CoachPreviewResult =
+  | { kind: "readiness_action"; payload: DailyReadinessActionPreview }
+  | { kind: "coach_action"; payload: CoachActionPreview }
+  | { kind: "weekly_strategy"; payload: WeeklyStrategyPreview }
+
 export type AthleteStateSourceRef = {
   model: string
   id: number | string
@@ -1583,6 +1648,13 @@ export const api = {
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
   previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),
   applyTodayReadinessAction: (previewId: string) => request<DailyReadinessActionApplyResult>(`/readiness/today/actions/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
+  coachConversations: (limit = 20, offset = 0) => request<CoachConversation[]>(`/coach/conversations?limit=${limit}&offset=${offset}`),
+  createCoachConversation: () => request<CoachConversation>("/coach/conversations", { method: "POST", body: JSON.stringify({ surface: "overview" }) }),
+  coachConversation: (conversationId: string) => request<CoachConversation>(`/coach/conversations/${encodeURIComponent(conversationId)}`),
+  submitCoachTurn: (conversationId: string, payload: { message: string; context: CoachContext }) => request<CoachMessage>(`/coach/conversations/${encodeURIComponent(conversationId)}/turns`, { method: "POST", body: JSON.stringify(payload) }),
+  coachMemory: () => request<Record<string, unknown>>("/coach/memory"),
+  updateCoachMemory: (payload: CoachMemoryUpdate) => request<Record<string, unknown>>("/coach/memory", { method: "PUT", body: JSON.stringify(payload) }),
+  createCoachPreview: async (conversationId: string, assistantMessageId: number) => parseCoachPreviewResult(await request<unknown>(`/coach/conversations/${encodeURIComponent(conversationId)}/previews`, { method: "POST", body: JSON.stringify({ assistant_message_id: assistantMessageId }) })),
   calendar: (fromDate: string, toDate: string) => request<CalendarResponse>(`/calendar?from=${fromDate}&to=${toDate}`),
   profile: () => request<AthleteProfile>("/profile"),
   updateProfile: (payload: Record<string, unknown>) => request<AthleteProfile>("/profile", { method: "PUT", body: JSON.stringify(payload) }),

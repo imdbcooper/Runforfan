@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.models import Activity, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
+    from app.models import Activity, CoachLlmAttempt, CoachMessage, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
+    from app.db.migrations.runner import MIGRATIONS
     from app.services.csv_imports import activity_payload_from_csv_row, iter_csv_rows
-    from app.services.data_management import activities_csv_content, activity_export, csv_safe_value, llm_provider_export, model_to_dict, training_plan_export
+    from app.services.data_management import DELETE_MODELS, activities_csv_content, activity_export, coach_message_export, csv_safe_value, llm_provider_export, model_to_dict, training_plan_export
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for data management tests"
@@ -124,6 +125,41 @@ class DataManagementTests(unittest.TestCase):
 
         self.assertEqual(exported["date"], "2026-06-08")
         self.assertEqual(exported["activity_ids"], [5])
+
+    def test_coach_message_export_redacts_content(self):
+        message = CoachMessage(id=1, user_id=2, conversation_id="conversation_opaque_id", role="assistant", content="sensitive training detail", content_redacted=True, response_json={"output": {"answer": "sensitive training detail"}}, created_at=datetime(2026, 7, 13, tzinfo=UTC))
+
+        exported = coach_message_export(message)
+
+        self.assertTrue(exported["content_redacted"])
+        self.assertIsNone(exported["content"])
+        self.assertIsNone(exported["response_json"])
+
+    def test_coach_llm_attempt_model_has_no_raw_payload_columns(self):
+        column_names = set(CoachLlmAttempt.__table__.columns.keys())
+
+        self.assertTrue({"provider", "model", "status", "failure_class", "started_at", "completed_at", "duration_ms", "request_fingerprint", "output_fingerprint", "validation_errors"}.issubset(column_names))
+        self.assertFalse({"raw_request", "raw_response", "request_payload", "response_payload"} & column_names)
+
+    def test_coach_migration_creates_required_tables_and_integrity_checks(self):
+        statements = dict(MIGRATIONS)["20260713_0027_conversational_coach"]
+        migration_sql = "\n".join(statements).lower()
+
+        for table_name in ("coach_conversations", "coach_messages", "coach_memory", "coach_llm_attempts"):
+            self.assertIn(f"create table if not exists {table_name}", migration_sql)
+        self.assertIn("on delete cascade", migration_sql)
+        self.assertIn("foreign key (source_message_id, user_id)", migration_sql)
+        self.assertIn("foreign key (message_id, user_id, conversation_id)", migration_sql)
+        self.assertIn("check (role", migration_sql)
+        self.assertIn("check (status", migration_sql)
+        self.assertIn("foreign key (conversation_id, user_id)", migration_sql)
+
+    def test_coach_delete_order_removes_dependents_before_conversations(self):
+        names = [name for name, _ in DELETE_MODELS]
+
+        self.assertLess(names.index("coach_llm_attempts"), names.index("coach_messages"))
+        self.assertLess(names.index("coach_memory"), names.index("coach_messages"))
+        self.assertLess(names.index("coach_messages"), names.index("coach_conversations"))
 
 
 if __name__ == "__main__":

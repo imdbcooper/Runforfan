@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 DEPENDENCY_SKIP_REASON = None
 
@@ -12,7 +12,7 @@ try:
     from app.api.routes.settings import delete_llm_provider, normalized_base_url, provider_out, test_provider_connection, update_llm_provider
     from app.models import LlmProviderSetting, User
     from app.schemas.common import LlmProviderUpdate
-    from app.services.llm_providers import provider_endpoint_url, provider_supports_vision
+    from app.services.llm_providers import pinned_provider_request, provider_endpoint_url, provider_supports_vision
 except ModuleNotFoundError as exc:
     if exc.name in {"cryptography", "fastapi", "httpx", "pydantic", "sqlalchemy"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for LLM provider tests"
@@ -195,6 +195,45 @@ class LlmProviderTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             provider_endpoint_url(provider, type("Settings", (), {"allow_private_llm_base_urls": False})())
+
+    def test_pinned_request_revalidates_dns_and_rejects_private_answers(self):
+        private_record = [(None, None, None, None, ("127.0.0.1", 443))]
+
+        with patch("app.services.llm_providers.socket.getaddrinfo", return_value=private_record), patch("app.services.llm_providers.httpx.Client") as client:
+            with self.assertRaises(ValueError):
+                pinned_provider_request(
+                    "https://provider.example/v1/chat/completions",
+                    allow_private=False,
+                    json={"safe": True},
+                    headers={"Authorization": "Bearer secret"},
+                    timeout=20,
+                )
+
+        client.assert_not_called()
+
+    def test_pinned_request_connects_to_vetted_ip_with_original_sni_and_host(self):
+        public_record = [(None, None, None, None, ("8.8.8.8", 443))]
+        response = FakeResponse()
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.build_request.return_value = object()
+        client.send.return_value = response
+
+        with patch("app.services.llm_providers.socket.getaddrinfo", return_value=public_record), patch("app.services.llm_providers.httpx.Client", return_value=client):
+            result = pinned_provider_request(
+                "https://provider.example/v1/chat/completions",
+                allow_private=False,
+                json={"safe": True},
+                headers={"Authorization": "Bearer secret"},
+                timeout=20,
+            )
+
+        self.assertIs(result, response)
+        request_call = client.build_request.call_args
+        self.assertEqual(str(request_call.args[1]), "https://8.8.8.8/v1/chat/completions")
+        self.assertEqual(request_call.kwargs["headers"]["Host"], "provider.example")
+        self.assertEqual(request_call.kwargs["extensions"], {"sni_hostname": "provider.example"})
+        client.send.assert_called_once_with(client.build_request.return_value)
 
     def test_provider_base_url_is_rejected_before_storage(self):
         with self.assertRaises(HTTPException) as ctx:

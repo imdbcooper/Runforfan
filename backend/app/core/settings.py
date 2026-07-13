@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     daily_training_load_backfill_on_startup: bool = True
     daily_training_load_backfill_days: int = 28
     daily_training_load_backfill_user_limit: int = 100
+    coach_enabled: bool = False
+    coach_llm_timeout: int = 20
+    coach_llm_max_tokens: int = 900
+    coach_turn_limit: int = 10
+    coach_turn_window_minutes: int = 10
+    coach_pending_turn_limit: int = 3
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",
