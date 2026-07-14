@@ -27,10 +27,30 @@ services:
       RUNFORFAN_DEMO_SEED: "true"
       RUNFORFAN_UPLOAD_DIR: /app/storage/uploads
       RUNFORFAN_COACH_ENABLED: "true"
+      RUNFORFAN_COACH_DELIVERY_ENABLED: "false"
+      RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED: "false"
     ports:
       - "8080:8080"
     volumes:
       - ./backend/app/storage/uploads:/app/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - runforfan_net
+
+  coach-delivery-worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: python -m app.workers.coach_delivery
+    environment:
+      RUNFORFAN_DATABASE_URL: postgresql+psycopg://runforfan:runforfan@db:5432/runforfan
+      RUNFORFAN_APP_ENV: development
+      RUNFORFAN_TELEGRAM_BOT_TOKEN: ${RUNFORFAN_TELEGRAM_BOT_TOKEN:-}
+      RUNFORFAN_FRONTEND_URL: ${RUNFORFAN_FRONTEND_URL:-http://127.0.0.1:5173/app/}
+      RUNFORFAN_COACH_DELIVERY_ENABLED: "false"
+      RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED: "false"
     depends_on:
       db:
         condition: service_healthy

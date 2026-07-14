@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     coach_turn_limit: int = 10
     coach_turn_window_minutes: int = 10
     coach_pending_turn_limit: int = 3
+    coach_delivery_enabled: bool = False
+    coach_delivery_worker_enabled: bool = False
+    coach_delivery_poll_seconds: float = 30.0
+    coach_delivery_batch_size: int = 25
+    coach_delivery_max_attempts: int = 5
+    coach_delivery_retry_base_seconds: int = 60
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",

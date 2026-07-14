@@ -2,6 +2,7 @@ import hmac
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -18,6 +19,53 @@ logger = logging.getLogger(__name__)
 _bot_username_cache: str | None = None
 _polling_thread: threading.Thread | None = None
 _polling_stop_event = threading.Event()
+
+
+@dataclass(frozen=True)
+class TelegramDeliveryResult:
+    http_status: int
+
+
+class TelegramDeliveryError(Exception):
+    def __init__(self, failure_class: str, http_status: int | None = None, retry_after: int | None = None):
+        self.failure_class = failure_class
+        self.http_status = http_status
+        self.retry_after = retry_after
+        super().__init__(failure_class)
+
+
+class TelegramDeliveryClient:
+    def send(self, chat_id: int, text: str) -> TelegramDeliveryResult:
+        payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True, "reply_markup": {"inline_keyboard": [[{"text": "Открыть Runforfan", "url": get_settings().frontend_url}]]}}
+        try:
+            url = _bot_api_url("sendMessage")
+        except HTTPException as exc:
+            raise TelegramDeliveryError("configuration") from exc
+        try:
+            response = httpx.post(url, json=payload, proxy=get_settings().telegram_bot_proxy_url, timeout=10)
+        except httpx.TimeoutException as exc:
+            raise TelegramDeliveryError("timeout") from exc
+        except httpx.NetworkError as exc:
+            raise TelegramDeliveryError("network") from exc
+        except httpx.HTTPError as exc:
+            raise TelegramDeliveryError("upstream") from exc
+        retry_after = None
+        try:
+            body = response.json()
+            parameters = body.get("parameters") if isinstance(body, dict) else None
+            if isinstance(parameters, dict) and isinstance(parameters.get("retry_after"), int):
+                retry_after = parameters["retry_after"]
+        except ValueError:
+            body = {}
+        if response.status_code == 429:
+            raise TelegramDeliveryError("rate_limited", 429, retry_after)
+        if response.status_code == 403:
+            raise TelegramDeliveryError("forbidden", 403)
+        if response.status_code == 400:
+            raise TelegramDeliveryError("bad_request", 400)
+        if response.status_code >= 500 or not response.is_success or not isinstance(body, dict) or not body.get("ok"):
+            raise TelegramDeliveryError("upstream", response.status_code)
+        return TelegramDeliveryResult(response.status_code)
 
 
 def validate_telegram_webhook_secret(received_secret: str | None) -> None:
@@ -41,7 +89,11 @@ def build_frontend_login_url(code: str) -> str:
 def telegram_bot_start_url() -> str | None:
     if not get_settings().telegram_bot_token:
         return None
-    username = _get_bot_username()
+    try:
+        username = _get_bot_username()
+    except HTTPException:
+        logger.warning("Telegram Bot API getMe failed while building start URL")
+        return None
     if not username:
         return None
     return f"https://t.me/{username}?start=login"
@@ -60,8 +112,19 @@ def handle_telegram_webhook_update(db: Session, update: dict[str, Any]) -> None:
     if not chat_id or not telegram_id:
         return
     text = str(message.get("text") or "").strip()
+    is_private_chat = chat.get("type") == "private"
     if not text.startswith("/start"):
-        _send_message(chat_id, "Нажмите /start, чтобы зарегистрироваться в Runforfan.")
+        if is_private_chat:
+            _send_message(chat_id, "Нажмите /start, чтобы зарегистрироваться в Runforfan.")
+        return
+
+    if not is_private_chat:
+        return
+
+    # Telegram private chats use the sender's numeric id as their chat id.
+    # Reject malformed updates before provisioning any local account state.
+    if int(chat_id) != int(telegram_id):
+        logger.warning("Ignoring Telegram private chat with mismatched sender and chat IDs")
         return
 
     user = get_or_create_telegram_user_from_profile(
@@ -71,6 +134,11 @@ def handle_telegram_webhook_update(db: Session, update: dict[str, Any]) -> None:
         first_name=sender.get("first_name"),
         last_name=sender.get("last_name"),
     )
+    # Authentication remains available during a closed delivery rollout, but
+    # destination metadata is collected only when delivery itself is available.
+    if get_settings().coach_delivery_enabled:
+        from app.services.coach_delivery import verify_private_telegram_chat
+        verify_private_telegram_chat(db, user, int(chat_id), int(telegram_id))
     code = create_telegram_login_code(db, user, int(telegram_id))
     login_url = build_frontend_login_url(code)
     _send_message(

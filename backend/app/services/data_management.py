@@ -18,6 +18,9 @@ from app.models import (
     AthleteStateSnapshot,
     CoachActionPreview,
     CoachConversation,
+    CoachDelivery,
+    CoachDeliveryAttempt,
+    CoachDeliveryPreference,
     CoachLlmAttempt,
     CoachMemory,
     CoachMessage,
@@ -152,10 +155,11 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
     audit_logs = list(db.scalars(select(AuditLog).where(AuditLog.user_id == user.id).order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(500)))
     coaching_events = list(db.scalars(select(CoachingEvent).where(CoachingEvent.user_id == user.id).order_by(CoachingEvent.occurred_at.desc(), CoachingEvent.id.desc())))
     daily_training_loads = list(db.scalars(select(DailyTrainingLoad).where(DailyTrainingLoad.user_id == user.id).order_by(DailyTrainingLoad.date.asc())))
+    coach_delivery_preference = db.scalar(select(CoachDeliveryPreference).where(CoachDeliveryPreference.user_id == user.id))
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-14.0028",
+        "version": "2026-07-14.0030",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -179,6 +183,9 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "coach_messages": [coach_message_export(item) for item in db.scalars(select(CoachMessage).where(CoachMessage.user_id == user.id).order_by(CoachMessage.created_at.asc(), CoachMessage.id.asc()))],
         "coach_memory": [model_to_dict(item) for item in db.scalars(select(CoachMemory).where(CoachMemory.user_id == user.id).order_by(CoachMemory.memory_key.asc()))],
         "coach_llm_attempts": [model_to_dict(item) for item in db.scalars(select(CoachLlmAttempt).where(CoachLlmAttempt.user_id == user.id).order_by(CoachLlmAttempt.created_at.asc(), CoachLlmAttempt.id.asc()))],
+        "coach_delivery_preference": model_to_dict(coach_delivery_preference, exclude={"telegram_chat_id"}) if coach_delivery_preference else None,
+        "coach_deliveries": [model_to_dict(item) for item in db.scalars(select(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDelivery.created_at.asc()))],
+        "coach_delivery_attempts": [model_to_dict(item) for item in db.scalars(select(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDeliveryAttempt.created_at.asc(), CoachDeliveryAttempt.id.asc()))],
         "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -202,6 +209,9 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 
 
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
+    ("coach_delivery_attempts", CoachDeliveryAttempt),
+    ("coach_deliveries", CoachDelivery),
+    ("coach_delivery_preferences", CoachDeliveryPreference),
     ("coach_llm_attempts", CoachLlmAttempt),
     ("coach_memory", CoachMemory),
     ("coach_messages", CoachMessage),
@@ -308,6 +318,7 @@ def delete_user_data(db: Session, user_id: int) -> dict[str, int]:
     counts = {
         "derived_activity_metrics": int(db.scalar(select(func.count()).select_from(DerivedActivityMetric).join(Activity, DerivedActivityMetric.activity_id == Activity.id).where(Activity.user_id == user_id)) or 0),
         "planned_workout_blocks": int(db.scalar(select(func.count()).select_from(TrainingPlanWorkoutBlock).join(TrainingPlanWorkout, TrainingPlanWorkoutBlock.workout_id == TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id)) or 0),
+        "coach_delivery_attempts": int(db.scalar(select(func.count()).select_from(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user_id)) or 0),
     }
     counts.update({name: count_rows_for_user(db, model, user_id) for name, model in DELETE_MODELS if hasattr(model, "user_id")})
     db.execute(delete(DerivedActivityMetric).where(DerivedActivityMetric.activity_id.in_(select(Activity.id).where(Activity.user_id == user_id))))

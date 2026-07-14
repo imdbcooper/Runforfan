@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, field_validator, model_validator
 
 
 Date = date
@@ -31,6 +31,29 @@ class ErrorResponse(BaseModel):
     code: str
     message: str
     details: object | None = None
+
+
+class CoachDeliveryPreferenceOut(BaseModel):
+    available: bool
+    linked: bool
+    enabled: bool
+    daily_brief_local_time: time
+    timezone: str
+    bot_url: str | None = None
+
+
+class CoachDeliveryPreferenceUpdate(BaseModel):
+    telegram_enabled: StrictBool | None = None
+    daily_brief_local_time: time | None = None
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("daily_brief_local_time")
+    @classmethod
+    def validate_daily_brief_local_time(cls, value: time | None) -> time | None:
+        if value is not None and (value.second or value.microsecond or value.tzinfo is not None):
+            raise ValueError("daily_brief_local_time must use local HH:MM precision")
+        return value
 
 
 class SegmentOut(BaseModel):

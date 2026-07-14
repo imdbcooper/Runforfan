@@ -1500,6 +1500,20 @@ export type TelegramBotLink = {
   bot_url: string | null
 }
 
+export type CoachDeliveryPreferences = {
+  available: boolean
+  linked: boolean
+  enabled: boolean
+  daily_brief_local_time: string | null
+  timezone: string | null
+  bot_url: string | null
+}
+
+export type CoachDeliveryPreferencesUpdate = {
+  telegram_enabled?: boolean
+  daily_brief_local_time?: string
+}
+
 let token = safeStorageGet("runforfan_token")
 
 export const authConfig = {
@@ -1707,6 +1721,8 @@ export const api = {
   testProvider: (id: number) => request<LlmProviderTest>(`/settings/llm-providers/${id}/test`, { method: "POST", body: "{}" }),
   deleteProvider: (id: number) => request(`/settings/llm-providers/${id}`, { method: "DELETE" }),
   integrations: () => request<Integration[]>("/settings/integrations"),
+  coachDeliveryPreferences: () => request<CoachDeliveryPreferences>("/coach-delivery/preferences"),
+  updateCoachDeliveryPreferences: (payload: CoachDeliveryPreferencesUpdate) => request<CoachDeliveryPreferences>("/coach-delivery/preferences", { method: "PUT", body: JSON.stringify(payload) }),
   exportData: () => request<Record<string, unknown>>("/export"),
   exportActivitiesCsv: () => requestText("/export/activities.csv"),
   deleteAccountData: (confirmation: "DELETE") => request<{ deleted: boolean; counts: Record<string, number>; audit_id: number | null }>("/account/data", { method: "DELETE", body: JSON.stringify({ confirmation }) }),

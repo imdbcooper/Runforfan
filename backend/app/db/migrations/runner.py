@@ -826,6 +826,106 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_upload_deletion_jobs_created_at ON upload_deletion_jobs (created_at)",
         ),
     ),
+    (
+        "20260714_0029_coach_delivery",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS coach_delivery_preferences (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                telegram_chat_id BIGINT,
+                telegram_chat_verified_at TIMESTAMP WITH TIME ZONE,
+                telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                daily_brief_local_time TIME NOT NULL DEFAULT '08:00:00',
+                enabled_at TIMESTAMP WITH TIME ZONE,
+                disabled_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_delivery_preference_enabled_destination CHECK (NOT telegram_enabled OR (telegram_chat_id IS NOT NULL AND telegram_chat_verified_at IS NOT NULL))
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_delivery_preferences_user_id ON coach_delivery_preferences (user_id)",
+            """
+            CREATE TABLE IF NOT EXISTS coach_deliveries (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                channel VARCHAR(32) NOT NULL DEFAULT 'telegram',
+                delivery_type VARCHAR(32) NOT NULL DEFAULT 'daily_brief',
+                local_date DATE NOT NULL,
+                timezone VARCHAR(100) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                athlete_state_snapshot_id INTEGER REFERENCES athlete_state_snapshots(id) ON DELETE SET NULL,
+                readiness_checkin_id INTEGER REFERENCES daily_readiness_checkins(id) ON DELETE SET NULL,
+                workout_id INTEGER REFERENCES training_plan_workouts(id) ON DELETE SET NULL,
+                template_key VARCHAR(32) NOT NULL,
+                content_fingerprint VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                scheduled_for TIMESTAMP WITH TIME ZONE NOT NULL,
+                retry_at TIMESTAMP WITH TIME ZONE,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                locked_at TIMESTAMP WITH TIME ZONE,
+                locked_by VARCHAR(128),
+                sent_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_delivery_channel CHECK (channel = 'telegram'),
+                CONSTRAINT ck_coach_delivery_type CHECK (delivery_type = 'daily_brief'),
+                CONSTRAINT ck_coach_delivery_template CHECK (template_key IN ('checkin_required', 'proceed', 'conservative', 'rest', 'stop')),
+                CONSTRAINT ck_coach_delivery_status CHECK (status IN ('pending', 'sending', 'sent', 'retry_scheduled', 'permanent_failure', 'cancelled')),
+                CONSTRAINT ck_coach_delivery_attempt_counts CHECK (attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts),
+                CONSTRAINT ck_coach_delivery_retry_status CHECK (retry_at IS NULL OR status = 'retry_scheduled'),
+                CONSTRAINT ck_coach_delivery_retry_scheduled_at CHECK (status != 'retry_scheduled' OR retry_at IS NOT NULL),
+                CONSTRAINT ck_coach_delivery_sending_lock CHECK (status != 'sending' OR (locked_at IS NOT NULL AND locked_by IS NOT NULL)),
+                CONSTRAINT uq_coach_delivery_daily UNIQUE (user_id, channel, delivery_type, local_date, rule_version)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_delivery_due_queue ON coach_deliveries (status, scheduled_for, retry_at)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_delivery_user_history ON coach_deliveries (user_id, local_date DESC, created_at DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS coach_delivery_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                delivery_id VARCHAR(64) NOT NULL REFERENCES coach_deliveries(id) ON DELETE CASCADE,
+                attempt_number INTEGER NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                failure_class VARCHAR(32),
+                http_status INTEGER,
+                started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                completed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_delivery_attempt_number CHECK (attempt_number > 0),
+                CONSTRAINT ck_coach_delivery_attempt_status CHECK (status IN ('success', 'retryable_failure', 'permanent_failure')),
+                CONSTRAINT ck_coach_delivery_attempt_failure_class CHECK (failure_class IS NULL OR failure_class IN ('timeout', 'network', 'rate_limited', 'upstream', 'forbidden', 'bad_request', 'configuration', 'internal')),
+                CONSTRAINT uq_coach_delivery_attempt UNIQUE (delivery_id, attempt_number)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_delivery_attempts_delivery_id ON coach_delivery_attempts (delivery_id)",
+        ),
+    ),
+    (
+        "20260714_0030_coach_delivery_constraints",
+        (
+            """
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_deliveries'::regclass AND conname = 'ck_coach_delivery_attempt_counts') THEN
+                    ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_attempt_counts CHECK (attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_deliveries'::regclass AND conname = 'ck_coach_delivery_retry_status') THEN
+                    ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_retry_status CHECK (retry_at IS NULL OR status = 'retry_scheduled');
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_deliveries'::regclass AND conname = 'ck_coach_delivery_retry_scheduled_at') THEN
+                    ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_retry_scheduled_at CHECK (status != 'retry_scheduled' OR retry_at IS NOT NULL);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_deliveries'::regclass AND conname = 'ck_coach_delivery_sending_lock') THEN
+                    ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_sending_lock CHECK (status != 'sending' OR (locked_at IS NOT NULL AND locked_by IS NOT NULL));
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_delivery_attempts'::regclass AND conname = 'ck_coach_delivery_attempt_number') THEN
+                    ALTER TABLE coach_delivery_attempts ADD CONSTRAINT ck_coach_delivery_attempt_number CHECK (attempt_number > 0);
+                END IF;
+            END $$
+            """,
+        ),
+    ),
 )
 
 

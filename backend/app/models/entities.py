@@ -1,8 +1,8 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,8 @@ class User(Base, TimestampMixin):
     coach_messages: Mapped[list["CoachMessage"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coach_memory: Mapped[list["CoachMemory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coach_llm_attempts: Mapped[list["CoachLlmAttempt"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    coach_delivery_preference: Mapped["CoachDeliveryPreference | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
+    coach_deliveries: Mapped[list["CoachDelivery"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -75,6 +77,85 @@ class TelegramLoginCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship()
+
+
+class CoachDeliveryPreference(Base, TimestampMixin):
+    __tablename__ = "coach_delivery_preferences"
+    __table_args__ = (
+        CheckConstraint("NOT telegram_enabled OR (telegram_chat_id IS NOT NULL AND telegram_chat_verified_at IS NOT NULL)", name="ck_coach_delivery_preference_enabled_destination"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    telegram_chat_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    telegram_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    daily_brief_local_time: Mapped[time] = mapped_column(default=time(8, 0), server_default=text("'08:00:00'"))
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="coach_delivery_preference")
+
+
+class CoachDelivery(Base, TimestampMixin):
+    __tablename__ = "coach_deliveries"
+    __table_args__ = (
+        CheckConstraint("channel = 'telegram'", name="ck_coach_delivery_channel"),
+        CheckConstraint("delivery_type = 'daily_brief'", name="ck_coach_delivery_type"),
+        CheckConstraint("template_key IN ('checkin_required', 'proceed', 'conservative', 'rest', 'stop')", name="ck_coach_delivery_template"),
+        CheckConstraint("status IN ('pending', 'sending', 'sent', 'retry_scheduled', 'permanent_failure', 'cancelled')", name="ck_coach_delivery_status"),
+        CheckConstraint("attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts", name="ck_coach_delivery_attempt_counts"),
+        CheckConstraint("retry_at IS NULL OR status = 'retry_scheduled'", name="ck_coach_delivery_retry_status"),
+        CheckConstraint("status != 'retry_scheduled' OR retry_at IS NOT NULL", name="ck_coach_delivery_retry_scheduled_at"),
+        CheckConstraint("status != 'sending' OR (locked_at IS NOT NULL AND locked_by IS NOT NULL)", name="ck_coach_delivery_sending_lock"),
+        UniqueConstraint("user_id", "channel", "delivery_type", "local_date", "rule_version", name="uq_coach_delivery_daily"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(32), default="telegram")
+    delivery_type: Mapped[str] = mapped_column(String(32), default="daily_brief")
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    timezone: Mapped[str] = mapped_column(String(100))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    athlete_state_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("athlete_state_snapshots.id", ondelete="SET NULL"))
+    readiness_checkin_id: Mapped[int | None] = mapped_column(ForeignKey("daily_readiness_checkins.id", ondelete="SET NULL"))
+    workout_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="SET NULL"))
+    template_key: Mapped[str] = mapped_column(String(32))
+    content_fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(128))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="coach_deliveries")
+    attempts: Mapped[list["CoachDeliveryAttempt"]] = relationship(back_populates="delivery", cascade="all, delete-orphan")
+
+
+class CoachDeliveryAttempt(Base):
+    __tablename__ = "coach_delivery_attempts"
+    __table_args__ = (
+        CheckConstraint("attempt_number > 0", name="ck_coach_delivery_attempt_number"),
+        CheckConstraint("status IN ('success', 'retryable_failure', 'permanent_failure')", name="ck_coach_delivery_attempt_status"),
+        CheckConstraint("failure_class IS NULL OR failure_class IN ('timeout', 'network', 'rate_limited', 'upstream', 'forbidden', 'bad_request', 'configuration', 'internal')", name="ck_coach_delivery_attempt_failure_class"),
+        UniqueConstraint("delivery_id", "attempt_number", name="uq_coach_delivery_attempt"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("coach_deliveries.id", ondelete="CASCADE"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32))
+    failure_class: Mapped[str | None] = mapped_column(String(32))
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    delivery: Mapped[CoachDelivery] = relationship(back_populates="attempts")
 
 
 class AthleteProfile(Base, TimestampMixin):

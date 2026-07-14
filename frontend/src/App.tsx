@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachDeliveryPreferences, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { coachPreviewExpired } from "@/lib/coach-preview"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
@@ -5638,16 +5638,31 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
   const [dataMessage, setDataMessage] = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState("")
   const [dataBusy, setDataBusy] = useState(false)
+  const [deliveryPreferences, setDeliveryPreferences] = useState<CoachDeliveryPreferences | null>(null)
+  const [deliveryEnabled, setDeliveryEnabled] = useState(false)
+  const [deliveryTime, setDeliveryTime] = useState("08:00")
+  const [deliveryError, setDeliveryError] = useState("")
+  const [deliveryResult, setDeliveryResult] = useState("")
+  const [deliverySaving, setDeliverySaving] = useState(false)
+
+  function applyDeliveryPreferences(preferences: CoachDeliveryPreferences) {
+    setDeliveryPreferences(preferences)
+    setDeliveryEnabled(preferences.enabled)
+    setDeliveryTime(preferences.daily_brief_local_time || "08:00")
+  }
 
   async function loadDataManagement() {
     try {
       await devLogin()
-      const [nextIntegrations, nextAuditLog] = await Promise.all([api.integrations(), api.auditLog(100, 0)])
+      const [nextIntegrations, nextAuditLog, nextDeliveryPreferences] = await Promise.all([api.integrations(), api.auditLog(100, 0), api.coachDeliveryPreferences()])
       setIntegrations(nextIntegrations)
       setAuditLog(nextAuditLog)
+      applyDeliveryPreferences(nextDeliveryPreferences)
+      setDeliveryError("")
     } catch (error) {
       console.error(error)
       setDataMessage("Не удалось загрузить integrations/audit log")
+      setDeliveryError(uiText("Не удалось загрузить настройки доставки. Попробуйте обновить страницу.", "Could not load delivery settings. Refresh the page and try again."))
     }
   }
 
@@ -5803,6 +5818,26 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
     }
   }
 
+  async function saveDeliveryPreferences(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!deliveryPreferences?.available || !deliveryPreferences.linked) return
+    setDeliverySaving(true)
+    setDeliveryError("")
+    setDeliveryResult("")
+    try {
+      await api.updateCoachDeliveryPreferences({
+        telegram_enabled: deliveryEnabled,
+        daily_brief_local_time: deliveryTime,
+      })
+      applyDeliveryPreferences(await api.coachDeliveryPreferences())
+      setDeliveryResult(uiText("Настройки ежедневного брифа сохранены.", "Daily brief settings saved."))
+    } catch (error) {
+      setDeliveryError(error instanceof Error ? error.message : uiText("Не удалось сохранить настройки доставки.", "Could not save delivery settings."))
+    } finally {
+      setDeliverySaving(false)
+    }
+  }
+
   const defaultProvider = providers.find((provider) => provider.is_default)
   const readyProviders = providers.filter((provider) => provider.has_api_key).length
 
@@ -5812,6 +5847,34 @@ function SettingsPage({ providers, onChanged }: { providers: LlmProvider[]; onCh
         <div><p className="text-xs font-semibold text-orange-200">{uiText("Продвинутые настройки", "Advanced settings")}</p><h2 className="mt-1 text-lg font-semibold text-white">{uiText("Готовность тренера и данных", "Coach and data readiness")}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-500">{uiText("Эти настройки нужны редко: провайдеры распознавания, интеграции, экспорт и журнал действий.", "These settings are rarely needed: recognition providers, integrations, exports and audit log.")}</p></div>
         <div className="flex flex-wrap gap-2"><Badge className={readyProviders ? "border-zinc-700 bg-zinc-900 text-zinc-300" : "border-orange-400/40 bg-orange-400/15 text-orange-100"}>{readyProviders ? uiText("распознавание готово", "recognition ready") : uiText("нужен ключ", "key needed")}</Badge>{defaultProvider ? <Badge translate="no">{defaultProvider.display_name}</Badge> : null}</div>
       </div>
+    </Card>
+    <Card className="border-orange-400/20 bg-zinc-950/80 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-orange-200">{uiText("КАНАЛ ТРЕНЕРА · TELEGRAM", "COACHING CHANNEL · TELEGRAM")}</p>
+          <h2 className="mt-1 text-lg font-semibold text-white">{uiText("Ежедневный бриф тренера", "Daily coach brief")}</h2>
+          <p className="mt-2 max-w-2xl text-xs leading-5 text-zinc-400">{uiText("Детерминированный ежедневный статус с короткой ссылкой в веб-приложение. Это не медицинский совет, а Telegram не может менять ваш план.", "A deterministic daily status with a short link back to the web app. It is not medical advice, and Telegram cannot change your plan.")}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge className={deliveryPreferences?.available ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-orange-400/30 bg-orange-400/10 text-orange-100"}>{deliveryPreferences?.available ? uiText("доступно в rollout", "rollout available") : uiText("rollout закрыт", "rollout unavailable")}</Badge>
+          <Badge className={deliveryPreferences?.linked ? "border-zinc-700 bg-zinc-900 text-zinc-200" : "border-zinc-800 bg-zinc-950 text-zinc-500"}>{deliveryPreferences?.linked ? uiText("приватный чат привязан", "private chat linked") : uiText("чат не привязан", "chat not linked")}</Badge>
+          <Badge className={deliveryPreferences?.enabled ? "border-orange-400/40 bg-orange-400/15 text-orange-100" : "border-zinc-800 bg-zinc-950 text-zinc-500"}>{deliveryPreferences?.enabled ? uiText("получение включено", "delivery opted in") : uiText("получение выключено", "delivery not opted in")}</Badge>
+        </div>
+      </div>
+      {!deliveryPreferences && !deliveryError ? <p className="mt-4 text-xs text-zinc-500" role="status">{uiText("Загружаем настройки доставки…", "Loading delivery settings...")}</p> : null}
+      {deliveryPreferences && !deliveryPreferences.available ? <div className="mt-4 grid gap-2 rounded-md border border-orange-400/20 bg-orange-400/10 px-3 py-3 text-xs leading-5 text-orange-100 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><p>{uiText("Функция находится в контролируемом запуске. Настройки доставки появятся здесь после открытия доступа.", "This feature is in a controlled rollout. Delivery settings will appear here when access opens.")}</p><span className="text-[11px] text-orange-100/80"><span>{uiText("Серверный часовой пояс", "Server timezone")}: </span><span className="font-mono" translate="no">{deliveryPreferences.timezone || "--"}</span></span></div> : null}
+      {deliveryPreferences?.available && !deliveryPreferences.linked ? <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs leading-5 text-zinc-400"><p className="max-w-2xl">{uiText("Откройте бота и нажмите /start: это подтверждает только приватное место доставки и не включает бриф автоматически.", "Open the bot and press /start: this verifies only a private delivery destination and does not opt you in automatically.")}</p>{trustedTelegramUrl(deliveryPreferences.bot_url || "") ? <a className="inline-flex h-11 shrink-0 items-center justify-center rounded-md border border-orange-400/40 px-3 font-medium text-orange-100 transition-colors hover:bg-orange-400/10 focus:outline-none focus:ring-2 focus:ring-orange-400/70 md:h-8" href={trustedTelegramUrl(deliveryPreferences.bot_url || "")} target="_blank" rel="noopener noreferrer">{uiText("Открыть Telegram-бота", "Open Telegram bot")}</a> : null}</div> : null}
+      {deliveryPreferences?.available && deliveryPreferences.linked ? <form className="mt-4 grid gap-3 border-t border-zinc-800 pt-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end" onSubmit={saveDeliveryPreferences}>
+        <label className="flex min-h-11 items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-300 md:min-h-8">
+          <input type="checkbox" checked={deliveryEnabled} disabled={!deliveryPreferences.available || !deliveryPreferences.linked || deliverySaving} onChange={(event) => setDeliveryEnabled(event.target.checked)} className="h-4 w-4 accent-orange-400" />
+          <span className="grid gap-0.5"><span className="font-medium text-white">{uiText("Получать ежедневный бриф", "Receive daily brief")}</span><span className="text-[10px] text-zinc-500">{uiText("Включается только по явному согласию", "Enabled only with explicit opt-in")}</span></span>
+        </label>
+        <Field label={uiText("Время доставки", "Delivery time")}><Input type="time" value={deliveryTime} onChange={(event) => setDeliveryTime(event.target.value)} disabled={!deliveryPreferences.available || !deliveryPreferences.linked || deliverySaving} required /></Field>
+        <div className="min-h-11 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500 md:min-h-8 md:py-1.5"><span className="block font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">{uiText("серверный часовой пояс", "server timezone")}</span><span className="text-zinc-300" translate="no">{deliveryPreferences.timezone || "--"}</span></div>
+        <div className="md:col-span-3 flex flex-wrap items-center gap-3"><Button type="submit" disabled={!deliveryPreferences.available || !deliveryPreferences.linked || deliverySaving}>{deliverySaving ? uiText("Сохраняем…", "Saving...") : uiText("Сохранить доставку", "Save delivery")}</Button><p className="text-[11px] text-zinc-500">{uiText("Часовой пояс устанавливает сервер.", "Timezone is owned by the server.")}</p></div>
+      </form> : null}
+      {deliveryError ? <p className="mt-3 rounded-md border border-orange-400/30 bg-orange-400/10 px-3 py-2 text-xs text-orange-100" role="status">{deliveryError}</p> : null}
+      {deliveryResult ? <p className="mt-3 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200" role="status">{deliveryResult}</p> : null}
     </Card>
     <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
     <CollapsibleSection title="Add LLM provider" summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">advanced</Badge>}><form onSubmit={submit} className="grid gap-3 p-4 text-xs">
