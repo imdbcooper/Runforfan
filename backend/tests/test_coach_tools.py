@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from app.services.coach_tools import authoritative_safety, build_coach_context
+from app.services.coach_tools import _safe_state, authoritative_safety, build_coach_context
 
 
 class CoachToolsTests(unittest.TestCase):
@@ -36,6 +36,32 @@ class CoachToolsTests(unittest.TestCase):
         self.assertNotIn("payload_json", source)
         self.assertNotIn("injury_notes", source)
         self.assertNotIn("activity.title", source)
+
+    def test_recovery_context_omits_vendor_labels_and_operational_fields(self):
+        state = _safe_state({
+            "signals": [{
+                "key": "recovery_signals",
+                "value": {"metrics": [{
+                    "id": 4,
+                    "metric_key": "hrv_rmssd_ms",
+                    "value": 52.0,
+                    "unit": "ms",
+                    "observed_at": "2026-07-14T06:00:00+00:00",
+                    "quality": "high",
+                    "freshness": "fresh",
+                    "baseline": 61.0,
+                    "baseline_samples": 7,
+                    "anomaly": False,
+                    "source_system": "vendor-private",
+                    "source_label": "Private Device Name",
+                    "received_at": "2026-07-14T06:01:00+00:00",
+                }]},
+            }],
+        })
+        metric = state["signals"][0]["value"]["metrics"][0]
+        self.assertNotIn("source_system", metric)
+        self.assertNotIn("source_label", metric)
+        self.assertNotIn("received_at", metric)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import hashlib
 import json
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -127,6 +127,45 @@ class WeeklyReviewTests(unittest.TestCase):
 
                 self.assertEqual(review["recommended_strategy"], expected)
 
+    def test_single_calibrated_wearable_anomaly_only_holds_progression(self):
+        fixture = self.fixture()
+        as_of_at = datetime.fromisoformat(fixture["as_of_at"])
+        fixture["recovery_observations"] = [
+            {
+                "id": index,
+                "metric_key": "hrv_rmssd_ms",
+                "value": 60.0 if index < 8 else 40.0,
+                "unit": "ms",
+                "observed_at": (as_of_at - timedelta(days=8 - index) if index < 8 else as_of_at - timedelta(hours=1)).isoformat(),
+                "received_at": as_of_at.isoformat(),
+                "source_kind": "device_import",
+                "source_system": "generic",
+                "source_label": "Generic",
+                "quality": "high",
+                "quality_score": 0.9,
+                "normalization_version": "recovery-signals-v1",
+            }
+            for index in range(1, 9)
+        ]
+
+        review = compute_weekly_review(fixture)
+
+        self.assertEqual(review["recommended_strategy"], "hold")
+        self.assertNotEqual(review["recommended_strategy"], "deload")
+
+    def test_same_day_checkin_correction_uses_latest_event(self):
+        fixture = self.fixture()
+        original = next(event for event in fixture["events"] if event["event_type"] == "readiness_checkin_saved")
+        corrected = json.loads(json.dumps(original))
+        corrected["id"] = 999
+        corrected["occurred_at"] = "2026-07-12T20:00:00+00:00"
+        corrected["payload"]["signals"]["fatigue_0_10"] = 9
+        fixture["events"].append(corrected)
+
+        review = compute_weekly_review(fixture)
+
+        self.assertEqual(review["recommended_strategy"], "deload")
+
     def test_prior_deload_selects_resume_without_current_risk(self):
         fixture = self.fixture()
         fixture["events"].append({
@@ -155,7 +194,7 @@ class WeeklyReviewTests(unittest.TestCase):
         second = json.dumps(compute_weekly_review(fixture), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
         self.assertEqual(first, second)
-        self.assertEqual(hashlib.sha256(first.encode("utf-8")).hexdigest(), "e2e491e6a6dfcb1ae37f10385a8e31f6886a1d1b8f1e46892fc0ff857b9bde10")
+        self.assertEqual(hashlib.sha256(first.encode("utf-8")).hexdigest(), "95ce8d571dd71efd850ff7b067453388f22d833703acfef16796db6e7ab513d8")
 
     def test_fingerprint_ignores_collection_clock_but_not_evidence(self):
         first = self.fixture()

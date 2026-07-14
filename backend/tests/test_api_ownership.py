@@ -574,9 +574,53 @@ class ApiOwnershipTests(unittest.TestCase):
             response = TestClient(app).request("DELETE", "/api/account/data", json={"confirmation": "DELETE"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"deleted": True, "counts": {"activities": 3}, "audit_id": 777})
+        self.assertEqual(response.json(), {"deleted": True, "counts": {"activities": 3, "screenshot_files": 0}, "audit_id": 777})
         delete_user_data.assert_called_once_with(db, 42)
-        log_audit_event.assert_called_once_with(db, 42, "data.deleted", "account", 42, {"counts": {"activities": 3}})
+        log_audit_event.assert_called_once_with(db, 42, "data.deleted", "account", 42, {"counts": {"activities": 3, "screenshot_files": 0}})
+
+    def test_account_delete_keeps_retry_job_when_post_commit_cleanup_fails(self):
+        db = CommitDb()
+        db.commit = Mock()
+        db.rollback = Mock()
+        app = app_with_router(account_routes.router, account_routes.get_current_user, account_routes.get_db, db)
+        staged = Path("/tmp/kilo/staged-account-delete")
+        job = SimpleNamespace(id=99)
+
+        with (
+            patch.object(account_routes, "stage_user_upload_deletion", return_value=(staged, 1)),
+            patch.object(account_routes, "delete_user_data", return_value={"activities": 3}),
+            patch.object(account_routes, "log_audit_event", return_value=SimpleNamespace(id=777)),
+            patch.object(account_routes, "create_upload_deletion_job", return_value=job),
+            patch.object(account_routes, "finish_upload_deletion_job", side_effect=OSError("disk cleanup failed")),
+            patch.object(account_routes, "restore_user_upload_deletion") as restore,
+        ):
+            response = TestClient(app).request("DELETE", "/api/account/data", json={"confirmation": "DELETE"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["counts"]["screenshot_files"], 1)
+        db.commit.assert_called_once_with()
+        db.rollback.assert_called_once_with()
+        restore.assert_not_called()
+
+    def test_account_delete_restores_staged_uploads_when_database_commit_fails(self):
+        db = CommitDb()
+        db.commit = Mock(side_effect=RuntimeError("database commit failed"))
+        db.rollback = Mock()
+        app = app_with_router(account_routes.router, account_routes.get_current_user, account_routes.get_db, db)
+        staged = Path("/tmp/kilo/staged-account-delete")
+
+        with (
+            patch.object(account_routes, "stage_user_upload_deletion", return_value=(staged, 1)),
+            patch.object(account_routes, "delete_user_data", return_value={"activities": 3}),
+            patch.object(account_routes, "log_audit_event", return_value=SimpleNamespace(id=777)),
+            patch.object(account_routes, "create_upload_deletion_job", return_value=SimpleNamespace(id=99)),
+            patch.object(account_routes, "restore_user_upload_deletion") as restore,
+        ):
+            with self.assertRaises(RuntimeError):
+                TestClient(app, raise_server_exceptions=True).request("DELETE", "/api/account/data", json={"confirmation": "DELETE"})
+
+        db.rollback.assert_called_once_with()
+        restore.assert_called_once_with(staged, account_routes.get_settings().upload_dir, 42)
 
 
 if __name__ == "__main__":

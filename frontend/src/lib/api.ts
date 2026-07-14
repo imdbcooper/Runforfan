@@ -806,6 +806,9 @@ export type DailyReadinessCheckIn = {
   illness_symptoms: boolean
   illness_notes: string | null
   notes: string | null
+  weather_condition: "normal" | "heat" | "cold" | "storm" | "poor_air" | null
+  surface_condition: "dry" | "wet" | "icy" | "uneven" | null
+  available_time_minutes: number | null
   created_at: string
   updated_at: string
 }
@@ -1003,6 +1006,7 @@ export type WeeklyReview = {
   metrics: Record<string, unknown>
   plan_changes: Record<string, unknown>[]
   readiness_trends: Record<string, unknown>
+  recovery_trends: Record<string, unknown>
   recommended_strategy: WeeklyStrategy
   strategy_reason: string
   rejected_strategies: string[]

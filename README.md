@@ -65,6 +65,7 @@ GET /health
 - `GET /api/dashboard/summary` — агрегированный Dashboard: активный план, текущая неделя, readiness, alerts, recent activities.
 - `GET /api/readiness/today` — сегодняшний check-in и безопасная детерминированная рекомендация для запланированной тренировки.
 - `PUT /api/readiness/today` — создать или заменить check-in на локальную дату пользователя без автоматического изменения плана.
+- `POST /api/recovery-signals/imports` — атомарно и идемпотентно импортировать user-scoped normalized sleep/HRV/resting-HR observations в канонических единицах. Raw vendor payloads, device IDs, notes и произвольные metadata контракт не принимает.
 - `POST /api/readiness/today/action-preview` — создать серверный preview применимой readiness-корректировки сегодняшней тренировки.
 - `POST /api/readiness/today/actions/{preview_id}/apply` — явно подтвердить preview, создать новую версию плана и audit trail.
 - `POST /api/coach-actions/workouts/{workout_id}/preview` — создать server-generated preview для `skip` или `reschedule` со структурированной причиной, календарно-недельным эффектом и проверкой safety constraints.
@@ -193,6 +194,7 @@ API настроек AI:
 - Для локальной разработки по умолчанию включен `RUNFORFAN_AUTO_CREATE_SCHEMA=true`, поэтому пустая база может быть создана через SQLAlchemy metadata.
 - Новые таблицы profile/measurements/zones также создаются явной версионированной миграцией `20260607_0001_profile_measurements_zones` через `schema_migrations`.
 - Hybrid Conversational Coach создаётся миграцией `20260713_0027_conversational_coach`: `coach_conversations`, `coach_messages`, `coach_memory`, `coach_llm_attempts` с ownership/check constraints и dependency-safe export/delete lifecycle.
+- Recovery and Wearable Signals создаются миграцией `20260714_0028_recovery_signal_observations`: normalized append-oriented observations, canonical units, source-record uniqueness, quality/provenance constraints и soft weather/surface/time поля daily check-in. Migration runner сериализует concurrent PostgreSQL startup advisory lock.
 - Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
@@ -218,6 +220,9 @@ API настроек AI:
 - Подтверждаемые действия сохраняют immutable pre/post snapshots. Rollback доступен только для action-derived версий, повторно проходит safety/stale checks и создаёт новую компенсирующую версию, не переписывая историю.
 - Dashboard summary объединяет активный план, текущую неделю, readiness signals, pending imports, профильные safety alerts и последние активности для стартовой страницы.
 - Athlete State хранится отдельно от исходных фактов как immutable materialized projection с input fingerprint. Overview явно показывает missing/stale данные, confidence и источники; snapshot не ставит диагнозы и не меняет план.
+- Recovery signals используют vendor-neutral sleep duration/efficiency, HRV RMSSD и resting HR. Personal baseline требует минимум семь разных дней качественных observations за 28 дней; fresh/aging/stale пороги равны 36/72 часам. Missing, stale, low-quality или uncalibrated data не ухудшают решения и не могут служить основанием для увеличения нагрузки.
+- Qualified anomaly или конфликт с текущим subjective check-in переводят Athlete State/daily readiness/Weekly Review в консервативный режим и блокируют progression, но не ставят диагноз, не создают произвольную тренировку и не применяют plan mutation. Боль, болезнь и профильные ограничения всегда имеют приоритет.
+- Погода, покрытие и доступное время сохраняются только как allowlisted мягкие ограничения daily check-in. Они объясняют `proceed_conservatively`, но не меняют workout автоматически и не передают внешние/raw weather payloads в Coach.
 - Weekly Review хранится отдельно как immutable snapshot завершённой локальной недели с input fingerprint, plan-at-start/end provenance, planned-vs-actual metrics, readiness trends, evidence, coverage и limitations. Поздно записанный исторический факт создаёт новый review fingerprint и делает старый strategy preview stale.
 - Недельные стратегии не догоняют пропущенный объём и не меняют completed/past workouts. `deload` снижает targets на 20-30% и заменяет hard sessions на easy; `resume` ограничен prior safe baseline и 5%; `conservative_progression` ограничен 5% и актуальными safety constraints.
 - Calendar показывает planned workouts, фактические activities по timezone профиля, linked/unlinked state, inline match/reschedule, быстрые статусы missed/skipped и предупреждения о hard sessions ближе 48 часов.
@@ -298,7 +303,7 @@ UI-стиль frontend:
 
 Production deployment выполняет `.github/workflows/deploy.yml` при push в `master` или через `workflow_dispatch`. Workflow собирает и публикует backend/frontend images, обновляет production compose/Caddy и проверяет `/health`, redirects, app shell, alpha guide, manifest, service worker и Telegram bot link.
 
-Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Release workflow передаёт её из одноимённой GitHub Actions variable, проверяет effective setting внутри backend-контейнера и подтверждает migration `20260713_0027_conversational_coach` до успешного завершения deploy.
+Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Release workflow передаёт её из одноимённой GitHub Actions variable, проверяет effective setting внутри backend-контейнера и подтверждает последнюю migration `20260714_0028_recovery_signal_observations` до успешного завершения deploy.
 
 ## Что уже обработано
 

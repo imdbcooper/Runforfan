@@ -4,12 +4,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import AthleteProfile, CoachingEvent, TrainingPlan, TrainingPlanVersion, TrainingPlanWorkout, User
+from app.models import AthleteProfile, CoachingEvent, RecoverySignalObservation, TrainingPlan, TrainingPlanVersion, TrainingPlanWorkout, User
 from app.services.athlete_state import resolved_timezone
 from app.services.plan_versions import json_safe, plan_snapshot
+from app.services.recovery_signals import RECOVERY_RULE_VERSION, observation_input
 
 
-HISTORICAL_RESOLVER_VERSION = "historical-state-v1"
+HISTORICAL_RESOLVER_VERSION = "historical-state-v2"
 
 
 class HistoricalStateConflict(ValueError):
@@ -274,6 +275,17 @@ def resolve_historical_week(
         if plan_relevant and (checkin_in_week or linked_checkin_safety or (event_type != "readiness_checkin_saved" and (occurred_in_week or linked_late_fact))):
             week_events.append(event)
 
+    recovery_observations = list(db.scalars(
+        select(RecoverySignalObservation)
+        .where(
+            RecoverySignalObservation.user_id == user.id,
+            RecoverySignalObservation.observed_at >= interval_start - timedelta(days=28),
+            RecoverySignalObservation.observed_at < interval_end,
+            RecoverySignalObservation.received_at <= cutoff,
+        )
+        .order_by(RecoverySignalObservation.observed_at.asc(), RecoverySignalObservation.id.asc())
+    ))
+
     resolution_status = "complete" if start_resolution.get("status") == "complete" and end_resolution.get("status") == "complete" else "partial_legacy"
     limitations = [*(start_resolution.get("limitations") or []), *(end_resolution.get("limitations") or [])]
     profile_input = None
@@ -294,12 +306,14 @@ def resolve_historical_week(
 
     return json_safe({
         "resolver_version": HISTORICAL_RESOLVER_VERSION,
+        "recovery_rule_version": RECOVERY_RULE_VERSION,
         "as_of_at": cutoff,
         "timezone": timezone_name,
         "week_start": week_start,
         "week_end": week_end,
         "target_week_start": target_week_start,
         "target_week_end": target_week_end,
+        "recovery_as_of_at": min(cutoff, interval_end),
         "resolution": {
             "status": resolution_status,
             "resolver_version": HISTORICAL_RESOLVER_VERSION,
@@ -316,4 +330,5 @@ def resolve_historical_week(
         "plan_changes": plan_changes(start_workouts, end_workouts),
         "target_workouts": target_workouts,
         "events": week_events,
+        "recovery_observations": [observation_input(item) for item in recovery_observations],
     })

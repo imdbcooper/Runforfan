@@ -14,17 +14,19 @@ from app.models import (
     AthleteStateSnapshot,
     CoachingEvent,
     DailyReadinessCheckIn,
+    RecoverySignalObservation,
     TrainingPlan,
     TrainingPlanWorkout,
     User,
 )
 from app.services.plan_versions import json_safe
 from app.services.planning import workout_execution_score
+from app.services.recovery_signals import RECOVERY_RULE_VERSION, observation_input, recovery_freshness_marker, summarize_recovery
 from app.services.training_load import training_load_context
 
 
-STATE_VERSION = "athlete-state-v1"
-RULE_VERSION = "athlete-state-rules-v1"
+STATE_VERSION = "athlete-state-v3"
+RULE_VERSION = "athlete-state-rules-v3"
 SAFETY_EVENT_TYPES = {"pain_reported", "illness_reported"}
 
 
@@ -94,6 +96,13 @@ def readiness_signal(checkins: list[dict[str, object]], local_date: date) -> dic
         )
     pain = bool(today["pain"])
     illness = bool(today["illness_symptoms"])
+    soft_constraints = [
+        value for value in (
+            f"weather:{today['weather_condition']}" if today.get("weather_condition") in {"heat", "cold", "storm", "poor_air"} else None,
+            f"surface:{today['surface_condition']}" if today.get("surface_condition") in {"wet", "icy", "uneven"} else None,
+            f"available_time:{today['available_time_minutes']}min" if today.get("available_time_minutes") is not None else None,
+        ) if value is not None
+    ]
     values = {
         "sleep_quality_0_10": today["sleep_quality_0_10"],
         "fatigue_0_10": today["fatigue_0_10"],
@@ -124,9 +133,9 @@ def readiness_signal(checkins: list[dict[str, object]], local_date: date) -> dic
     elif fatigue >= 8 or soreness >= 8 or sleep <= 2:
         status = "risk"
         summary = "Severe fatigue, soreness or poor sleep is reported today."
-    elif fatigue >= 6 or soreness >= 6 or stress >= 7 or sleep <= 4:
+    elif fatigue >= 6 or soreness >= 6 or stress >= 7 or sleep <= 4 or soft_constraints:
         status = "watch"
-        summary = "One or more recovery signals call for a controlled session."
+        summary = "One or more recovery or contextual signals call for a controlled session."
     else:
         status = "ok"
         summary = "Today's self-report has no threshold-level warning; this is not an injury prediction."
@@ -140,6 +149,7 @@ def readiness_signal(checkins: list[dict[str, object]], local_date: date) -> dic
             **values,
             "pain": pain,
             "illness_symptoms": illness,
+            "soft_constraints": soft_constraints,
         },
         summary=summary,
         observed_at=local_date,
@@ -404,6 +414,60 @@ def load_signal(load: dict[str, object]) -> dict[str, object]:
     )
 
 
+def recovery_signal(observations: list[dict[str, object]], checkins: list[dict[str, object]], as_of_at: datetime, local_date: date | None = None) -> dict[str, object]:
+    recovery = summarize_recovery(observations, as_of_at, checkins, current_checkin_date=local_date)
+    metrics = list(recovery["metrics"])
+    if not metrics:
+        return signal(
+            key="recovery_signals",
+            label="Recovery signals",
+            status="unknown",
+            freshness="missing",
+            confidence="none",
+            value={"rule_version": recovery["rule_version"], "metrics": [], "conflict": False},
+            summary="No normalized recovery observations are available.",
+            observed_at=None,
+            refs=[],
+            limitations=["Wearable data is optional and its absence is not interpreted as poor recovery or readiness."],
+        )
+    usable = [item for item in metrics if item["usable"]]
+    calibrated = [item for item in usable if item["baseline"] is not None]
+    freshest = max(usable or metrics, key=lambda item: item["observed_at"])
+    status = "watch" if recovery["progression_blocked"] else "ok" if calibrated else "unknown"
+    if recovery["conflict"]:
+        summary = "Wearable evidence and the latest self-report disagree; self-reported symptoms and restrictions take priority."
+    elif recovery["wearable_concern"]:
+        summary = "A qualified deviation from the athlete's own baseline supports holding progression, not diagnosis or automatic plan changes."
+    elif calibrated:
+        summary = "Current qualified recovery observations show no threshold-level baseline deviation."
+    elif usable:
+        summary = "Qualified observations are accumulating, but a personal baseline is not available yet."
+    else:
+        summary = "Recovery observations are stale or low quality and cannot support a readiness conclusion."
+    return signal(
+        key="recovery_signals",
+        label="Recovery signals",
+        status=status,
+        freshness=str(freshest["freshness"]),
+        confidence="low" if recovery["conflict"] else "high" if len(calibrated) >= 3 else "medium" if calibrated else "low",
+        value={
+            "rule_version": recovery["rule_version"],
+            "metrics": metrics,
+            "conflict": recovery["conflict"],
+            "self_report_priority": bool(recovery["conflict"] and recovery["self_report_concern"]),
+            "progression_blocked": recovery["progression_blocked"],
+        },
+        summary=summary,
+        observed_at=freshest["observed_at"],
+        refs=[source_ref("recovery_signal_observations", int(item["id"]), str(item["metric_key"])) for item in metrics],
+        limitations=[
+            "Recovery signals are vendor-neutral context, not medical evidence or permission to increase load.",
+            *(["Resolve the conflict with a current self-report before progression."] if recovery["conflict"] else []),
+            *(["At least seven prior qualified observations are required for each personal baseline."] if any(item["baseline"] is None for item in metrics) else []),
+        ],
+    )
+
+
 def readiness_trends(checkins: list[dict[str, object]]) -> dict[str, object]:
     fields = ("sleep_quality_0_10", "fatigue_0_10", "soreness_0_10", "stress_0_10")
     result: dict[str, object] = {}
@@ -434,7 +498,8 @@ def overall_state(signals: list[dict[str, object]]) -> tuple[str, str, str]:
         return "risk", "Safety or recovery signal needs attention", "Keep training conservative and resolve the cited safety evidence before adding load."
     if "watch" in statuses:
         return "watch", "Current signals support a controlled approach", "Hold progression while aging or cautionary signals remain relevant."
-    if "unknown" in statuses:
+    required_statuses = {str(item["status"]) for item in signals if item["key"] != "recovery_signals"}
+    if "unknown" in required_statuses:
         return "unknown", "Athlete state is incomplete", "Missing evidence prevents a positive readiness conclusion."
     return "ok", "Current evidence has no threshold-level warning", "Available signals support following the plan without adding unplanned load."
 
@@ -453,6 +518,7 @@ def compute_athlete_state(inputs: dict[str, object]) -> dict[str, object]:
         execution,
         adherence_signal(inputs["active_plan"], due_workouts, inputs["adherence"], local_date),
         load_signal(inputs["training_load"]),
+        recovery_signal(list(inputs.get("recovery_observations") or []), checkins, inputs.get("as_of_at") or datetime.now(UTC), local_date),
     ]
     status, headline, summary = overall_state(signals)
     strategy = "deload" if status == "risk" else "hold"
@@ -501,6 +567,9 @@ def _checkin_input(checkin: DailyReadinessCheckIn) -> dict[str, object]:
         "pain": checkin.pain,
         "pain_level_0_10": checkin.pain_level_0_10,
         "illness_symptoms": checkin.illness_symptoms,
+        "weather_condition": checkin.weather_condition,
+        "surface_condition": checkin.surface_condition,
+        "available_time_minutes": checkin.available_time_minutes,
         "updated_at": checkin.updated_at,
     }
 
@@ -647,6 +716,16 @@ def build_athlete_state_inputs(db: Session, user: User, observation_cutoff: date
         )
         .order_by(CoachingEvent.occurred_at.asc(), CoachingEvent.id.asc())
     ))
+    recovery_observations = list(db.scalars(
+        select(RecoverySignalObservation)
+        .where(
+            RecoverySignalObservation.user_id == user.id,
+            RecoverySignalObservation.observed_at >= cutoff - timedelta(days=35),
+            RecoverySignalObservation.observed_at <= cutoff,
+            RecoverySignalObservation.received_at <= cutoff,
+        )
+        .order_by(RecoverySignalObservation.observed_at.asc(), RecoverySignalObservation.id.asc())
+    ))
     load_context = training_load_context(
         db,
         user,
@@ -660,6 +739,8 @@ def build_athlete_state_inputs(db: Session, user: User, observation_cutoff: date
     inputs = {
         "state_version": STATE_VERSION,
         "rule_version": RULE_VERSION,
+        "recovery_rule_version": RECOVERY_RULE_VERSION,
+        "as_of_at": cutoff,
         "local_date": local_date,
         "timezone": timezone_name,
         "week_start": week_start,
@@ -677,6 +758,8 @@ def build_athlete_state_inputs(db: Session, user: User, observation_cutoff: date
             "points": load_context["daily"]["points"],
             "warnings": load_context["warnings"],
         },
+        "recovery_observations": [observation_input(item) for item in recovery_observations],
+        "recovery_freshness_marker": recovery_freshness_marker([observation_input(item) for item in recovery_observations], cutoff),
     }
     return inputs
 
@@ -690,7 +773,7 @@ def materialize_athlete_state(db: Session, user: User) -> dict[str, object]:
     observation_cutoff = _utcnow()
     inputs = build_athlete_state_inputs(db, user, observation_cutoff)
     inputs_collected_at = _utcnow()
-    fingerprint = canonical_fingerprint(inputs)
+    fingerprint = canonical_fingerprint({key: value for key, value in inputs.items() if key != "as_of_at"})
     existing = db.scalar(
         select(AthleteStateSnapshot).where(
             AthleteStateSnapshot.user_id == user.id,

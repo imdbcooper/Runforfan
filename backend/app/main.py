@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import add_exception_handlers
-from app.api.routes import account, activities, analytics, athlete_state, audit_log, auth, calendar, coach, coach_actions, coaching_events, dashboard, export, goals, imports, performance, plan_recalculations, planning, profile, readiness, settings as settings_routes, weekly_reviews, zones
+from app.api.routes import account, activities, analytics, athlete_state, audit_log, auth, calendar, coach, coach_actions, coaching_events, dashboard, export, goals, imports, performance, plan_recalculations, planning, profile, readiness, recovery_signals, settings as settings_routes, weekly_reviews, zones
 from app.core.settings import get_settings
 from app.db.base import Base
 from app.db.migrations.runner import run_migrations
@@ -11,6 +11,7 @@ from app.models import *  # noqa: F401,F403
 from app.seed.demo import seed_demo_data
 from app.services.activity_metrics import backfill_derived_activity_metrics
 from app.services.import_recognition_worker import start_import_recognition_worker, stop_import_recognition_worker
+from app.services.data_management import process_pending_upload_deletions
 from app.services.telegram_bot import start_telegram_polling, stop_telegram_polling
 from app.services.training_load import backfill_recent_daily_training_loads
 
@@ -34,6 +35,8 @@ def on_startup() -> None:
     if settings.auto_create_schema:
         Base.metadata.create_all(bind=engine)
     run_migrations(engine)
+    with SessionLocal() as db:
+        process_pending_upload_deletions(db, settings.upload_dir)
     if settings.demo_seed:
         with SessionLocal() as db:
             seed_demo_data(db)
@@ -79,6 +82,7 @@ app.include_router(account.router, prefix="/api")
 app.include_router(audit_log.router, prefix="/api")
 app.include_router(coaching_events.router, prefix="/api")
 app.include_router(athlete_state.router, prefix="/api")
+app.include_router(recovery_signals.router, prefix="/api")
 app.include_router(plan_recalculations.router, prefix="/api")
 app.include_router(weekly_reviews.router, prefix="/api")
 app.include_router(coach.router, prefix="/api")

@@ -1,9 +1,13 @@
 import csv
+import secrets
+import shutil
 from datetime import UTC, date, datetime
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -28,6 +32,7 @@ from app.models import (
     PerformanceResult,
     PlanRecalculationRequest,
     PlanRollbackPreview,
+    RecoverySignalObservation,
     RunningGoal,
     ScreenshotSource,
     TrainingPlan,
@@ -37,6 +42,7 @@ from app.models import (
     TrainingPlanWorkoutBlock,
     TrainingPlanWorkoutFeedback,
     TrainingZone,
+    UploadDeletionJob,
     User,
     WeeklyReview,
     WeeklyStrategyPreview,
@@ -149,7 +155,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-13.0027",
+        "version": "2026-07-14.0028",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -161,6 +167,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "performance_results": [model_to_dict(item) for item in db.scalars(select(PerformanceResult).where(PerformanceResult.user_id == user.id).order_by(PerformanceResult.result_date.desc()))],
         "daily_training_loads": [model_to_dict(item) for item in daily_training_loads],
         "daily_readiness_checkins": [model_to_dict(item) for item in db.scalars(select(DailyReadinessCheckIn).where(DailyReadinessCheckIn.user_id == user.id).order_by(DailyReadinessCheckIn.checkin_date.asc()))],
+        "recovery_signal_observations": [model_to_dict(item) for item in db.scalars(select(RecoverySignalObservation).where(RecoverySignalObservation.user_id == user.id).order_by(RecoverySignalObservation.observed_at.asc(), RecoverySignalObservation.id.asc()))],
         "daily_readiness_action_previews": [model_to_dict(item) for item in db.scalars(select(DailyReadinessActionPreview).where(DailyReadinessActionPreview.user_id == user.id).order_by(DailyReadinessActionPreview.created_at.asc()))],
         "coach_action_previews": [model_to_dict(item) for item in db.scalars(select(CoachActionPreview).where(CoachActionPreview.user_id == user.id).order_by(CoachActionPreview.created_at.asc()))],
         "plan_rollback_previews": [model_to_dict(item) for item in db.scalars(select(PlanRollbackPreview).where(PlanRollbackPreview.user_id == user.id).order_by(PlanRollbackPreview.created_at.asc()))],
@@ -202,6 +209,7 @@ DELETE_MODELS: tuple[tuple[str, Any], ...] = (
     ("weekly_strategy_previews", WeeklyStrategyPreview),
     ("weekly_reviews", WeeklyReview),
     ("athlete_state_snapshots", AthleteStateSnapshot),
+    ("recovery_signal_observations", RecoverySignalObservation),
     ("plan_rollback_previews", PlanRollbackPreview),
     ("plan_recalculation_requests", PlanRecalculationRequest),
     ("coach_action_previews", CoachActionPreview),
@@ -226,6 +234,74 @@ DELETE_MODELS: tuple[tuple[str, Any], ...] = (
     ("training_zones", TrainingZone),
     ("llm_provider_settings", LlmProviderSetting),
 )
+
+
+def stage_user_upload_deletion(upload_dir: Path, user_id: int) -> tuple[Path | None, int]:
+    root = upload_dir.resolve()
+    user_dir = upload_dir / str(user_id)
+    if user_dir.parent.resolve() != root:
+        raise RuntimeError("User upload directory escaped the configured upload root")
+    if not user_dir.exists() and not user_dir.is_symlink():
+        return None, 0
+    file_count = sum(1 for item in user_dir.rglob("*") if item.is_file() or item.is_symlink())
+    if user_dir.is_symlink():
+        file_count = max(file_count, 1)
+    staged = root / f".delete-{secrets.token_hex(16)}"
+    user_dir.rename(staged)
+    return staged, file_count
+
+
+def finish_user_upload_deletion(staged: Path | None) -> None:
+    if staged is None:
+        return
+    if staged.is_symlink():
+        staged.unlink(missing_ok=True)
+    elif staged.exists():
+        shutil.rmtree(staged)
+
+
+def restore_user_upload_deletion(staged: Path | None, upload_dir: Path, user_id: int) -> None:
+    if staged is None or (not staged.exists() and not staged.is_symlink()):
+        return
+    target = upload_dir / str(user_id)
+    if target.exists() or target.is_symlink():
+        raise RuntimeError("Cannot restore staged user uploads because the target exists")
+    staged.rename(target)
+
+
+def create_upload_deletion_job(db: Session, staged: Path, file_count: int) -> UploadDeletionJob:
+    if staged.name != str(staged.name) or not staged.name.startswith(".delete-") or Path(staged.name).name != staged.name:
+        raise RuntimeError("Invalid staged upload deletion name")
+    job = UploadDeletionJob(staged_name=staged.name, file_count=file_count)
+    db.add(job)
+    db.flush()
+    return job
+
+
+def finish_upload_deletion_job(db: Session, upload_dir: Path, job_id: int) -> None:
+    job = db.get(UploadDeletionJob, job_id)
+    if job is None:
+        return
+    if not job.staged_name.startswith(".delete-") or Path(job.staged_name).name != job.staged_name:
+        raise RuntimeError("Invalid persisted upload deletion name")
+    staged = upload_dir / job.staged_name
+    if staged.parent.resolve() != upload_dir.resolve():
+        raise RuntimeError("Staged upload deletion escaped the configured upload root")
+    finish_user_upload_deletion(staged)
+    db.delete(job)
+    db.commit()
+
+
+def process_pending_upload_deletions(db: Session, upload_dir: Path) -> int:
+    job_ids = list(db.scalars(select(UploadDeletionJob.id).order_by(UploadDeletionJob.created_at.asc(), UploadDeletionJob.id.asc())))
+    completed = 0
+    for job_id in job_ids:
+        try:
+            finish_upload_deletion_job(db, upload_dir, int(job_id))
+            completed += 1
+        except (OSError, SQLAlchemyError):
+            db.rollback()
+    return completed
 
 
 def delete_user_data(db: Session, user_id: int) -> dict[str, int]:

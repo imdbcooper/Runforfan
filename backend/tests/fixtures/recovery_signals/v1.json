@@ -1,0 +1,50 @@
+{
+  "as_of_at": "2026-07-14T06:00:00+00:00",
+  "baseline": [
+    60.0,
+    62.0,
+    59.0,
+    61.0,
+    63.0,
+    60.0,
+    61.0
+  ],
+  "cases": [
+    {
+      "name": "qualified_hrv_anomaly",
+      "value": 40.0,
+      "quality": "high",
+      "age_hours": 2,
+      "checkin": {"checkin_date": "2026-07-14", "fatigue_0_10": 3, "soreness_0_10": 2, "stress_0_10": 2, "sleep_quality_0_10": 8, "pain": false, "illness_symptoms": false},
+      "expected_blocked": true,
+      "expected_conflict": true
+    },
+    {
+      "name": "stale_anomaly_is_not_decision_evidence",
+      "value": 40.0,
+      "quality": "high",
+      "age_hours": 96,
+      "checkin": {"checkin_date": "2026-07-14", "fatigue_0_10": 3, "soreness_0_10": 2, "stress_0_10": 2, "sleep_quality_0_10": 8, "pain": false, "illness_symptoms": false},
+      "expected_blocked": false,
+      "expected_conflict": false
+    },
+    {
+      "name": "low_quality_anomaly_is_not_decision_evidence",
+      "value": 40.0,
+      "quality": "low",
+      "age_hours": 2,
+      "checkin": {"checkin_date": "2026-07-14", "fatigue_0_10": 3, "soreness_0_10": 2, "stress_0_10": 2, "sleep_quality_0_10": 8, "pain": false, "illness_symptoms": false},
+      "expected_blocked": false,
+      "expected_conflict": false
+    },
+    {
+      "name": "subjective_concern_overrides_normal_wearable",
+      "value": 61.0,
+      "quality": "high",
+      "age_hours": 2,
+      "checkin": {"checkin_date": "2026-07-14", "fatigue_0_10": 8, "soreness_0_10": 2, "stress_0_10": 2, "sleep_quality_0_10": 8, "pain": false, "illness_symptoms": false},
+      "expected_blocked": true,
+      "expected_conflict": true
+    }
+  ]
+}

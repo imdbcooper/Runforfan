@@ -14,10 +14,24 @@ from app.services.weekly_review import materialize_weekly_review
 
 
 def _safe_state(state: dict[str, object]) -> dict[str, object]:
+    signals = []
+    for raw_signal in state.get("signals") or []:
+        if not isinstance(raw_signal, dict):
+            continue
+        item = dict(raw_signal)
+        if item.get("key") == "recovery_signals" and isinstance(item.get("value"), dict):
+            value = dict(item["value"])
+            value["metrics"] = [
+                {key: metric.get(key) for key in ("id", "metric_key", "value", "unit", "observed_at", "quality", "freshness", "baseline", "baseline_samples", "anomaly")}
+                for metric in value.get("metrics") or []
+                if isinstance(metric, dict)
+            ]
+            item["value"] = value
+        signals.append(item)
     return {
         "snapshot_id": state.get("snapshot_id"), "local_date": state.get("local_date"),
         "status": state.get("status"), "headline": state.get("headline"),
-        "summary": state.get("summary"), "signals": state.get("signals"),
+        "summary": state.get("summary"), "signals": signals,
         "weekly": state.get("weekly"), "limitations": state.get("limitations"),
     }
 

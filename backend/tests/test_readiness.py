@@ -126,6 +126,43 @@ class DailyReadinessTests(unittest.TestCase):
         self.assertEqual(result["rule_id"], "profile_injured")
         self.assertEqual(result["status"], "stop")
 
+    def test_soft_context_is_conservative_without_mutation_action(self):
+        checkin = make_checkin(weather_condition="heat", surface_condition="wet", available_time_minutes=20)
+        result = daily_readiness_recommendation(checkin, make_profile(), make_workout(duration_seconds=3600))
+
+        self.assertEqual(result["rule_version"], "daily-readiness-v3")
+        self.assertEqual(result["rule_id"], "soft_context_conservative")
+        self.assertEqual(result["status"], "modify")
+        self.assertEqual(result["action"], "proceed_conservatively")
+        self.assertIsNone(result["prescribed_workout"])
+
+    def test_pain_overrides_soft_context(self):
+        checkin = make_checkin(pain=True, pain_level_0_10=5, weather_condition="heat", surface_condition="icy")
+        result = daily_readiness_recommendation(checkin, make_profile(), make_workout())
+
+        self.assertEqual(result["rule_id"], "pain_or_illness_stop")
+        self.assertEqual(result["status"], "stop")
+
+    def test_normal_environment_does_not_lower_readiness(self):
+        checkin = make_checkin(weather_condition="normal", surface_condition="dry", available_time_minutes=90)
+        result = daily_readiness_recommendation(checkin, make_profile(), make_workout(duration_seconds=3600))
+
+        self.assertEqual(result["rule_id"], "proceed_as_planned")
+
+    def test_qualified_recovery_anomaly_blocks_proceed_as_planned(self):
+        recovery = {"progression_blocked": True}
+        result = daily_readiness_recommendation(make_checkin(), make_profile(), make_workout(workout_type="interval", intensity="threshold"), recovery)
+
+        self.assertEqual(result["rule_id"], "recovery_evidence_conservative")
+        self.assertEqual(result["action"], "proceed_conservatively")
+        self.assertIsNone(result["prescribed_workout"])
+
+    def test_pain_has_priority_over_recovery_anomaly(self):
+        recovery = {"progression_blocked": True}
+        result = daily_readiness_recommendation(make_checkin(pain=True, pain_level_0_10=5), make_profile(), make_workout(), recovery)
+
+        self.assertEqual(result["rule_id"], "pain_or_illness_stop")
+
     def test_payload_rejects_pain_level_without_pain(self):
         with self.assertRaises(ValidationError):
             DailyReadinessCheckInUpsert(sleep_quality_0_10=8, fatigue_0_10=3, soreness_0_10=2, stress_0_10=3, pain=False, pain_level_0_10=4)

@@ -15,9 +15,10 @@ from app.services.dashboard import active_training_plan
 from app.services.plan_versions import action_plan_snapshot, create_plan_version, json_safe, workout_snapshot
 from app.services.planning import today_for_user, workout_to_dict
 from app.services.profile import get_or_create_profile, safety_check
+from app.services.recovery_signals import recovery_inputs, summarize_recovery
 
 
-RULE_VERSION = "daily-readiness-v1"
+RULE_VERSION = "daily-readiness-v3"
 DISCLAIMER = "Runforfan не является медицинским устройством. При боли, головокружении, одышке или ухудшении самочувствия прекратите нагрузку и обратитесь к специалисту."
 HARD_WORKOUT_TYPES = {"interval", "intervals", "tempo", "threshold", "race", "fartlek", "hills", "hill_repeats"}
 HARD_INTENSITIES = {"hard", "tempo", "threshold", "interval", "race", "vo2max"}
@@ -101,6 +102,7 @@ def daily_readiness_recommendation(
     checkin: DailyReadinessCheckIn | None,
     profile: AthleteProfile,
     workout: TrainingPlanWorkout | None,
+    recovery: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if profile.recovery_status == "injured":
         return recommendation(
@@ -229,6 +231,35 @@ def daily_readiness_recommendation(
             prescribed_workout=shortened_workout(workout),
         )
 
+    if workout is not None and recovery and recovery.get("progression_blocked"):
+        return recommendation(
+            rule_id="recovery_evidence_conservative",
+            status="modify",
+            action="proceed_conservatively",
+            title="Уточните восстановление перед тренировкой",
+            message="Качественный recovery-сигнал отклонился от личного baseline или расходится с текущим check-in. Это не диагноз и не автоматическое изменение плана; не повышайте нагрузку и выберите консервативное выполнение или отдых.",
+            reasons=["Recovery evidence требует уточнения; субъективная боль, болезнь и ограничения всегда имеют приоритет."],
+            workout=workout,
+        )
+
+    soft_constraints = []
+    if checkin.weather_condition in {"heat", "cold", "storm", "poor_air"}:
+        soft_constraints.append(f"Отмечено внешнее условие: {checkin.weather_condition}.")
+    if checkin.surface_condition in {"wet", "icy", "uneven"}:
+        soft_constraints.append(f"Отмечено состояние покрытия: {checkin.surface_condition}.")
+    if workout and checkin.available_time_minutes is not None and workout.duration_seconds and checkin.available_time_minutes * 60 < workout.duration_seconds:
+        soft_constraints.append(f"Доступно {checkin.available_time_minutes} мин., меньше плановой длительности тренировки.")
+    if workout is not None and soft_constraints:
+        return recommendation(
+            rule_id="soft_context_conservative",
+            status="modify",
+            action="proceed_conservatively",
+            title="Уточните маршрут или время до старта",
+            message="Погода, покрытие и доступное время являются мягкими ограничениями. Они не ставят диагноз и не меняют план автоматически; выберите безопасный маршрут, помещение или оставьте тренировку без выполнения.",
+            reasons=soft_constraints,
+            workout=workout,
+        )
+
     safety = safety_check(profile)
     if workout is None:
         return recommendation(
@@ -343,6 +374,9 @@ def checkin_to_dict(checkin: DailyReadinessCheckIn | None) -> dict[str, object] 
         "illness_symptoms": checkin.illness_symptoms,
         "illness_notes": checkin.illness_notes,
         "notes": checkin.notes,
+        "weather_condition": checkin.weather_condition,
+        "surface_condition": checkin.surface_condition,
+        "available_time_minutes": checkin.available_time_minutes,
         "created_at": checkin.created_at,
         "updated_at": checkin.updated_at,
     }
@@ -363,10 +397,23 @@ def readiness_to_dict(
     }
 
 
+def recovery_summary_for_today(
+    db: Session,
+    user: User,
+    checkin_date: date,
+    checkin: DailyReadinessCheckIn | None,
+    *,
+    as_of_at: datetime | None = None,
+) -> dict[str, object]:
+    cutoff = as_of_at or datetime.now(UTC)
+    checkins = [checkin_to_dict(checkin)] if checkin else []
+    return summarize_recovery(recovery_inputs(db, user, cutoff), cutoff, checkins, current_checkin_date=checkin_date)
+
+
 def daily_readiness_for_today(db: Session, user: User) -> dict[str, object]:
     checkin_date, profile, workout = today_context(db, user)
     checkin = today_checkin(db, user, checkin_date)
-    current_recommendation = daily_readiness_recommendation(checkin, profile, workout)
+    current_recommendation = daily_readiness_recommendation(checkin, profile, workout, recovery_summary_for_today(db, user, checkin_date, checkin))
     return readiness_to_dict(checkin_date, checkin, workout, current_recommendation)
 
 
@@ -395,7 +442,7 @@ def save_daily_readiness_checkin(db: Session, user: User, payload: DailyReadines
     for field, value in values.items():
         setattr(checkin, field, value)
 
-    current_recommendation = daily_readiness_recommendation(checkin, profile, workout)
+    current_recommendation = daily_readiness_recommendation(checkin, profile, workout, recovery_summary_for_today(db, user, checkin_date, checkin))
     checkin.recommendation_snapshot = current_recommendation
     db.add(checkin)
     db.flush()
@@ -650,7 +697,7 @@ def create_daily_readiness_action_preview(db: Session, user: User) -> dict[str, 
     checkin = today_checkin(db, user, checkin_date, lock=True)
     if checkin is None:
         raise ReadinessActionConflict("Today's readiness recommendation cannot be applied", "checkin_required")
-    current_recommendation = daily_readiness_recommendation(checkin, profile, workout)
+    current_recommendation = daily_readiness_recommendation(checkin, profile, workout, recovery_summary_for_today(db, user, checkin_date, checkin))
     target = action_target(workout, current_recommendation)
     preview_id = secrets.token_urlsafe(32)
     expires_at = datetime.now(UTC) + timedelta(minutes=ACTION_PREVIEW_TTL_MINUTES)
@@ -720,7 +767,7 @@ def apply_daily_readiness_action_preview(db: Session, user: User, preview_id: st
         or checkin.id != preview.checkin_id
     ):
         raise ReadinessActionConflict("Action preview is stale; create a new preview", "preview_stale")
-    current_recommendation = daily_readiness_recommendation(checkin, profile, workout)
+    current_recommendation = daily_readiness_recommendation(checkin, profile, workout, recovery_summary_for_today(db, user, checkin_date, checkin))
     target = action_target(workout, current_recommendation)
     snapshot = action_state_snapshot(user, checkin, profile, plan, workout, current_recommendation)
     if (

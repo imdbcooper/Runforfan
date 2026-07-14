@@ -25,12 +25,13 @@ from app.services.plan_rollbacks import PlanRollbackConflict, validate_rollback_
 from app.services.plan_versions import action_plan_snapshot, create_plan_version, json_safe, workout_snapshot
 from app.services.planning import PLANNING_HARD_POLICY, today_for_user, workout_is_hard
 from app.services.profile import safety_check
-from app.services.readiness import apply_target, daily_readiness_recommendation, preview_block
+from app.services.readiness import apply_target, daily_readiness_recommendation, preview_block, recovery_summary_for_today
+from app.services.recovery_signals import summarize_recovery
 
 
-WEEKLY_REVIEW_VERSION = "weekly-review-v1"
-WEEKLY_REVIEW_RULE_VERSION = "weekly-review-rules-v1"
-WEEKLY_STRATEGY_RULE_VERSION = "weekly-strategy-rules-v1"
+WEEKLY_REVIEW_VERSION = "weekly-review-v3"
+WEEKLY_REVIEW_RULE_VERSION = "weekly-review-rules-v3"
+WEEKLY_STRATEGY_RULE_VERSION = "weekly-strategy-rules-v3"
 WEEKLY_STRATEGY_PREVIEW_TTL_MINUTES = 10
 WEEKLY_STRATEGIES = {"hold", "deload", "resume", "conservative_progression"}
 
@@ -129,11 +130,23 @@ def readiness_metrics(events: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def latest_readiness_events(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    latest: dict[str, dict[str, object]] = {}
+    for event in sorted(events, key=lambda item: (str(item.get("occurred_at") or ""), int(item.get("id") or 0))):
+        if event.get("event_type") != "readiness_checkin_saved":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        checkin_date = str(payload.get("checkin_date") or "")
+        if checkin_date:
+            latest[checkin_date] = event
+    return list(latest.values())
+
+
 def event_refs(events: list[dict[str, object]], event_types: set[str] | None = None) -> list[dict[str, object]]:
     return [source_ref("coaching_events", int(item["id"])) for item in events if event_types is None or item.get("event_type") in event_types]
 
 
-def select_strategy(context: dict[str, object], metrics: dict[str, object], readiness: dict[str, object]) -> tuple[str, str, list[str], list[dict[str, object]]]:
+def select_strategy(context: dict[str, object], metrics: dict[str, object], readiness: dict[str, object], recovery: dict[str, object]) -> tuple[str, str, list[str], list[dict[str, object]]]:
     events = list(context["events"])
     resolution = context["resolution"]
     profile = context.get("profile") or {}
@@ -144,6 +157,7 @@ def select_strategy(context: dict[str, object], metrics: dict[str, object], read
     readiness_concern = int(readiness["reduced_load_days"]) > 0
     prior_deload = any(item.get("event_type") == "weekly_strategy_applied" and (item.get("payload") or {}).get("strategy") == "deload" for item in events)
     evidence = event_refs(events, {"pain_reported", "illness_reported", "readiness_checkin_saved", "workout_feedback_saved", "workout_completed", "workout_missed", "weekly_strategy_applied"})
+    evidence.extend(source_ref("recovery_signal_observations", int(item["id"]), str(item["metric_key"])) for item in recovery["metrics"])
 
     if safety_events or profile_risk or feedback_risk or readiness_risk:
         return "deload", "Current safety or recovery evidence requires reducing next-week load.", ["hold", "resume", "conservative_progression"], evidence
@@ -157,6 +171,8 @@ def select_strategy(context: dict[str, object], metrics: dict[str, object], read
         return "hold", "At least one session exceeded its planned target, so progression is paused.", ["deload", "resume", "conservative_progression"], evidence
     if readiness_concern:
         return "hold", "Sleep, fatigue, soreness, or stress evidence supports holding load rather than progressing.", ["deload", "resume", "conservative_progression"], evidence
+    if recovery["progression_blocked"]:
+        return "hold", "Qualified recovery evidence is anomalous or conflicts with self-report, so progression is paused without diagnosing or changing the plan automatically.", ["deload", "resume", "conservative_progression"], evidence
     if prior_deload and numeric(metrics["session_adherence"]) >= 0.8:
         return "resume", "The safety-deload week was completed without a current risk signal; resume only toward the prior safe baseline.", ["deload", "hold", "conservative_progression"], evidence
     if numeric(metrics["session_adherence"]) >= 0.9 and int(readiness["complete_checkin_days"]) >= 3:
@@ -172,8 +188,19 @@ def compute_weekly_review(context: dict[str, object]) -> dict[str, object]:
     }
     metrics = workout_metrics(list(context["review_workouts"]))
     metrics["prior_safe_baseline"] = prior_safe_baseline(list(context["events"]))
-    readiness = readiness_metrics(list(context["events"]))
-    strategy, reason, rejected, evidence = select_strategy(context, metrics, readiness)
+    current_readiness_events = latest_readiness_events(list(context["events"]))
+    readiness = readiness_metrics(current_readiness_events)
+    checkin_signals = [
+        {**event.get("payload", {}).get("signals", {}), "checkin_date": event.get("payload", {}).get("checkin_date", "")}
+        for event in current_readiness_events
+    ]
+    recovery = summarize_recovery(
+        list(context.get("recovery_observations") or []),
+        datetime.fromisoformat(str(context.get("recovery_as_of_at") or context["as_of_at"])),
+        checkin_signals,
+        current_checkin_date=date.fromisoformat(str(context["week_end"])),
+    )
+    strategy, reason, rejected, evidence = select_strategy(context, metrics, readiness, recovery)
     resolution = context["resolution"]
     coverage_score = 0.0
     if resolution.get("status") == "complete":
@@ -210,6 +237,7 @@ def compute_weekly_review(context: dict[str, object]) -> dict[str, object]:
         "metrics": metrics,
         "plan_changes": context.get("plan_changes") or [],
         "readiness_trends": readiness,
+        "recovery_trends": recovery,
         "recommended_strategy": strategy,
         "strategy_reason": reason,
         "rejected_strategies": rejected,
@@ -386,7 +414,7 @@ def strategy_targets(db: Session, user: User, review: WeeklyReview, plan: Traini
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == user.id))
     checkin = db.scalar(select(DailyReadinessCheckIn).where(DailyReadinessCheckIn.user_id == user.id, DailyReadinessCheckIn.checkin_date == today))
     next_workout = candidates[0] if candidates else None
-    readiness_action = str(daily_readiness_recommendation(checkin, profile, next_workout).get("action")) if profile else "checkin_required"
+    readiness_action = str(daily_readiness_recommendation(checkin, profile, next_workout, recovery_summary_for_today(db, user, today, checkin)).get("action")) if profile else "checkin_required"
     _timezone_name, timezone = resolved_timezone(profile)
     target_start_utc = datetime.combine(target_start, datetime.min.time(), tzinfo=timezone).astimezone(UTC)
     current_week_safety_event = db.scalar(select(CoachingEvent.id).where(

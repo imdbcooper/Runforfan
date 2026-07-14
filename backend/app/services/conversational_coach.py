@@ -18,7 +18,7 @@ from app.schemas.common import CoachActionPreviewRequest as ExistingCoachActionP
 from app.services.coach_actions import action_target, load_plan_context
 from app.services.coach_provider import request_coach_output
 from app.services.coach_tools import authoritative_safety, build_coach_context
-from app.services.readiness import ReadinessActionConflict, action_target as readiness_target, today_checkin, today_context, daily_readiness_recommendation
+from app.services.readiness import ReadinessActionConflict, action_target as readiness_target, daily_readiness_recommendation, recovery_summary_for_today, today_checkin, today_context
 from app.services.weekly_review import WeeklyReviewConflict, current_plan, materialize_weekly_review, strategy_targets
 
 
@@ -245,11 +245,12 @@ def authorize_preview_request(db: Session | None, user: User | None, handoff: An
             raise CoachConflict("Caution blocks progression previews", "preview_unauthorized")
         return
     if handoff.kind == "readiness_action":
-        _date, profile, workout = today_context(db, user)
-        checkin = today_checkin(db, user, _date)
-        if workout is None or checkin is None or daily_readiness_recommendation(checkin, profile, workout).get("action") != handoff.action:
+        checkin_date, profile, workout = today_context(db, user)
+        checkin = today_checkin(db, user, checkin_date)
+        recovery = recovery_summary_for_today(db, user, checkin_date, checkin)
+        if workout is None or checkin is None or daily_readiness_recommendation(checkin, profile, workout, recovery).get("action") != handoff.action:
             raise CoachConflict("Readiness action is no longer authorized", "preview_unauthorized")
-        readiness_target(workout, daily_readiness_recommendation(checkin, profile, workout))
+        readiness_target(workout, daily_readiness_recommendation(checkin, profile, workout, recovery))
     elif handoff.kind == "weekly_strategy":
         if safety in {"caution", "medical_boundary"} and handoff.strategy in {"resume", "conservative_progression"}:
             raise CoachConflict("Current safety blocks progression previews", "preview_unauthorized")

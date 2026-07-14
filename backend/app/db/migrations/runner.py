@@ -769,11 +769,70 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_coach_llm_attempts_user_created ON coach_llm_attempts (user_id, created_at DESC, id DESC)",
         ),
     ),
+    (
+        "20260714_0028_recovery_signal_observations",
+        (
+            "ALTER TABLE daily_readiness_checkins ADD COLUMN IF NOT EXISTS weather_condition VARCHAR(32)",
+            "ALTER TABLE daily_readiness_checkins ADD COLUMN IF NOT EXISTS surface_condition VARCHAR(32)",
+            "ALTER TABLE daily_readiness_checkins ADD COLUMN IF NOT EXISTS available_time_minutes INTEGER",
+            "ALTER TABLE daily_readiness_checkins DROP CONSTRAINT IF EXISTS ck_daily_readiness_weather_condition",
+            "ALTER TABLE daily_readiness_checkins ADD CONSTRAINT ck_daily_readiness_weather_condition CHECK (weather_condition IS NULL OR weather_condition IN ('normal', 'heat', 'cold', 'storm', 'poor_air'))",
+            "ALTER TABLE daily_readiness_checkins DROP CONSTRAINT IF EXISTS ck_daily_readiness_surface_condition",
+            "ALTER TABLE daily_readiness_checkins ADD CONSTRAINT ck_daily_readiness_surface_condition CHECK (surface_condition IS NULL OR surface_condition IN ('dry', 'wet', 'icy', 'uneven'))",
+            "ALTER TABLE daily_readiness_checkins DROP CONSTRAINT IF EXISTS ck_daily_readiness_available_time",
+            "ALTER TABLE daily_readiness_checkins ADD CONSTRAINT ck_daily_readiness_available_time CHECK (available_time_minutes IS NULL OR (available_time_minutes >= 0 AND available_time_minutes <= 600))",
+            """
+            CREATE TABLE IF NOT EXISTS recovery_signal_observations (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                metric_key VARCHAR(64) NOT NULL,
+                value_numeric DOUBLE PRECISION NOT NULL,
+                unit VARCHAR(32) NOT NULL,
+                observed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                received_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                source_kind VARCHAR(32) NOT NULL,
+                source_system VARCHAR(64) NOT NULL,
+                source_label VARCHAR(100) NOT NULL,
+                source_record_id VARCHAR(255) NOT NULL,
+                quality VARCHAR(16) NOT NULL,
+                quality_score DOUBLE PRECISION,
+                normalization_version VARCHAR(64) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_recovery_signal_metric_key CHECK (metric_key IN ('sleep_duration_seconds', 'sleep_efficiency_pct', 'hrv_rmssd_ms', 'resting_heart_rate_bpm')),
+                CONSTRAINT ck_recovery_signal_unit CHECK (unit IN ('seconds', 'percent', 'ms', 'bpm')),
+                CONSTRAINT ck_recovery_signal_source_kind CHECK (source_kind IN ('manual', 'device_import', 'partner_sync')),
+                CONSTRAINT ck_recovery_signal_quality CHECK (quality IN ('high', 'medium', 'low')),
+                CONSTRAINT ck_recovery_signal_quality_score CHECK (quality_score IS NULL OR (quality_score >= 0 AND quality_score <= 1)),
+                CONSTRAINT ck_recovery_signal_observed_received CHECK (observed_at <= received_at),
+                CONSTRAINT uq_recovery_signal_source_record UNIQUE (user_id, source_system, metric_key, source_record_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_observations_user_id ON recovery_signal_observations (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_observations_metric_key ON recovery_signal_observations (metric_key)",
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_observations_observed_at ON recovery_signal_observations (observed_at)",
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_observations_received_at ON recovery_signal_observations (received_at)",
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_user_metric_observed ON recovery_signal_observations (user_id, metric_key, observed_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_recovery_signal_user_received ON recovery_signal_observations (user_id, received_at DESC, id DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS upload_deletion_jobs (
+                id BIGSERIAL PRIMARY KEY,
+                staged_name VARCHAR(100) NOT NULL,
+                file_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_upload_deletion_job_file_count CHECK (file_count >= 0),
+                CONSTRAINT uq_upload_deletion_job_staged_name UNIQUE (staged_name)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_upload_deletion_jobs_created_at ON upload_deletion_jobs (created_at)",
+        ),
+    ),
 )
 
 
 def run_migrations(engine: Engine) -> None:
     with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(727506681)"))
         conn.execute(text(
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (

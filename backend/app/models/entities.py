@@ -36,6 +36,7 @@ class User(Base, TimestampMixin):
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_training_loads: Mapped[list["DailyTrainingLoad"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_checkins: Mapped[list["DailyReadinessCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    recovery_signal_observations: Mapped[list["RecoverySignalObservation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     daily_readiness_action_previews: Mapped[list["DailyReadinessActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coach_action_previews: Mapped[list["CoachActionPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     plan_rollback_previews: Mapped[list["PlanRollbackPreview"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -120,6 +121,50 @@ class AthleteMeasurement(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped[User] = relationship(back_populates="measurements")
+
+
+class RecoverySignalObservation(Base):
+    __tablename__ = "recovery_signal_observations"
+    __table_args__ = (
+        CheckConstraint("metric_key IN ('sleep_duration_seconds', 'sleep_efficiency_pct', 'hrv_rmssd_ms', 'resting_heart_rate_bpm')", name="ck_recovery_signal_metric_key"),
+        CheckConstraint("unit IN ('seconds', 'percent', 'ms', 'bpm')", name="ck_recovery_signal_unit"),
+        CheckConstraint("source_kind IN ('manual', 'device_import', 'partner_sync')", name="ck_recovery_signal_source_kind"),
+        CheckConstraint("quality IN ('high', 'medium', 'low')", name="ck_recovery_signal_quality"),
+        CheckConstraint("quality_score IS NULL OR (quality_score >= 0 AND quality_score <= 1)", name="ck_recovery_signal_quality_score"),
+        CheckConstraint("observed_at <= received_at", name="ck_recovery_signal_observed_received"),
+        UniqueConstraint("user_id", "source_system", "metric_key", "source_record_id", name="uq_recovery_signal_source_record"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    metric_key: Mapped[str] = mapped_column(String(64), index=True)
+    value_numeric: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(32))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    source_kind: Mapped[str] = mapped_column(String(32))
+    source_system: Mapped[str] = mapped_column(String(64))
+    source_label: Mapped[str] = mapped_column(String(100))
+    source_record_id: Mapped[str] = mapped_column(String(255))
+    quality: Mapped[str] = mapped_column(String(16))
+    quality_score: Mapped[float | None] = mapped_column(Float)
+    normalization_version: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="recovery_signal_observations")
+
+
+class UploadDeletionJob(Base):
+    __tablename__ = "upload_deletion_jobs"
+    __table_args__ = (
+        CheckConstraint("file_count >= 0", name="ck_upload_deletion_job_file_count"),
+        UniqueConstraint("staged_name", name="uq_upload_deletion_job_staged_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    staged_name: Mapped[str] = mapped_column(String(100))
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class TrainingZone(Base, TimestampMixin):
@@ -315,7 +360,12 @@ class DailyTrainingLoad(Base):
 
 class DailyReadinessCheckIn(Base, TimestampMixin):
     __tablename__ = "daily_readiness_checkins"
-    __table_args__ = (UniqueConstraint("user_id", "checkin_date", name="uq_daily_readiness_checkins_user_date"),)
+    __table_args__ = (
+        CheckConstraint("weather_condition IS NULL OR weather_condition IN ('normal', 'heat', 'cold', 'storm', 'poor_air')", name="ck_daily_readiness_weather_condition"),
+        CheckConstraint("surface_condition IS NULL OR surface_condition IN ('dry', 'wet', 'icy', 'uneven')", name="ck_daily_readiness_surface_condition"),
+        CheckConstraint("available_time_minutes IS NULL OR (available_time_minutes >= 0 AND available_time_minutes <= 600)", name="ck_daily_readiness_available_time"),
+        UniqueConstraint("user_id", "checkin_date", name="uq_daily_readiness_checkins_user_date"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -330,6 +380,9 @@ class DailyReadinessCheckIn(Base, TimestampMixin):
     illness_symptoms: Mapped[bool] = mapped_column(Boolean, default=False)
     illness_notes: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    weather_condition: Mapped[str | None] = mapped_column(String(32))
+    surface_condition: Mapped[str | None] = mapped_column(String(32))
+    available_time_minutes: Mapped[int | None] = mapped_column(Integer)
     recommendation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     user: Mapped[User] = relationship(back_populates="daily_readiness_checkins")

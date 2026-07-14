@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 DEPENDENCY_SKIP_REASON = None
 
 try:
-    from app.models import Activity, CoachLlmAttempt, CoachMessage, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, User
+    from app.models import Activity, CoachLlmAttempt, CoachMessage, DailyTrainingLoad, DerivedActivityMetric, LlmProviderSetting, TrainingPlan, TrainingPlanWorkout, TrainingPlanWorkoutBlock, UploadDeletionJob, User
     from app.db.migrations.runner import MIGRATIONS
     from app.services.csv_imports import activity_payload_from_csv_row, iter_csv_rows
-    from app.services.data_management import DELETE_MODELS, activities_csv_content, activity_export, coach_message_export, csv_safe_value, llm_provider_export, model_to_dict, training_plan_export
+    from app.services.data_management import DELETE_MODELS, activities_csv_content, activity_export, coach_message_export, csv_safe_value, finish_user_upload_deletion, llm_provider_export, model_to_dict, restore_user_upload_deletion, stage_user_upload_deletion, training_plan_export
 except ModuleNotFoundError as exc:
     if exc.name in {"pydantic", "sqlalchemy"}:
         DEPENDENCY_SKIP_REASON = "Backend dependencies are required for data management tests"
@@ -160,6 +162,48 @@ class DataManagementTests(unittest.TestCase):
         self.assertLess(names.index("coach_llm_attempts"), names.index("coach_messages"))
         self.assertLess(names.index("coach_memory"), names.index("coach_messages"))
         self.assertLess(names.index("coach_messages"), names.index("coach_conversations"))
+
+    def test_recovery_observations_are_in_dependency_safe_delete_order(self):
+        names = [name for name, _ in DELETE_MODELS]
+        self.assertIn("recovery_signal_observations", names)
+        self.assertLess(names.index("recovery_signal_observations"), names.index("athlete_profiles"))
+
+    def test_account_data_cleanup_removes_only_the_users_upload_directory(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            user_file = root / "7" / "batch" / "screenshot.jpg"
+            other_file = root / "8" / "batch" / "screenshot.jpg"
+            user_file.parent.mkdir(parents=True)
+            other_file.parent.mkdir(parents=True)
+            user_file.write_bytes(b"user-private-image")
+            other_file.write_bytes(b"other-user-image")
+
+            staged, deleted = stage_user_upload_deletion(root, 7)
+            finish_user_upload_deletion(staged)
+
+            self.assertEqual(deleted, 1)
+            self.assertFalse((root / "7").exists())
+            self.assertTrue(other_file.exists())
+
+    def test_account_data_cleanup_can_restore_uploads_after_database_rollback(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            user_file = root / "7" / "batch" / "screenshot.jpg"
+            user_file.parent.mkdir(parents=True)
+            user_file.write_bytes(b"user-private-image")
+
+            staged, deleted = stage_user_upload_deletion(root, 7)
+            restore_user_upload_deletion(staged, root, 7)
+
+            self.assertEqual(deleted, 1)
+            self.assertEqual(user_file.read_bytes(), b"user-private-image")
+
+    def test_upload_deletion_job_stores_only_opaque_staged_name(self):
+        columns = set(UploadDeletionJob.__table__.columns.keys())
+
+        self.assertEqual(columns, {"id", "staged_name", "file_count", "created_at"})
+        self.assertNotIn("user_id", columns)
+        self.assertNotIn("file_path", columns)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictInt, model_validator
+from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator, model_validator
 
 
 Date = date
@@ -1068,6 +1068,9 @@ class DailyReadinessCheckInUpsert(BaseModel):
     illness_symptoms: bool = False
     illness_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=2000)
+    weather_condition: Literal["normal", "heat", "cold", "storm", "poor_air"] | None = None
+    surface_condition: Literal["dry", "wet", "icy", "uneven"] | None = None
+    available_time_minutes: StrictInt | None = Field(default=None, ge=0, le=600)
 
     @model_validator(mode="after")
     def validate_checkin(self):
@@ -1091,6 +1094,9 @@ class DailyReadinessCheckInOut(BaseModel):
     illness_symptoms: bool
     illness_notes: str | None = None
     notes: str | None = None
+    weather_condition: str | None = None
+    surface_condition: str | None = None
+    available_time_minutes: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -1246,6 +1252,53 @@ class AthleteStateSourceRefOut(BaseModel):
     field: str | None = None
 
 
+class RecoverySignalImportItem(BaseModel):
+    metric_key: Literal["sleep_duration_seconds", "sleep_efficiency_pct", "hrv_rmssd_ms", "resting_heart_rate_bpm"]
+    value: StrictFloat | StrictInt
+    unit: Literal["seconds", "percent", "ms", "bpm"]
+    observed_at: datetime
+    source_kind: Literal["manual", "device_import", "partner_sync"]
+    source_system: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    source_label: str = Field(min_length=1, max_length=100)
+    source_record_id: str = Field(min_length=1, max_length=255)
+    quality: Literal["high", "medium", "low"]
+    quality_score: StrictFloat | StrictInt | None = Field(default=None, ge=0, le=1)
+    model_config = {"extra": "forbid"}
+
+    @field_validator("observed_at")
+    @classmethod
+    def require_timezone(cls, value: datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("observed_at must include a timezone")
+        return value
+
+
+class RecoverySignalImportRequest(BaseModel):
+    observations: list[RecoverySignalImportItem] = Field(min_length=1, max_length=100)
+    model_config = {"extra": "forbid"}
+
+
+class RecoverySignalObservationOut(BaseModel):
+    id: int
+    metric_key: str
+    value: float
+    unit: str
+    observed_at: datetime
+    received_at: datetime
+    source_kind: str
+    source_system: str
+    source_label: str
+    quality: str
+    quality_score: float | None = None
+    normalization_version: str
+
+
+class RecoverySignalImportOut(BaseModel):
+    accepted: int
+    duplicates: int
+    observations: list[RecoverySignalObservationOut]
+
+
 class AthleteStateSignalOut(BaseModel):
     key: str
     label: str
@@ -1291,6 +1344,7 @@ class WeeklyReviewOut(BaseModel):
     metrics: dict[str, object]
     plan_changes: list[dict[str, object]] = Field(default_factory=list)
     readiness_trends: dict[str, object]
+    recovery_trends: dict[str, object]
     recommended_strategy: Literal["hold", "deload", "resume", "conservative_progression"]
     strategy_reason: str
     rejected_strategies: list[str]

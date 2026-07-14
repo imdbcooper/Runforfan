@@ -1217,6 +1217,9 @@ type DailyCheckInDraft = {
   painLevel: string
   illness: boolean
   notes: string
+  weather: string
+  surface: string
+  availableMinutes: string
 }
 
 function dailyDraft(readiness: DailyReadiness | null): DailyCheckInDraft {
@@ -1230,6 +1233,9 @@ function dailyDraft(readiness: DailyReadiness | null): DailyCheckInDraft {
     painLevel: checkin?.pain_level_0_10?.toString() || "",
     illness: checkin?.illness_symptoms || false,
     notes: checkin?.notes || "",
+    weather: checkin?.weather_condition || "",
+    surface: checkin?.surface_condition || "",
+    availableMinutes: checkin?.available_time_minutes?.toString() || "",
   }
 }
 
@@ -1566,6 +1572,9 @@ function DailyCoachCheckIn({ readiness, onChanged, onActionApplied }: { readines
         illness_symptoms: draft.illness,
         illness_notes: null,
         notes: draft.notes.trim() || null,
+        weather_condition: draft.weather || null,
+        surface_condition: draft.surface || null,
+        available_time_minutes: value(draft.availableMinutes),
       })
       onChanged(next)
       setEditing(false)
@@ -1630,6 +1639,11 @@ function DailyCoachCheckIn({ readiness, onChanged, onActionApplied }: { readines
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><label className="flex items-center gap-2 text-sm font-medium text-white"><input type="checkbox" checked={draft.pain} onChange={(event) => setDraft((current) => ({ ...current, pain: event.target.checked, painLevel: event.target.checked ? current.painLevel : "" }))} />{uiText("Есть боль", "I have pain")}</label>{draft.pain ? <label className="mt-3 grid gap-1 text-xs text-zinc-400"><span>{uiText("Уровень боли 0-10", "Pain level 0-10")}</span><Select value={draft.painLevel} onChange={(event) => setDraft((current) => ({ ...current, painLevel: event.target.value }))}><option value="">{uiText("Не указан", "Not specified")}</option>{scoreOptions.map((value) => <option key={value} value={value}>{value}</option>)}</Select></label> : null}</div>
         <label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-sm font-medium text-white"><input type="checkbox" checked={draft.illness} onChange={(event) => setDraft((current) => ({ ...current, illness: event.target.checked }))} />{uiText("Есть симптомы болезни", "I have illness symptoms")}</label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={uiText("Погода", "Weather")}><Select value={draft.weather} onChange={(event) => setDraft((current) => ({ ...current, weather: event.target.value }))}><option value="">{uiText("Не учитывать", "Not specified")}</option><option value="normal">{uiText("Обычная", "Normal")}</option><option value="heat">{uiText("Жара", "Heat")}</option><option value="cold">{uiText("Холод", "Cold")}</option><option value="storm">{uiText("Гроза / шторм", "Storm")}</option><option value="poor_air">{uiText("Плохой воздух", "Poor air")}</option></Select></Field>
+        <Field label={uiText("Покрытие", "Surface")}><Select value={draft.surface} onChange={(event) => setDraft((current) => ({ ...current, surface: event.target.value }))}><option value="">{uiText("Не учитывать", "Not specified")}</option><option value="dry">{uiText("Сухое", "Dry")}</option><option value="wet">{uiText("Мокрое", "Wet")}</option><option value="icy">{uiText("Лёд", "Icy")}</option><option value="uneven">{uiText("Неровное", "Uneven")}</option></Select></Field>
+        <Field label={uiText("Доступно минут", "Minutes available")}><Input type="number" min="0" max="600" value={draft.availableMinutes} placeholder="--" onChange={(event) => setDraft((current) => ({ ...current, availableMinutes: event.target.value }))} /></Field>
       </div>
       <label className="grid gap-1 text-xs text-zinc-400"><span>{uiText("Комментарий, если нужен", "Optional note")}</span><Input value={draft.notes} maxLength={2000} placeholder={uiText("Например: тяжёлые ноги после вчерашней тренировки", "For example: heavy legs after yesterday's workout")} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} /></label>
       {error ? <p role="alert" aria-live="assertive" className="text-xs text-rose-300">{error}</p> : null}
@@ -1885,6 +1899,7 @@ function athleteSignalLabel(key: string, fallback: string) {
     execution_quality: uiText("Выполнение плана", "Execution quality"),
     weekly_adherence: uiText("Текущая неделя", "Weekly adherence"),
     training_load: uiText("Тренировочная нагрузка", "Training load"),
+    recovery_signals: uiText("Сон и восстановление", "Sleep and recovery"),
   }
   return labels[key] || fallback
 }
@@ -1920,6 +1935,7 @@ function AthleteStateCard({ athleteState, error, onRetry }: { athleteState: Athl
   const signals = [...athleteState.signals].sort((left, right) => athleteSignalPriority(left) - athleteSignalPriority(right))
   const visible = signals.slice(0, 4)
   const evidenceCount = athleteState.signals.reduce((total, item) => total + item.source_refs.length, 0)
+  const recovery = athleteState.signals.find((item) => item.key === "recovery_signals")
   return <Card className="overflow-hidden">
     <CardHeader className="border-b border-zinc-800">
       <div className="min-w-0"><p className="text-xs font-semibold text-orange-200">Athlete state</p><CardTitle className="mt-1">{athleteState.headline}</CardTitle><p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">{athleteState.summary}</p></div>
@@ -1934,6 +1950,7 @@ function AthleteStateCard({ athleteState, error, onRetry }: { athleteState: Athl
           <p className="mt-2 text-[10px] leading-4 text-zinc-500">{freshnessLabel(item.freshness)} · {athleteConfidenceLabel(item.confidence)}</p>
         </div>)}
       </div>
+      {recovery ? <RecoverySignalPanel signal={recovery} /> : null}
       <CollapsibleSection title={uiText("Источники и ограничения", "Evidence and limitations")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{evidenceCount} {uiText("источников", "sources")}</Badge>}>
         <div className="grid gap-2 text-xs sm:grid-cols-2">
           {signals.map((item) => <div key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-white">{athleteSignalLabel(item.key, item.label)}</p><span className="text-zinc-600">{item.source_refs.length} source refs</span></div><p className="mt-1 leading-5 text-zinc-500">{item.limitations[0] || uiText("Дополнительных ограничений нет.", "No additional limitation recorded.")}</p></div>)}
@@ -1942,6 +1959,60 @@ function AthleteStateCard({ athleteState, error, onRetry }: { athleteState: Athl
       </CollapsibleSection>
     </div>
   </Card>
+}
+
+type RecoveryMetric = {
+  id?: number
+  metric_key?: string
+  value?: number
+  unit?: string
+  observed_at?: string
+  source_label?: string
+  source_kind?: string
+  source_system?: string
+  quality?: string
+  freshness?: string
+  baseline?: number | null
+  baseline_samples?: number
+  anomaly?: boolean
+}
+
+function recoverySourceLabel(sourceKind?: string) {
+  if (sourceKind === "manual") return uiText("Ручной ввод", "Manual entry")
+  if (sourceKind === "partner_sync") return uiText("Синхронизация партнёра", "Partner sync")
+  return uiText("Импорт устройства", "Device import")
+}
+
+function recoveryMetricLabel(key?: string) {
+  const labels: Record<string, string> = {
+    sleep_duration_seconds: uiText("Длительность сна", "Sleep duration"),
+    sleep_efficiency_pct: uiText("Эффективность сна", "Sleep efficiency"),
+    hrv_rmssd_ms: "HRV (RMSSD)",
+    resting_heart_rate_bpm: uiText("Пульс покоя", "Resting heart rate"),
+  }
+  return labels[key || ""] || key || uiText("Сигнал", "Signal")
+}
+
+function recoveryMetricValue(metric: RecoveryMetric, value: number | null | undefined = metric.value) {
+  if (typeof value !== "number") return uiText("нет baseline", "no baseline")
+  if (metric.unit === "seconds") return `${Math.round(value / 60)} min`
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} ${metric.unit || ""}`.trim()
+}
+
+function RecoverySignalPanel({ signal }: { signal: AthleteStateSignal }) {
+  const value = signal.value && typeof signal.value === "object" ? signal.value as Record<string, unknown> : {}
+  const metrics = Array.isArray(value.metrics) ? value.metrics.filter((item): item is RecoveryMetric => Boolean(item && typeof item === "object")) : []
+  const conflict = value.conflict === true
+  return <section className="border border-zinc-800 bg-zinc-950/60 p-4" aria-labelledby="recovery-signals-title">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><p id="recovery-signals-title" className="text-sm font-semibold text-white">{uiText("Recovery signals", "Recovery signals")}</p><p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">{signal.summary}</p></div><Badge className={signalClass(signal.status)}>{signalStatusLabel(signal.status)}</Badge></div>
+    {conflict ? <p role="status" className="mt-3 border-l-2 border-orange-400 bg-orange-400/10 p-3 text-xs leading-5 text-orange-100">{uiText("Данные устройства расходятся с вашим check-in. Самочувствие, боль, болезнь и ограничения имеют приоритет; увеличение нагрузки заблокировано до уточнения.", "Device data conflicts with your check-in. Self-reported wellbeing, pain, illness and restrictions take priority; progression is blocked until clarified.")}</p> : null}
+    {metrics.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric, index) => <article key={`${metric.metric_key}-${metric.id || index}`} className={cn("border p-3", metric.anomaly ? "border-orange-400/30 bg-orange-400/10" : "border-zinc-800 bg-zinc-900/60")}>
+      <div className="flex items-start justify-between gap-2"><p className="text-xs font-semibold text-zinc-100">{recoveryMetricLabel(metric.metric_key)}</p><span className="font-mono text-[9px] uppercase tracking-[0.12em] text-zinc-500">{metric.quality || uiText("без оценки", "unrated")}</span></div>
+      <p className="mt-2 text-lg font-semibold text-white">{recoveryMetricValue(metric)}</p>
+      <p className="mt-1 text-[10px] leading-4 text-zinc-500">{uiText("baseline", "baseline")}: {recoveryMetricValue(metric, metric.baseline ?? null)} · n={metric.baseline_samples || 0}</p>
+      <p className="mt-2 text-[10px] leading-4 text-zinc-500">{metric.source_system || recoverySourceLabel(metric.source_kind)} · {metric.observed_at ? new Date(metric.observed_at).toLocaleString() : freshnessLabel(metric.freshness || signal.freshness)}</p>
+    </article>)}</div> : <p className="mt-3 text-xs text-zinc-600">{uiText("Wearable не подключён. Это не считается плохим восстановлением.", "No wearable is connected. This is not treated as poor recovery.")}</p>}
+  </section>
 }
 
 function reviewNumber(record: Record<string, unknown>, key: string) {
