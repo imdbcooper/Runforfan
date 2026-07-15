@@ -1,11 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models import SafetyEscalation, SafetyReviewConsent, SafetyReviewEvent, SafetyReviewerGrant, SafetyReviewRequest, User
+from app.models import SafetyEscalation, SafetyReviewAudienceEnrollment, SafetyReviewConsent, SafetyReviewEvent, SafetyReviewerGrant, SafetyReviewRequest, User
 from app.services.audit import log_audit_event
 
 
@@ -41,6 +41,84 @@ def require_active_reviewer(db: Session, user: User, *, lock: bool = False) -> S
     if grant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active provisioned reviewer required")
     return grant
+
+
+def _active_audience(db: Session, user_id: int, *, lock: bool = False) -> SafetyReviewAudienceEnrollment | None:
+    query = select(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == user_id, SafetyReviewAudienceEnrollment.status == "active")
+    if lock:
+        query = query.with_for_update()
+    return db.scalar(query)
+
+
+def provision_review_audience(db: Session, user_id: int) -> SafetyReviewAudienceEnrollment:
+    enrollment = db.scalar(select(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == user_id).with_for_update())
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None or not user.is_active or user.is_demo:
+        raise SafetyReviewConflict("Audience member must be an existing active non-demo user")
+    if enrollment is not None:
+        if enrollment.status != "active":
+            raise SafetyReviewConflict("Revoked audience enrollment is terminal; create a new controlled identity")
+        return enrollment
+    enrollment = SafetyReviewAudienceEnrollment(user_id=user_id, status="active")
+    db.add(enrollment)
+    db.flush()
+    log_audit_event(db, user_id, "safety_review.audience_enrolled", "safety_review_audience_enrollment", enrollment.id, {})
+    db.commit()
+    db.refresh(enrollment)
+    return enrollment
+
+
+def revoke_review_audience(db: Session, user_id: int) -> tuple[SafetyReviewAudienceEnrollment, int]:
+    enrollment = db.scalar(select(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == user_id).with_for_update())
+    if enrollment is None:
+        raise SafetyReviewConflict("Audience enrollment not found")
+    if enrollment.status == "revoked":
+        return enrollment, 0
+    db.scalar(select(User.id).where(User.id == user_id).with_for_update())
+    now = datetime.now(UTC)
+    request_refs = list(db.execute(select(SafetyReviewRequest.id, SafetyReviewRequest.escalation_id).where(SafetyReviewRequest.user_id == user_id, SafetyReviewRequest.status.in_(ACTIVE_REQUEST_STATUSES)).order_by(SafetyReviewRequest.id.asc())))
+    closed = 0
+    for request_id, escalation_id in request_refs:
+        db.scalar(select(SafetyEscalation.id).where(SafetyEscalation.id == escalation_id, SafetyEscalation.user_id == user_id).with_for_update())
+        _consent(db, escalation_id, user_id, lock=True)
+        request = db.scalar(select(SafetyReviewRequest).where(SafetyReviewRequest.id == request_id, SafetyReviewRequest.status.in_(ACTIVE_REQUEST_STATUSES)).with_for_update())
+        if request is None:
+            continue
+        request.status = "cancelled_audience_revoked"
+        request.closed_at = now
+        db.flush()
+        db.add(SafetyReviewEvent(request_id=request.id, user_id=user_id, actor_user_id=None, event_type="audience_revoked", actor_kind="system", occurred_at=now))
+        closed += 1
+    enrollment.status = "revoked"
+    enrollment.revoked_at = now
+    log_audit_event(db, user_id, "safety_review.audience_revoked", "safety_review_audience_enrollment", enrollment.id, {"closed_active_requests": closed})
+    db.commit()
+    db.refresh(enrollment)
+    return enrollment, closed
+
+
+def operational_status(db: Session, *, now: datetime | None = None, access_hours: int = 24) -> dict[str, object]:
+    generated_at = now or datetime.now(UTC)
+    since = generated_at - timedelta(hours=max(1, min(access_hours, 720)))
+    requested_times = list(db.scalars(select(SafetyReviewRequest.requested_at).where(SafetyReviewRequest.status == "requested")))
+    ages = [max(0, int((generated_at - value).total_seconds())) for value in requested_times]
+    event_rows = db.execute(select(SafetyReviewEvent.event_type, func.count()).where(SafetyReviewEvent.occurred_at >= since).group_by(SafetyReviewEvent.event_type)).all()
+    event_counts = {event_type: 0 for event_type in ("requested", "claimed", "viewed", "released", "completed", "unable_to_review", "withdrawn", "consent_revoked", "case_superseded", "audience_revoked", "audience_not_enrolled")}
+    event_counts.update({event_type: int(count) for event_type, count in event_rows})
+    settings = get_settings()
+    return {
+        "generated_at": generated_at.isoformat(),
+        "rollout": {"safety_escalation_enabled": settings.safety_escalation_enabled, "safety_review_enabled": settings.safety_review_enabled, "safety_review_reviewer_api_enabled": settings.safety_review_reviewer_api_enabled},
+        "active_reviewer_grants": int(db.scalar(select(func.count()).select_from(SafetyReviewerGrant).where(SafetyReviewerGrant.status == "active")) or 0),
+        "active_audience_enrollments": int(db.scalar(select(func.count()).select_from(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.status == "active")) or 0),
+        "queue": {
+            "requested_count": len(ages),
+            "claimed_count": int(db.scalar(select(func.count()).select_from(SafetyReviewRequest).where(SafetyReviewRequest.status == "claimed")) or 0),
+            "requested_age_buckets": {"under_1h": sum(age < 3600 for age in ages), "1h_to_under_24h": sum(3600 <= age < 86400 for age in ages), "24h_or_more": sum(age >= 86400 for age in ages)},
+        },
+        "access_ledger": {"since": since.isoformat(), "events": event_counts},
+        "disclaimer": "Persisted queue and access-ledger observations only. This does not establish reviewer presence, staffing, monitoring, coverage, or a response-time guarantee.",
+    }
 
 
 def release_reviewer_claims(db: Session, reviewer_user_id: int, now: datetime | None = None) -> int:
@@ -143,6 +221,8 @@ def review_state(db: Session, user_id: int, escalation_id: int) -> dict[str, obj
     if not athlete_review_available():
         return {"available": False, "policy_version": POLICY_VERSION, "consent_status": None, "request_status": None, "disposition_code": None, "requested_at": None, "completed_at": None, "disclaimer": DISCLAIMER}
     _owned_active_case(db, user_id, escalation_id)
+    if _active_audience(db, user_id) is None:
+        return {"available": False, "policy_version": POLICY_VERSION, "consent_status": None, "request_status": None, "disposition_code": None, "requested_at": None, "completed_at": None, "disclaimer": DISCLAIMER}
     consent = _consent(db, escalation_id, user_id)
     request = _request(db, escalation_id, user_id)
     return {
@@ -160,6 +240,8 @@ def review_state(db: Session, user_id: int, escalation_id: int) -> dict[str, obj
 def grant_consent(db: Session, user: User, escalation_id: int) -> dict[str, object]:
     if not athlete_review_available():
         raise SafetyReviewConflict("Human review is unavailable")
+    if _active_audience(db, user.id, lock=True) is None:
+        raise SafetyReviewConflict("Safety review is unavailable for this account")
     db.scalar(select(User.id).where(User.id == user.id).with_for_update())
     escalation = _owned_active_case(db, user.id, escalation_id, lock=True)
     existing = _consent(db, escalation.id, user.id, lock=True)
@@ -187,6 +269,8 @@ def request_review(db: Session, user: User, escalation_id: int) -> dict[str, obj
     )
     if enrolled_reviewer is None:
         raise SafetyReviewConflict("No reviewer is currently provisioned; no review request was created")
+    if _active_audience(db, user.id, lock=True) is None:
+        raise SafetyReviewConflict("Safety review is unavailable for this account")
     db.scalar(select(User.id).where(User.id == user.id).with_for_update())
     escalation = _owned_active_case(db, user.id, escalation_id, lock=True)
     consent = _consent(db, escalation.id, user.id, lock=True)
@@ -264,6 +348,8 @@ def claim_request(db: Session, reviewer: User, request_id: int) -> dict[str, obj
     if request_owner is None:
         raise SafetyReviewConflict("Review request not found")
     user_id, escalation_id = request_owner
+    if _active_audience(db, user_id, lock=True) is None:
+        raise SafetyReviewConflict("Review request is no longer authorized")
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     escalation = db.scalar(select(SafetyEscalation).where(SafetyEscalation.id == escalation_id, SafetyEscalation.user_id == user_id).with_for_update())
     consent = _consent(db, escalation_id, user_id, lock=True)
@@ -296,6 +382,8 @@ def reviewer_context(db: Session, reviewer: User, request_id: int) -> dict[str, 
     if request_owner is None:
         raise SafetyReviewConflict("Claimed review request not found")
     user_id, escalation_id = request_owner
+    if _active_audience(db, user_id, lock=True) is None:
+        raise SafetyReviewConflict("Review access is no longer authorized")
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     escalation = db.scalar(select(SafetyEscalation).where(SafetyEscalation.id == escalation_id, SafetyEscalation.user_id == user_id).with_for_update())
     consent = _consent(db, escalation_id, user_id, lock=True)
@@ -311,6 +399,8 @@ def release_request(db: Session, reviewer: User, request_id: int) -> dict[str, o
     if request_owner is None:
         raise SafetyReviewConflict("Claimed review request not found")
     user_id, escalation_id = request_owner
+    if _active_audience(db, user_id, lock=True) is None:
+        raise SafetyReviewConflict("Review access is no longer authorized")
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     db.scalar(select(SafetyEscalation.id).where(SafetyEscalation.id == escalation_id, SafetyEscalation.user_id == user_id).with_for_update())
     _consent(db, escalation_id, user_id, lock=True)
@@ -372,6 +462,8 @@ def complete_request(db: Session, reviewer: User, request_id: int, disposition_c
     if request_owner is None:
         raise SafetyReviewConflict("Claimed review request not found")
     user_id, escalation_id = request_owner
+    if _active_audience(db, user_id, lock=True) is None:
+        raise SafetyReviewConflict("Review access is no longer authorized")
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     escalation = db.scalar(select(SafetyEscalation).where(SafetyEscalation.id == escalation_id, SafetyEscalation.user_id == user_id).with_for_update())
     consent = _consent(db, escalation_id, user_id, lock=True)

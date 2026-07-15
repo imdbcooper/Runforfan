@@ -19,7 +19,7 @@ try:
     from app.api.routes import safety_reviews as review_routes
     from app.db.base import Base
     from app.db.migrations.runner import run_migrations
-    from app.models import AthleteProfile, SafetyEscalation, SafetyEscalationEvent, SafetyReviewConsent, SafetyReviewEvent, SafetyReviewerGrant, SafetyReviewRequest, TrainingPlan, TrainingPlanVersion, User
+    from app.models import AthleteProfile, SafetyEscalation, SafetyEscalationEvent, SafetyReviewAudienceEnrollment, SafetyReviewConsent, SafetyReviewEvent, SafetyReviewerGrant, SafetyReviewRequest, TrainingPlan, TrainingPlanVersion, User
     from app.services import safety_escalations, safety_reviews
     from app.services.data_management import delete_user_data, export_user_data
 except ModuleNotFoundError as exc:
@@ -69,6 +69,8 @@ class SafetyReviewPostgresTests(unittest.TestCase):
             db.add_all([
                 AthleteProfile(user_id=athlete.id, timezone="Europe/Moscow", recovery_status="injured", injury_notes="private injury detail", health_conditions="private condition"),
                 AthleteProfile(user_id=other.id, timezone="Europe/Moscow", recovery_status="normal"),
+                SafetyReviewAudienceEnrollment(user_id=athlete.id, status="active"),
+                SafetyReviewAudienceEnrollment(user_id=reviewer.id, status="active"),
                 SafetyReviewerGrant(user_id=reviewer.id, status="active"),
                 SafetyReviewerGrant(user_id=second_reviewer.id, status="active"),
             ])
@@ -143,10 +145,10 @@ class SafetyReviewPostgresTests(unittest.TestCase):
             tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE 'safety_review%'" )).scalars())
             constraints = set(connection.execute(text("SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = current_schema() AND table_name LIKE 'safety_review%'" )).scalars())
             triggers = set(connection.execute(text("SELECT tgname FROM pg_trigger JOIN pg_class ON pg_class.oid = tgrelid JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace WHERE pg_namespace.nspname = current_schema() AND NOT tgisinternal AND pg_class.relname LIKE 'safety_review%'" )).scalars())
-            migrated = connection.execute(text("SELECT 1 FROM schema_migrations WHERE version = '20260715_0033_safety_review_workflow'")).scalar_one()
-        self.assertEqual(tables, {"safety_reviewer_grants", "safety_review_consents", "safety_review_requests", "safety_review_events"})
+            migrated = connection.execute(text("SELECT 1 FROM schema_migrations WHERE version = '20260715_0034_safety_review_operational_controls'")).scalar_one()
+        self.assertEqual(tables, {"safety_reviewer_grants", "safety_review_audience_enrollments", "safety_review_consents", "safety_review_requests", "safety_review_events"})
         self.assertTrue({"fk_safety_review_request_owner", "fk_safety_review_request_consent_owner", "ck_safety_review_request_lifecycle", "ck_safety_review_event_pair"}.issubset(constraints))
-        self.assertEqual(triggers, {"trg_safety_reviewer_grant", "trg_safety_review_consent", "trg_safety_review_request", "trg_safety_review_event", "trg_safety_review_request_event_presence"})
+        self.assertEqual(triggers, {"trg_safety_reviewer_grant", "trg_safety_review_audience_enrollment", "trg_safety_review_consent", "trg_safety_review_request", "trg_safety_review_event", "trg_safety_review_request_event_presence"})
         self.assertEqual(migrated, 1)
 
     def test_database_rejects_demo_reviewer_grant(self):
@@ -154,6 +156,81 @@ class SafetyReviewPostgresTests(unittest.TestCase):
             db.add(SafetyReviewerGrant(user_id=self.demo_reviewer_id, status="active"))
             with self.assertRaises(DBAPIError):
                 db.commit()
+
+    def test_controlled_audience_is_required_and_terminal(self):
+        escalation_id = self.open_case()
+        with self.SessionLocal() as db:
+            enrollment = db.scalar(select(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == self.athlete_id).with_for_update())
+            enrollment.status = "revoked"
+            enrollment.revoked_at = datetime.now(UTC)
+            db.commit()
+        with self.enabled():
+            state = self.client_for(self.athlete_id).get(f"/api/safety-escalations/{escalation_id}/review")
+            consent = self.client_for(self.athlete_id).post(f"/api/safety-escalations/{escalation_id}/review-consent", json={"policy_version": safety_reviews.POLICY_VERSION})
+        self.assertFalse(state.json()["available"])
+        self.assertEqual(consent.status_code, 409)
+        with self.SessionLocal() as db:
+            with self.assertRaises(safety_reviews.SafetyReviewConflict):
+                safety_reviews.provision_review_audience(db, self.athlete_id)
+
+    def test_audience_revocation_closes_claim_and_access(self):
+        escalation_id = self.open_case()
+        request_id = self.request_case(escalation_id)
+        with self.enabled():
+            self.client_for(self.reviewer_id).post(f"/api/safety-reviewer/requests/{request_id}/claim")
+            with self.SessionLocal() as db:
+                enrollment, closed = safety_reviews.revoke_review_audience(db, self.athlete_id)
+                self.assertEqual(enrollment.status, "revoked")
+                self.assertEqual(closed, 1)
+            denied = self.client_for(self.reviewer_id).get(f"/api/safety-reviewer/requests/{request_id}/context")
+        self.assertEqual(denied.status_code, 409)
+        with self.SessionLocal() as db:
+            request = db.get(SafetyReviewRequest, request_id)
+            self.assertEqual(request.status, "cancelled_audience_revoked")
+            event = db.scalar(select(SafetyReviewEvent).where(SafetyReviewEvent.request_id == request_id, SafetyReviewEvent.event_type == "audience_revoked"))
+            self.assertEqual(event.actor_kind, "system")
+            self.assertIsNone(event.actor_user_id)
+
+    def test_concurrent_claim_and_audience_revoke_fail_closed(self):
+        escalation_id = self.open_case()
+        request_id = self.request_case(escalation_id)
+        barrier = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def claim():
+            barrier.wait(5)
+            outcomes.append(f"claim:{self.client_for(self.reviewer_id).post(f'/api/safety-reviewer/requests/{request_id}/claim').status_code}")
+
+        def revoke():
+            barrier.wait(5)
+            with self.SessionLocal() as db:
+                enrollment, closed = safety_reviews.revoke_review_audience(db, self.athlete_id)
+                outcomes.append(f"revoke:{enrollment.status}:{closed}")
+
+        with self.enabled():
+            threads = [threading.Thread(target=claim), threading.Thread(target=revoke)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(10)
+        self.assertEqual(len(outcomes), 2)
+        with self.SessionLocal() as db:
+            self.assertEqual(db.scalar(select(SafetyReviewAudienceEnrollment.status).where(SafetyReviewAudienceEnrollment.user_id == self.athlete_id)), "revoked")
+            self.assertEqual(db.get(SafetyReviewRequest, request_id).status, "cancelled_audience_revoked")
+
+    def test_operational_status_is_aggregate_and_non_sla(self):
+        escalation_id = self.open_case()
+        self.request_case(escalation_id)
+        with self.enabled(), self.SessionLocal() as db:
+            report = safety_reviews.operational_status(db, now=datetime.now(UTC), access_hours=24)
+        serialized = str(report).lower()
+        self.assertEqual(report["queue"]["requested_count"], 1)
+        self.assertEqual(report["active_audience_enrollments"], 2)
+        self.assertIn("does not establish reviewer presence", report["disclaimer"])
+        self.assertNotIn("oldest_requested_at", serialized)
+        self.assertNotIn("oldest_requested_age_seconds", serialized)
+        for forbidden in ("user_id", "reviewer_user_id", "actor_user_id", "display_name", "guidance", "trigger_kind"):
+            self.assertNotIn(forbidden, serialized)
 
     def test_consent_and_request_are_owned_explicit_and_idempotent(self):
         escalation_id = self.open_case()
@@ -475,7 +552,8 @@ class SafetyReviewPostgresTests(unittest.TestCase):
         with self.SessionLocal() as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(TrainingPlanVersion).where(TrainingPlanVersion.user_id == self.athlete_id)), 1)
             exported = export_user_data(db, db.get(User, self.athlete_id))
-            self.assertEqual(exported["version"], "2026-07-15.0033")
+            self.assertEqual(exported["version"], "2026-07-15.0034")
+            self.assertEqual(exported["safety_review_audience_enrollment"]["status"], "active")
             serialized = str({"consents": exported["safety_review_consents"], "requests": exported["safety_review_requests"], "events": exported["safety_review_events"]})
             self.assertNotIn("reviewer_user_id", serialized)
             self.assertNotIn("actor_user_id", serialized)
@@ -483,6 +561,7 @@ class SafetyReviewPostgresTests(unittest.TestCase):
             counts = delete_user_data(db, self.athlete_id)
             db.commit()
             self.assertEqual(counts["safety_review_requests"], 1)
+            self.assertEqual(counts["safety_review_audience_enrollments"], 1)
             self.assertEqual(db.scalar(select(func.count()).select_from(SafetyReviewRequest).where(SafetyReviewRequest.user_id == self.athlete_id)), 0)
 
     def test_closed_rollout_hides_athlete_and_reviewer_apis(self):

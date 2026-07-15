@@ -39,6 +39,7 @@ from app.models import (
     RunningGoal,
     SafetyEscalation,
     SafetyEscalationEvent,
+    SafetyReviewAudienceEnrollment,
     SafetyReviewConsent,
     SafetyReviewEvent,
     SafetyReviewerGrant,
@@ -163,10 +164,11 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
     coaching_events = list(db.scalars(select(CoachingEvent).where(CoachingEvent.user_id == user.id).order_by(CoachingEvent.occurred_at.desc(), CoachingEvent.id.desc())))
     daily_training_loads = list(db.scalars(select(DailyTrainingLoad).where(DailyTrainingLoad.user_id == user.id).order_by(DailyTrainingLoad.date.asc())))
     coach_delivery_preference = db.scalar(select(CoachDeliveryPreference).where(CoachDeliveryPreference.user_id == user.id))
+    audience_enrollment = db.scalar(select(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == user.id))
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-15.0033",
+        "version": "2026-07-15.0034",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -195,6 +197,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "coach_delivery_attempts": [model_to_dict(item) for item in db.scalars(select(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDeliveryAttempt.created_at.asc(), CoachDeliveryAttempt.id.asc()))],
         "safety_escalations": [model_to_dict(item, exclude={"source_key", "source_fingerprint"}) for item in db.scalars(select(SafetyEscalation).where(SafetyEscalation.user_id == user.id).order_by(SafetyEscalation.created_at.asc(), SafetyEscalation.id.asc()))],
         "safety_escalation_events": [model_to_dict(item) for item in db.scalars(select(SafetyEscalationEvent).where(SafetyEscalationEvent.user_id == user.id).order_by(SafetyEscalationEvent.occurred_at.asc(), SafetyEscalationEvent.id.asc()))],
+        "safety_review_audience_enrollment": model_to_dict(audience_enrollment) if audience_enrollment else None,
         "safety_review_consents": [model_to_dict(item) for item in db.scalars(select(SafetyReviewConsent).where(SafetyReviewConsent.user_id == user.id).order_by(SafetyReviewConsent.created_at.asc(), SafetyReviewConsent.id.asc()))],
         "safety_review_requests": [model_to_dict(item, exclude={"reviewer_user_id"}) for item in db.scalars(select(SafetyReviewRequest).where(SafetyReviewRequest.user_id == user.id).order_by(SafetyReviewRequest.requested_at.asc(), SafetyReviewRequest.id.asc()))],
         "safety_review_events": [model_to_dict(item, exclude={"actor_user_id"}) for item in db.scalars(select(SafetyReviewEvent).where(SafetyReviewEvent.user_id == user.id).order_by(SafetyReviewEvent.occurred_at.asc(), SafetyReviewEvent.id.asc()))],
@@ -340,6 +343,7 @@ def delete_user_data(db: Session, user_id: int) -> dict[str, int]:
     counts["safety_review_events"] = count_rows_for_user(db, SafetyReviewEvent, user_id)
     counts["safety_review_requests"] = count_rows_for_user(db, SafetyReviewRequest, user_id)
     counts["safety_review_consents"] = count_rows_for_user(db, SafetyReviewConsent, user_id)
+    counts["safety_review_audience_enrollments"] = count_rows_for_user(db, SafetyReviewAudienceEnrollment, user_id)
     reviewer_grant = db.scalar(select(SafetyReviewerGrant).where(SafetyReviewerGrant.user_id == user_id).with_for_update())
     claimed_review_count = int(db.scalar(select(func.count()).select_from(SafetyReviewRequest).where(SafetyReviewRequest.reviewer_user_id == user_id, SafetyReviewRequest.status == "claimed")) or 0)
     counts["safety_reviewer_grants_revoked"] = 1 if reviewer_grant is not None and reviewer_grant.status == "active" else 0
@@ -350,6 +354,7 @@ def delete_user_data(db: Session, user_id: int) -> dict[str, int]:
         reviewer_grant.status = "revoked"
         reviewer_grant.revoked_at = datetime.now(UTC)
     db.flush()
+    db.execute(delete(SafetyReviewAudienceEnrollment).where(SafetyReviewAudienceEnrollment.user_id == user_id))
     db.execute(delete(DerivedActivityMetric).where(DerivedActivityMetric.activity_id.in_(select(Activity.id).where(Activity.user_id == user_id))))
     db.execute(delete(TrainingPlanWorkoutBlock).where(TrainingPlanWorkoutBlock.workout_id.in_(select(TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id))))
     for _, model in DELETE_MODELS:

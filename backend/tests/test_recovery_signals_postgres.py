@@ -142,7 +142,7 @@ class RecoverySignalPostgresTests(unittest.TestCase):
         self.client_for(self.other_user_id).post("/api/recovery-signals/imports", json=self.payload())
         with self.SessionLocal() as db:
             exported = export_user_data(db, db.get(User, self.user_id))
-            self.assertEqual(exported["version"], "2026-07-15.0033")
+            self.assertEqual(exported["version"], "2026-07-15.0034")
             self.assertEqual(len(exported["recovery_signal_observations"]), 1)
             counts = delete_user_data(db, self.user_id)
             db.commit()

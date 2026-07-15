@@ -1208,7 +1208,7 @@ class SafetyReviewStateOut(BaseModel):
     available: bool
     policy_version: Literal["safety-review-consent-v1"]
     consent_status: Literal["active", "withdrawn", "case_superseded"] | None = None
-    request_status: Literal["requested", "claimed", "completed", "withdrawn", "cancelled_consent_revoked", "cancelled_case_superseded", "unable_to_review"] | None = None
+    request_status: Literal["requested", "claimed", "completed", "withdrawn", "cancelled_consent_revoked", "cancelled_case_superseded", "cancelled_audience_revoked", "cancelled_not_enrolled", "unable_to_review"] | None = None
     disposition_code: Literal["reviewed_guidance_reiterated", "seek_local_professional_support", "insufficient_information", "unable_to_review"] | None = None
     requested_at: datetime | None = None
     completed_at: datetime | None = None

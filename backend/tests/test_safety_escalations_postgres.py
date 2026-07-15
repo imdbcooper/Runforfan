@@ -255,7 +255,7 @@ class SafetyEscalationPostgresTests(unittest.TestCase):
             self.client_for(self.user_id).get("/api/safety-escalations/current")
         with self.SessionLocal() as db:
             exported = export_user_data(db, db.get(User, self.user_id))
-            self.assertEqual(exported["version"], "2026-07-15.0033")
+            self.assertEqual(exported["version"], "2026-07-15.0034")
             self.assertEqual(len(exported["safety_escalations"]), 1)
             serialized = str({"cases": exported["safety_escalations"], "events": exported["safety_escalation_events"]})
             self.assertNotIn("source_key", serialized)

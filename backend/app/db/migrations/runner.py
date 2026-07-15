@@ -1379,6 +1379,156 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE CONSTRAINT TRIGGER trg_safety_review_request_event_presence AFTER INSERT OR UPDATE ON safety_review_requests DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_safety_review_request_events()",
         ),
     ),
+    (
+        "20260715_0034_safety_review_operational_controls",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS safety_review_audience_enrollments (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                status VARCHAR(24) NOT NULL DEFAULT 'active',
+                enrolled_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                revoked_at TIMESTAMP WITH TIME ZONE,
+                CONSTRAINT ck_safety_review_audience_status CHECK (status IN ('active', 'revoked')),
+                CONSTRAINT ck_safety_review_audience_lifecycle CHECK ((status = 'active' AND revoked_at IS NULL) OR (status = 'revoked' AND revoked_at IS NOT NULL))
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_safety_review_audience_enrollments_user_id ON safety_review_audience_enrollments (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_review_audience_enrollments_status ON safety_review_audience_enrollments (status)",
+            "ALTER TABLE safety_review_requests DROP CONSTRAINT IF EXISTS ck_safety_review_request_status",
+            "ALTER TABLE safety_review_requests ADD CONSTRAINT ck_safety_review_request_status CHECK (status IN ('requested', 'claimed', 'completed', 'withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'cancelled_audience_revoked', 'cancelled_not_enrolled', 'unable_to_review'))",
+            "ALTER TABLE safety_review_requests DROP CONSTRAINT IF EXISTS ck_safety_review_request_lifecycle",
+            "ALTER TABLE safety_review_requests ADD CONSTRAINT ck_safety_review_request_lifecycle CHECK ((status = 'requested' AND reviewer_user_id IS NULL AND claimed_at IS NULL AND completed_at IS NULL AND closed_at IS NULL AND disposition_code IS NULL) OR (status = 'claimed' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NULL AND closed_at IS NULL AND disposition_code IS NULL) OR (status = 'completed' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND closed_at IS NULL AND disposition_code IS NOT NULL) OR (status = 'unable_to_review' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND closed_at IS NULL AND disposition_code = 'unable_to_review') OR (status IN ('withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'cancelled_audience_revoked', 'cancelled_not_enrolled') AND completed_at IS NULL AND closed_at IS NOT NULL AND disposition_code IS NULL))",
+            "ALTER TABLE safety_review_events DROP CONSTRAINT IF EXISTS ck_safety_review_event_type",
+            "ALTER TABLE safety_review_events ADD CONSTRAINT ck_safety_review_event_type CHECK (event_type IN ('requested', 'claimed', 'released', 'viewed', 'completed', 'withdrawn', 'consent_revoked', 'case_superseded', 'audience_revoked', 'audience_not_enrolled', 'unable_to_review'))",
+            "ALTER TABLE safety_review_events DROP CONSTRAINT IF EXISTS ck_safety_review_event_pair",
+            "ALTER TABLE safety_review_events ADD CONSTRAINT ck_safety_review_event_pair CHECK ((event_type IN ('requested', 'withdrawn') AND actor_kind = 'athlete' AND actor_user_id IS NOT NULL) OR (event_type IN ('claimed', 'released', 'viewed', 'completed', 'unable_to_review') AND actor_kind = 'reviewer' AND actor_user_id IS NOT NULL) OR (event_type IN ('consent_revoked', 'case_superseded', 'audience_revoked', 'audience_not_enrolled') AND actor_kind = 'system' AND actor_user_id IS NULL))",
+            """
+            CREATE OR REPLACE FUNCTION enforce_safety_review_audience_enrollment() RETURNS trigger AS $$
+            DECLARE demo BOOLEAN; active BOOLEAN;
+            BEGIN
+                IF TG_OP = 'DELETE' THEN
+                    IF current_setting('runforfan.safety_review_erasure_user_id', true) = OLD.user_id::TEXT THEN
+                        RETURN OLD;
+                    END IF;
+                    RAISE EXCEPTION 'safety review audience enrollments cannot be deleted directly';
+                END IF;
+                IF TG_OP = 'UPDATE' AND (NEW.user_id != OLD.user_id OR NEW.enrolled_at != OLD.enrolled_at) THEN
+                    RAISE EXCEPTION 'safety review audience identity is immutable';
+                END IF;
+                SELECT is_demo, is_active INTO demo, active FROM users WHERE id = NEW.user_id;
+                IF NEW.status = 'active' AND (demo OR NOT active) THEN
+                    RAISE EXCEPTION 'active audience member must be a non-demo active user';
+                END IF;
+                IF TG_OP = 'UPDATE' AND OLD.status = 'revoked' AND NEW.status != OLD.status THEN
+                    RAISE EXCEPTION 'revoked audience enrollment is terminal';
+                END IF;
+                IF TG_OP = 'UPDATE' AND OLD.status = 'active' AND NEW.status = 'revoked' AND EXISTS (SELECT 1 FROM safety_review_requests WHERE user_id = NEW.user_id AND status IN ('requested', 'claimed')) THEN
+                    RAISE EXCEPTION 'active review requests must close before audience revocation';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_safety_review_audience_enrollment ON safety_review_audience_enrollments",
+            "CREATE TRIGGER trg_safety_review_audience_enrollment BEFORE INSERT OR UPDATE OR DELETE ON safety_review_audience_enrollments FOR EACH ROW EXECUTE FUNCTION enforce_safety_review_audience_enrollment()",
+            """
+            CREATE OR REPLACE FUNCTION enforce_safety_review_request() RETURNS trigger AS $$
+            DECLARE consent_status VARCHAR(24); case_status VARCHAR(24); reviewer_ok BOOLEAN; audience_ok BOOLEAN;
+            BEGIN
+                IF TG_OP = 'DELETE' THEN
+                    IF current_setting('runforfan.safety_review_erasure_user_id', true) = OLD.user_id::TEXT THEN RETURN OLD; END IF;
+                    RAISE EXCEPTION 'safety review requests cannot be deleted directly';
+                END IF;
+                IF TG_OP = 'UPDATE' AND (NEW.escalation_id != OLD.escalation_id OR NEW.consent_id != OLD.consent_id OR NEW.user_id != OLD.user_id OR NEW.requested_at != OLD.requested_at) THEN RAISE EXCEPTION 'safety review request identity is immutable'; END IF;
+                IF TG_OP = 'UPDATE' AND NEW.status = OLD.status AND (NEW.reviewer_user_id IS DISTINCT FROM OLD.reviewer_user_id OR NEW.claimed_at IS DISTINCT FROM OLD.claimed_at OR NEW.completed_at IS DISTINCT FROM OLD.completed_at OR NEW.closed_at IS DISTINCT FROM OLD.closed_at OR NEW.disposition_code IS DISTINCT FROM OLD.disposition_code) THEN RAISE EXCEPTION 'safety review transition facts cannot change without a state transition'; END IF;
+                IF TG_OP = 'UPDATE' AND NEW.status != OLD.status AND (
+                    (NEW.status = 'claimed' AND (NEW.reviewer_user_id IS NULL OR NEW.claimed_at IS NULL OR NEW.completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL OR NEW.disposition_code IS NOT NULL)) OR
+                    (NEW.status = 'requested' AND (NEW.reviewer_user_id IS NOT NULL OR NEW.claimed_at IS NOT NULL OR NEW.completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL OR NEW.disposition_code IS NOT NULL)) OR
+                    (NEW.status IN ('completed', 'unable_to_review') AND (NEW.reviewer_user_id IS NULL OR NEW.claimed_at IS NULL OR NEW.completed_at IS NULL OR NEW.closed_at IS NOT NULL OR NEW.disposition_code IS NULL)) OR
+                    (NEW.status IN ('withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'cancelled_audience_revoked', 'cancelled_not_enrolled') AND (NEW.completed_at IS NOT NULL OR NEW.closed_at IS NULL OR NEW.disposition_code IS NOT NULL))
+                ) THEN RAISE EXCEPTION 'invalid safety review transition facts'; END IF;
+                SELECT status INTO consent_status FROM safety_review_consents WHERE id = NEW.consent_id AND user_id = NEW.user_id AND escalation_id = NEW.escalation_id;
+                SELECT status INTO case_status FROM safety_escalations WHERE id = NEW.escalation_id AND user_id = NEW.user_id;
+                SELECT EXISTS (SELECT 1 FROM safety_review_audience_enrollments WHERE user_id = NEW.user_id AND status = 'active') INTO audience_ok;
+                IF TG_OP = 'INSERT' AND (NEW.status != 'requested' OR consent_status != 'active' OR case_status NOT IN ('open', 'acknowledged') OR NOT audience_ok) THEN RAISE EXCEPTION 'active audience, consent and safety case are required for review request'; END IF;
+                IF TG_OP = 'UPDATE' AND NEW.status != OLD.status AND NOT (
+                    (OLD.status = 'requested' AND NEW.status IN ('claimed', 'withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'cancelled_audience_revoked', 'cancelled_not_enrolled')) OR
+                    (OLD.status = 'claimed' AND NEW.status IN ('requested', 'completed', 'withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'cancelled_audience_revoked', 'cancelled_not_enrolled', 'unable_to_review'))
+                ) THEN RAISE EXCEPTION 'invalid safety review request transition'; END IF;
+                IF NEW.status IN ('claimed', 'completed', 'unable_to_review') THEN
+                    SELECT EXISTS (SELECT 1 FROM safety_reviewer_grants g JOIN users u ON u.id = g.user_id WHERE g.user_id = NEW.reviewer_user_id AND g.status = 'active' AND u.is_active AND NOT u.is_demo) INTO reviewer_ok;
+                    IF NEW.reviewer_user_id = NEW.user_id THEN RAISE EXCEPTION 'self-review is not allowed'; END IF;
+                    IF NOT reviewer_ok OR NOT audience_ok OR consent_status != 'active' OR case_status NOT IN ('open', 'acknowledged') THEN RAISE EXCEPTION 'active reviewer, audience, consent and safety case are required'; END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            """
+            CREATE OR REPLACE FUNCTION enforce_safety_review_event() RETURNS trigger AS $$
+            DECLARE athlete_id INTEGER; assigned_reviewer INTEGER; request_status VARCHAR(40);
+            BEGIN
+                IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'safety review events are immutable'; END IF;
+                IF TG_OP = 'DELETE' THEN
+                    IF current_setting('runforfan.safety_review_erasure_user_id', true) = OLD.user_id::TEXT THEN RETURN OLD; END IF;
+                    RAISE EXCEPTION 'safety review events cannot be deleted directly';
+                END IF;
+                SELECT user_id, reviewer_user_id, status INTO athlete_id, assigned_reviewer, request_status FROM safety_review_requests WHERE id = NEW.request_id AND user_id = NEW.user_id;
+                IF NEW.actor_kind = 'athlete' AND NEW.actor_user_id != athlete_id THEN RAISE EXCEPTION 'athlete actor does not own review request'; END IF;
+                IF NEW.actor_kind = 'reviewer' AND NEW.actor_user_id != assigned_reviewer THEN RAISE EXCEPTION 'reviewer actor is not assigned to review request'; END IF;
+                IF (NEW.event_type = 'requested' AND request_status != 'requested')
+                    OR (NEW.event_type IN ('claimed', 'viewed', 'released') AND request_status != 'claimed')
+                    OR (NEW.event_type = 'completed' AND request_status != 'completed')
+                    OR (NEW.event_type = 'unable_to_review' AND request_status != 'unable_to_review')
+                    OR (NEW.event_type = 'withdrawn' AND request_status != 'withdrawn')
+                    OR (NEW.event_type = 'consent_revoked' AND request_status != 'cancelled_consent_revoked')
+                    OR (NEW.event_type = 'case_superseded' AND request_status != 'cancelled_case_superseded')
+                    OR (NEW.event_type = 'audience_revoked' AND request_status != 'cancelled_audience_revoked')
+                    OR (NEW.event_type = 'audience_not_enrolled' AND request_status != 'cancelled_not_enrolled') THEN RAISE EXCEPTION 'safety review event does not match request state'; END IF;
+                IF NEW.event_type IN ('completed', 'unable_to_review') AND NEW.disposition_code IS NULL THEN RAISE EXCEPTION 'review completion disposition is required'; END IF;
+                IF NEW.event_type NOT IN ('completed', 'unable_to_review') AND NEW.disposition_code IS NOT NULL THEN RAISE EXCEPTION 'disposition is only allowed for review completion'; END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            """
+            CREATE OR REPLACE FUNCTION require_safety_review_request_events() RETURNS trigger AS $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'requested') THEN RAISE EXCEPTION 'requested safety review event is required'; END IF;
+                IF NEW.status = 'claimed' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'claimed' AND actor_user_id = NEW.reviewer_user_id AND occurred_at = NEW.claimed_at) THEN RAISE EXCEPTION 'matching claimed safety review event is required'; END IF;
+                IF NEW.status = 'requested' AND TG_OP = 'UPDATE' AND OLD.status = 'claimed' AND NOT EXISTS (SELECT 1 FROM safety_review_events released WHERE released.request_id = NEW.id AND released.user_id = NEW.user_id AND released.event_type = 'released' AND released.id > COALESCE((SELECT max(claimed.id) FROM safety_review_events claimed WHERE claimed.request_id = NEW.id AND claimed.event_type = 'claimed'), 0)) THEN RAISE EXCEPTION 'matching released safety review event is required'; END IF;
+                IF NEW.status IN ('completed', 'unable_to_review') AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = NEW.status AND actor_user_id = NEW.reviewer_user_id AND occurred_at = NEW.completed_at AND disposition_code = NEW.disposition_code) THEN RAISE EXCEPTION 'matching completion safety review event is required'; END IF;
+                IF NEW.status = 'withdrawn' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'withdrawn' AND occurred_at = NEW.closed_at) THEN RAISE EXCEPTION 'matching withdrawn safety review event is required'; END IF;
+                IF NEW.status = 'cancelled_consent_revoked' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'consent_revoked' AND occurred_at = NEW.closed_at) THEN RAISE EXCEPTION 'matching consent revocation safety review event is required'; END IF;
+                IF NEW.status = 'cancelled_case_superseded' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'case_superseded' AND occurred_at = NEW.closed_at) THEN RAISE EXCEPTION 'matching supersession safety review event is required'; END IF;
+                IF NEW.status = 'cancelled_audience_revoked' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'audience_revoked' AND occurred_at = NEW.closed_at) THEN RAISE EXCEPTION 'matching audience revocation safety review event is required'; END IF;
+                IF NEW.status = 'cancelled_not_enrolled' AND NOT EXISTS (SELECT 1 FROM safety_review_events WHERE request_id = NEW.id AND user_id = NEW.user_id AND event_type = 'audience_not_enrolled' AND occurred_at = NEW.closed_at) THEN RAISE EXCEPTION 'matching audience cutoff safety review event is required'; END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            """
+            UPDATE safety_review_requests
+            SET status = 'cancelled_not_enrolled', closed_at = now(), updated_at = now()
+            WHERE status IN ('requested', 'claimed')
+              AND NOT EXISTS (
+                  SELECT 1 FROM safety_review_audience_enrollments enrollment
+                  WHERE enrollment.user_id = safety_review_requests.user_id AND enrollment.status = 'active'
+              )
+            """,
+            """
+            INSERT INTO safety_review_events (request_id, user_id, actor_user_id, event_type, actor_kind, disposition_code, occurred_at)
+            SELECT request.id, request.user_id, NULL, 'audience_not_enrolled', 'system', NULL, request.closed_at
+            FROM safety_review_requests request
+            WHERE request.status = 'cancelled_not_enrolled'
+              AND NOT EXISTS (
+                  SELECT 1 FROM safety_review_events event
+                  WHERE event.request_id = request.id AND event.event_type = 'audience_not_enrolled'
+              )
+            """,
+        ),
+    ),
 )
 
 

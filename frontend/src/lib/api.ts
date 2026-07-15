@@ -868,7 +868,7 @@ export type SafetyReviewState = {
   available: boolean
   policy_version: "safety-review-consent-v1"
   consent_status: "active" | "withdrawn" | "case_superseded" | null
-  request_status: "requested" | "claimed" | "completed" | "withdrawn" | "cancelled_consent_revoked" | "cancelled_case_superseded" | "unable_to_review" | null
+  request_status: "requested" | "claimed" | "completed" | "withdrawn" | "cancelled_consent_revoked" | "cancelled_case_superseded" | "cancelled_audience_revoked" | "cancelled_not_enrolled" | "unable_to_review" | null
   disposition_code: "reviewed_guidance_reiterated" | "seek_local_professional_support" | "insufficient_information" | "unable_to_review" | null
   requested_at: string | null
   completed_at: string | null

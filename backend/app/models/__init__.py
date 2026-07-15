@@ -34,6 +34,7 @@ from app.models.entities import (  # noqa: F401
     RunningGoal,
     SafetyEscalation,
     SafetyEscalationEvent,
+    SafetyReviewAudienceEnrollment,
     SafetyReviewConsent,
     SafetyReviewEvent,
     SafetyReviewerGrant,
