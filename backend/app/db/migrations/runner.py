@@ -961,6 +961,126 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "CREATE INDEX IF NOT EXISTS ix_coaching_events_delivery_scan ON coaching_events (user_id, created_at, id) WHERE event_type IN ('workout_completed', 'activity_imported')",
         ),
     ),
+    (
+        "20260715_0032_safety_escalations",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS safety_escalations (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                checkin_id INTEGER REFERENCES daily_readiness_checkins(id) ON DELETE SET NULL,
+                local_date DATE NOT NULL,
+                trigger_kind VARCHAR(48) NOT NULL,
+                severity VARCHAR(16) NOT NULL,
+                status VARCHAR(24) NOT NULL DEFAULT 'open',
+                rule_version VARCHAR(64) NOT NULL,
+                source_rule_version VARCHAR(64) NOT NULL,
+                source_rule_id VARCHAR(64) NOT NULL,
+                source_key VARCHAR(160) NOT NULL,
+                source_fingerprint VARCHAR(64) NOT NULL,
+                acknowledgement_code VARCHAR(48),
+                acknowledged_at TIMESTAMP WITH TIME ZONE,
+                superseded_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_safety_escalation_trigger CHECK (trigger_kind IN ('red_flag_stop', 'pain_requires_rest', 'return_to_run_ambiguous')),
+                CONSTRAINT ck_safety_escalation_severity CHECK (severity IN ('high', 'critical')),
+                CONSTRAINT ck_safety_escalation_status CHECK (status IN ('open', 'acknowledged', 'superseded')),
+                CONSTRAINT ck_safety_escalation_acknowledgement CHECK (acknowledgement_code IS NULL OR acknowledgement_code = 'understood_guidance'),
+                CONSTRAINT ck_safety_escalation_lifecycle CHECK ((status = 'open' AND acknowledged_at IS NULL AND acknowledgement_code IS NULL AND superseded_at IS NULL) OR (status = 'acknowledged' AND acknowledged_at IS NOT NULL AND acknowledgement_code IS NOT NULL AND superseded_at IS NULL) OR (status = 'superseded' AND superseded_at IS NOT NULL)),
+                CONSTRAINT uq_safety_escalation_owner UNIQUE (id, user_id),
+                CONSTRAINT uq_safety_escalation_source UNIQUE (user_id, source_fingerprint)
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_safety_escalation_active_user ON safety_escalations (user_id) WHERE status IN ('open', 'acknowledged')",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalations_user_id ON safety_escalations (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalations_checkin_id ON safety_escalations (checkin_id)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalations_local_date ON safety_escalations (local_date)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalations_trigger_kind ON safety_escalations (trigger_kind)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalations_status ON safety_escalations (status)",
+            """
+            CREATE TABLE IF NOT EXISTS safety_escalation_events (
+                id SERIAL PRIMARY KEY,
+                escalation_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                event_type VARCHAR(24) NOT NULL,
+                actor_kind VARCHAR(16) NOT NULL,
+                rule_version VARCHAR(64) NOT NULL,
+                metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_safety_escalation_event_type CHECK (event_type IN ('opened', 'acknowledged', 'superseded')),
+                CONSTRAINT ck_safety_escalation_event_actor CHECK (actor_kind IN ('system', 'athlete')),
+                CONSTRAINT ck_safety_escalation_event_pair CHECK ((event_type IN ('opened', 'superseded') AND actor_kind = 'system') OR (event_type = 'acknowledged' AND actor_kind = 'athlete')),
+                CONSTRAINT fk_safety_escalation_event_owner FOREIGN KEY (escalation_id, user_id) REFERENCES safety_escalations(id, user_id) ON DELETE CASCADE,
+                CONSTRAINT uq_safety_escalation_event_type UNIQUE (escalation_id, event_type)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalation_events_escalation_id ON safety_escalation_events (escalation_id)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalation_events_user_id ON safety_escalation_events (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_safety_escalation_events_occurred_at ON safety_escalation_events (occurred_at)",
+            """
+            CREATE OR REPLACE FUNCTION enforce_safety_escalation_transition() RETURNS trigger AS $$
+            BEGIN
+                IF NEW.user_id != OLD.user_id OR NEW.local_date != OLD.local_date OR NEW.source_key != OLD.source_key OR NEW.source_fingerprint != OLD.source_fingerprint OR NEW.rule_version != OLD.rule_version OR NEW.source_rule_version != OLD.source_rule_version OR NEW.source_rule_id != OLD.source_rule_id OR NEW.trigger_kind != OLD.trigger_kind OR NEW.severity != OLD.severity THEN
+                    RAISE EXCEPTION 'safety escalation identity is immutable';
+                END IF;
+                IF NEW.status != OLD.status AND NOT ((OLD.status = 'open' AND NEW.status IN ('acknowledged', 'superseded')) OR (OLD.status = 'acknowledged' AND NEW.status = 'superseded')) THEN
+                    RAISE EXCEPTION 'invalid safety escalation transition';
+                END IF;
+                IF NEW.status = OLD.status AND (NEW.acknowledgement_code IS DISTINCT FROM OLD.acknowledgement_code OR NEW.acknowledged_at IS DISTINCT FROM OLD.acknowledged_at OR NEW.superseded_at IS DISTINCT FROM OLD.superseded_at) THEN
+                    RAISE EXCEPTION 'safety escalation lifecycle fields require a transition';
+                END IF;
+                IF NEW.status = 'superseded' AND (NEW.acknowledgement_code IS DISTINCT FROM OLD.acknowledgement_code OR NEW.acknowledged_at IS DISTINCT FROM OLD.acknowledged_at) THEN
+                    RAISE EXCEPTION 'supersession cannot alter acknowledgement';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_safety_escalation_transition ON safety_escalations",
+            "CREATE TRIGGER trg_safety_escalation_transition BEFORE UPDATE ON safety_escalations FOR EACH ROW EXECUTE FUNCTION enforce_safety_escalation_transition()",
+            """
+            CREATE OR REPLACE FUNCTION enforce_safety_escalation_event() RETURNS trigger AS $$
+            DECLARE case_status VARCHAR(24);
+            BEGIN
+                IF TG_OP = 'UPDATE' THEN
+                    RAISE EXCEPTION 'safety escalation events are immutable';
+                END IF;
+                SELECT status INTO case_status FROM safety_escalations WHERE id = NEW.escalation_id AND user_id = NEW.user_id;
+                IF (NEW.event_type = 'opened' AND (NEW.actor_kind != 'system' OR case_status != 'open'))
+                    OR (NEW.event_type = 'acknowledged' AND (NEW.actor_kind != 'athlete' OR case_status != 'acknowledged'))
+                    OR (NEW.event_type = 'superseded' AND (NEW.actor_kind != 'system' OR case_status != 'superseded')) THEN
+                    RAISE EXCEPTION 'invalid safety escalation event';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_safety_escalation_event ON safety_escalation_events",
+            "CREATE TRIGGER trg_safety_escalation_event BEFORE INSERT OR UPDATE ON safety_escalation_events FOR EACH ROW EXECUTE FUNCTION enforce_safety_escalation_event()",
+            """
+            CREATE OR REPLACE FUNCTION require_safety_escalation_events() RETURNS trigger AS $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM safety_escalation_events WHERE escalation_id = NEW.id AND user_id = NEW.user_id AND event_type = 'opened') THEN
+                    RAISE EXCEPTION 'opened safety escalation event is required';
+                END IF;
+                IF NEW.status = 'acknowledged' AND NOT EXISTS (SELECT 1 FROM safety_escalation_events WHERE escalation_id = NEW.id AND user_id = NEW.user_id AND event_type = 'acknowledged') THEN
+                    RAISE EXCEPTION 'acknowledged safety escalation event is required';
+                END IF;
+                IF NEW.status = 'superseded' AND NOT EXISTS (SELECT 1 FROM safety_escalation_events WHERE escalation_id = NEW.id AND user_id = NEW.user_id AND event_type = 'superseded') THEN
+                    RAISE EXCEPTION 'superseded safety escalation event is required';
+                END IF;
+                IF NEW.status = 'superseded' AND NEW.acknowledged_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM safety_escalation_events WHERE escalation_id = NEW.id AND user_id = NEW.user_id AND event_type = 'acknowledged') THEN
+                    RAISE EXCEPTION 'acknowledgement history is required';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_safety_escalation_event_presence ON safety_escalations",
+            "CREATE CONSTRAINT TRIGGER trg_safety_escalation_event_presence AFTER INSERT OR UPDATE ON safety_escalations DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_safety_escalation_events()",
+        ),
+    ),
 )
 
 

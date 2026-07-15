@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachDeliveryPreferences, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachDeliveryPreferences, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type SafetyEscalationCurrent, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { coachPreviewExpired } from "@/lib/coach-preview"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
@@ -818,6 +818,8 @@ function App() {
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null)
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
   const [dailyReadiness, setDailyReadiness] = useState<DailyReadiness | null>(null)
+  const [safetyEscalation, setSafetyEscalation] = useState<SafetyEscalationCurrent | null>(null)
+  const [safetyEscalationError, setSafetyEscalationError] = useState("")
   const [athleteState, setAthleteState] = useState<AthleteState | null>(null)
   const [athleteStateError, setAthleteStateError] = useState("")
   const [weeklyReview, setWeeklyReview] = useState<WeeklyReview | null>(null)
@@ -836,6 +838,7 @@ function App() {
   const [status, setStatus] = useState("LOADING")
   const athleteStateRequests = useRef(createLatestRequestGate())
   const weeklyReviewRequests = useRef(createLatestRequestGate())
+  const safetyEscalationRequests = useRef(createLatestRequestGate())
 
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
@@ -895,6 +898,21 @@ function App() {
     }
   }
 
+  async function refreshSafetyEscalation() {
+    const requestId = safetyEscalationRequests.current.begin()
+    try {
+      const nextSafetyEscalation = await api.currentSafetyEscalation()
+      if (!safetyEscalationRequests.current.isLatest(requestId)) return
+      setSafetyEscalation(nextSafetyEscalation)
+      setSafetyEscalationError("")
+    } catch (error) {
+      if (!safetyEscalationRequests.current.isLatest(requestId)) return
+      console.error(error)
+      setSafetyEscalation(null)
+      setSafetyEscalationError(apiErrorMessage(error, uiText("Не удалось обновить safety status.", "Could not refresh safety status.")))
+    }
+  }
+
   async function refreshGlobal({ throwOnError = false }: { throwOnError?: boolean } = {}) {
     try {
       await devLogin()
@@ -913,7 +931,7 @@ function App() {
       setDailyReadiness(nextReadiness)
       setProviders(nextProviders)
       setStatus(authenticatedStatus())
-      await Promise.all([refreshAthleteState(), refreshWeeklyReview()])
+      await Promise.all([refreshAthleteState(), refreshWeeklyReview(), refreshSafetyEscalation()])
     } catch (error) {
       if (!authConfig.devLoginEnabled && isUnauthorized(error)) {
         clearAuthToken()
@@ -944,6 +962,7 @@ function App() {
       setSafety(nextSafety)
       setZones(nextZones)
       setMeasurements(nextMeasurements)
+      await refreshSafetyEscalation()
       if (nextCompleteness.score >= ONBOARDING_READY_SCORE) dismissOnboarding()
       setStatus(authenticatedStatus())
     } catch (error) {
@@ -1030,7 +1049,7 @@ function App() {
         <div className="min-w-0 max-w-full">
           <Topbar page={page} status={status} currentUser={currentUser} theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onMenu={() => setMobileOpen(true)} />
           <main className="min-w-0 max-w-full overflow-hidden p-4 md:p-6">
-            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} athleteState={athleteState} athleteStateError={athleteStateError} weeklyReview={weeklyReview} weeklyReviewError={weeklyReviewError} onRetryAthleteState={refreshAthleteState} onRetryWeeklyReview={refreshWeeklyReview} onReadinessChanged={(value) => { setDailyReadiness(value); void refreshAthleteState(); void refreshWeeklyReview() }} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
+            {page === "overview" && <Overview activities={activities} dashboard={dashboard} dailyReadiness={dailyReadiness} safetyEscalation={safetyEscalation} safetyEscalationError={safetyEscalationError} onRetrySafetyEscalation={refreshSafetyEscalation} onSafetyEscalationChanged={(value) => { setSafetyEscalation(value); setSafetyEscalationError("") }} athleteState={athleteState} athleteStateError={athleteStateError} weeklyReview={weeklyReview} weeklyReviewError={weeklyReviewError} onRetryAthleteState={refreshAthleteState} onRetryWeeklyReview={refreshWeeklyReview} onReadinessChanged={(value) => { setDailyReadiness(value); void refreshAthleteState(); void refreshWeeklyReview(); void refreshSafetyEscalation() }} onActionApplied={() => refreshGlobal({ throwOnError: true })} onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
             {page === "activities" && <Activities activities={activities} onImport={() => setPage("imports")} onChanged={refreshGlobal} />}
             {page === "imports" && <ImportsPage onChanged={refreshGlobal} />}
             {page === "calendar" && <CalendarPage onImport={() => setPage("imports")} onPlans={() => setPage("planning")} />}
@@ -1187,7 +1206,7 @@ function Topbar({ page, status, currentUser, theme, onThemeToggle, language, onL
   </header>
 }
 
-function Overview({ activities, dashboard, dailyReadiness, athleteState, athleteStateError, weeklyReview, weeklyReviewError, onRetryAthleteState, onRetryWeeklyReview, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; athleteState: AthleteState | null; athleteStateError: string; weeklyReview: WeeklyReview | null; weeklyReviewError: string; onRetryAthleteState: () => Promise<void>; onRetryWeeklyReview: () => Promise<void>; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
+function Overview({ activities, dashboard, dailyReadiness, safetyEscalation, safetyEscalationError, onRetrySafetyEscalation, onSafetyEscalationChanged, athleteState, athleteStateError, weeklyReview, weeklyReviewError, onRetryAthleteState, onRetryWeeklyReview, onReadinessChanged, onActionApplied, onImport, onPlans }: { activities: ActivityType[]; dashboard: DashboardSummary | null; dailyReadiness: DailyReadiness | null; safetyEscalation: SafetyEscalationCurrent | null; safetyEscalationError: string; onRetrySafetyEscalation: () => Promise<void>; onSafetyEscalationChanged: (value: SafetyEscalationCurrent) => void; athleteState: AthleteState | null; athleteStateError: string; weeklyReview: WeeklyReview | null; weeklyReviewError: string; onRetryAthleteState: () => Promise<void>; onRetryWeeklyReview: () => Promise<void>; onReadinessChanged: (value: DailyReadiness) => void; onActionApplied: () => Promise<void>; onImport: () => void; onPlans: () => void }) {
   const currentWeek = dashboard?.current_week
   const plan = dashboard?.active_plan
   const recentActivities = dashboard?.recent_activities?.length ? dashboard.recent_activities : activities
@@ -1197,6 +1216,7 @@ function Overview({ activities, dashboard, dailyReadiness, athleteState, athlete
   return <div className="grid gap-4">
     <WorkoutFocus todayWorkout={dashboard?.today_workout || null} nextWorkout={dashboard?.next_workout || null} currentWeek={currentWeek || null} activePlanTitle={plan?.title || null} onPlans={onPlans} onImport={onImport} />
     <DailyCoachCheckIn readiness={dailyReadiness} onChanged={onReadinessChanged} onActionApplied={onActionApplied} />
+    <SafetyEscalationCard state={safetyEscalation} loadError={safetyEscalationError} onRetry={onRetrySafetyEscalation} onChanged={onSafetyEscalationChanged} />
     <CoachConversationCard onActionApplied={onActionApplied} />
     <AthleteStateCard athleteState={athleteState} error={athleteStateError} onRetry={onRetryAthleteState} />
     <WeeklyReviewCard review={weeklyReview} error={weeklyReviewError} onRetry={onRetryWeeklyReview} onApplied={onActionApplied} />
@@ -1206,6 +1226,47 @@ function Overview({ activities, dashboard, dailyReadiness, athleteState, athlete
     </div>
     {showSignals ? <CollapsibleSection title={uiText("Перед тренировкой", "Before your workout")} summary={<Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{uiText("если нужно", "if needed")}</Badge>}><DashboardSignals dashboard={dashboard} /></CollapsibleSection> : null}
   </div>
+}
+
+function SafetyEscalationCard({ state, loadError, onRetry, onChanged }: { state: SafetyEscalationCurrent | null; loadError: string; onRetry: () => Promise<void>; onChanged: (value: SafetyEscalationCurrent) => void }) {
+  const escalation = state?.escalation
+  const [saving, setSaving] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const [error, setError] = useState("")
+  if (loadError) return <Card className="border-rose-400/40 bg-rose-500/[0.06] p-4" role="alert">
+    <p className="text-sm font-semibold text-rose-100">{uiText("Статус безопасности временно недоступен", "Safety status is temporarily unavailable")}</p>
+    <p className="mt-2 text-xs leading-5 text-zinc-400">{loadError} {uiText("Не полагайтесь на устаревшие данные; проверьте текущую readiness-рекомендацию.", "Do not rely on stale data; check the current readiness guidance.")}</p>
+    <Button className="mt-3" variant="secondary" disabled={retrying} onClick={() => { setRetrying(true); void onRetry().finally(() => setRetrying(false)) }}>{retrying ? uiText("Обновляем...", "Refreshing...") : uiText("Повторить", "Retry")}</Button>
+  </Card>
+  if (!state?.available || !escalation) return null
+  const escalationId = escalation.id
+
+  async function acknowledge() {
+    setSaving(true)
+    setError("")
+    try {
+      onChanged(await api.acknowledgeSafetyEscalation(escalationId))
+    } catch (caught) {
+      setError(apiErrorMessage(caught, uiText("Не удалось зафиксировать подтверждение. Обновите страницу и проверьте текущую рекомендацию.", "Could not record the acknowledgement. Refresh and check the current guidance.")))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <Card className="border-rose-400/40 bg-rose-500/[0.06]" role="region" aria-labelledby="safety-escalation-title">
+    <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+      <div className="min-w-0">
+        {escalation.status === "open" ? <p className="sr-only" role="alert">{uiText("Новая рекомендация по безопасности требует внимания.", "New safety guidance requires attention.")}</p> : null}
+        <div className="flex flex-wrap items-center gap-2"><p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200">{uiText("Граница безопасности", "Safety boundary")}</p><Badge className="border-rose-400/40 bg-rose-500/10 text-rose-100">{escalation.status === "acknowledged" ? uiText("прочитано", "acknowledged") : uiText("требует внимания", "needs attention")}</Badge></div>
+        <h2 id="safety-escalation-title" className="mt-2 text-lg font-semibold text-white">{escalation.title}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-200">{escalation.guidance}</p>
+        <p className="mt-3 max-w-3xl text-xs leading-5 text-zinc-500">{escalation.disclaimer}</p>
+        <p className="mt-2 text-xs leading-5 text-zinc-500">{uiText("Здесь нет дежурного специалиста или гарантированного человеческого ответа. Подтверждение прочтения не снимает ограничение и не меняет тренировочный план.", "There is no on-call specialist or guaranteed human response here. Acknowledgement does not clear the restriction or change your training plan.")}</p>
+        {error ? <p className="mt-3 text-xs text-rose-300" role="alert">{error}</p> : null}
+      </div>
+      {escalation.status === "open" ? <Button disabled={saving} onClick={acknowledge}>{saving ? uiText("Сохраняем...", "Saving...") : uiText("Я понял(а) рекомендацию", "I understand the guidance")}</Button> : <p className="max-w-xs rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-400" role="status">{uiText("Рекомендация прочитана. Ограничение остаётся активным, пока детерминированный сигнал безопасности не изменится.", "Guidance acknowledged. The restriction remains active until the deterministic safety input changes.")}</p>}
+    </div>
+  </Card>
 }
 
 type DailyCheckInDraft = {

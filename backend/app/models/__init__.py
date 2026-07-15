@@ -32,6 +32,8 @@ from app.models.entities import (  # noqa: F401
     PlanRollbackPreview,
     RecoverySignalObservation,
     RunningGoal,
+    SafetyEscalation,
+    SafetyEscalationEvent,
     ScreenshotSource,
     TrainingPlan,
     TrainingPlanRecommendationAudit,

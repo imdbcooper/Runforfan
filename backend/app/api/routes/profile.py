@@ -70,6 +70,15 @@ def update_profile(payload: AthleteProfileUpdate, user: User = Depends(get_curre
         invalidate_calculated_zones(db, user.id)
     if weight_changed:
         refresh_user_profile_dependent_activity_metrics(db, user.id)
+    if "recovery_status" in updates:
+        from app.services.readiness import daily_readiness_recommendation, recovery_summary_for_today, today_checkin, today_context
+        from app.services.safety_escalations import sync_escalation
+
+        db.flush()
+        checkin_date, _profile, workout = today_context(db, user)
+        checkin = today_checkin(db, user, checkin_date)
+        recommendation = daily_readiness_recommendation(checkin, profile, workout, recovery_summary_for_today(db, user, checkin_date, checkin))
+        sync_escalation(db, user, local_date=checkin_date, profile=profile, checkin=checkin, recommendation=recommendation)
     db.commit()
     db.refresh(profile)
     return profile_out(profile)

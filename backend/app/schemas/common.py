@@ -1169,6 +1169,31 @@ class EmptyRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class SafetyEscalationAcknowledgeIn(BaseModel):
+    acknowledgement: Literal["understood_guidance"]
+    model_config = {"extra": "forbid"}
+
+
+class SafetyEscalationOut(BaseModel):
+    id: int
+    trigger_kind: Literal["red_flag_stop", "pain_requires_rest", "return_to_run_ambiguous"]
+    severity: Literal["high", "critical"]
+    status: Literal["open", "acknowledged"]
+    rule_version: str
+    source_rule_id: str
+    local_date: date
+    title: str
+    guidance: str
+    acknowledged_at: datetime | None = None
+    created_at: datetime
+    disclaimer: str
+
+
+class SafetyEscalationCurrentOut(BaseModel):
+    available: bool
+    escalation: SafetyEscalationOut | None = None
+
+
 class DailyReadinessActionChangeOut(BaseModel):
     field: str
     before: object | None = None

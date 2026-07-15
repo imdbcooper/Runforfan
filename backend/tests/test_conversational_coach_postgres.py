@@ -349,7 +349,7 @@ class ConversationalCoachPostgresTests(unittest.TestCase):
             db.add(message)
             db.commit()
             exported = export_user_data(db, db.get(User, self.user_id))
-            self.assertEqual(exported["version"], "2026-07-15.0031")
+            self.assertEqual(exported["version"], "2026-07-15.0032")
             self.assertEqual(exported["coach_conversations"][0]["id"], conversation_id)
             self.assertIsNone(exported["coach_messages"][0]["content"])
             counts = delete_user_data(db, self.user_id)

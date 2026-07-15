@@ -491,6 +491,9 @@ def save_daily_readiness_checkin(db: Session, user: User, payload: DailyReadines
             payload={"notes": checkin.illness_notes},
         )
     result = readiness_to_dict(checkin_date, checkin, workout, current_recommendation)
+    from app.services.safety_escalations import sync_escalation
+
+    sync_escalation(db, user, local_date=checkin_date, profile=profile, checkin=checkin, recommendation=current_recommendation)
     db.commit()
     return result
 

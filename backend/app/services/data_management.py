@@ -37,6 +37,8 @@ from app.models import (
     PlanRollbackPreview,
     RecoverySignalObservation,
     RunningGoal,
+    SafetyEscalation,
+    SafetyEscalationEvent,
     ScreenshotSource,
     TrainingPlan,
     TrainingPlanRecommendationAudit,
@@ -159,7 +161,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-15.0031",
+        "version": "2026-07-15.0032",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -186,6 +188,8 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "coach_delivery_preference": model_to_dict(coach_delivery_preference, exclude={"telegram_chat_id"}) if coach_delivery_preference else None,
         "coach_deliveries": [model_to_dict(item) for item in db.scalars(select(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDelivery.created_at.asc()))],
         "coach_delivery_attempts": [model_to_dict(item) for item in db.scalars(select(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDeliveryAttempt.created_at.asc(), CoachDeliveryAttempt.id.asc()))],
+        "safety_escalations": [model_to_dict(item, exclude={"source_key", "source_fingerprint"}) for item in db.scalars(select(SafetyEscalation).where(SafetyEscalation.user_id == user.id).order_by(SafetyEscalation.created_at.asc(), SafetyEscalation.id.asc()))],
+        "safety_escalation_events": [model_to_dict(item) for item in db.scalars(select(SafetyEscalationEvent).where(SafetyEscalationEvent.user_id == user.id).order_by(SafetyEscalationEvent.occurred_at.asc(), SafetyEscalationEvent.id.asc()))],
         "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -209,6 +213,8 @@ def count_rows_for_user(db: Session, model: Any, user_id: int) -> int:
 
 
 DELETE_MODELS: tuple[tuple[str, Any], ...] = (
+    ("safety_escalation_events", SafetyEscalationEvent),
+    ("safety_escalations", SafetyEscalation),
     ("coach_delivery_attempts", CoachDeliveryAttempt),
     ("coach_deliveries", CoachDelivery),
     ("coach_delivery_preferences", CoachDeliveryPreference),

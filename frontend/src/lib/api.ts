@@ -844,6 +844,26 @@ export type DailyReadiness = {
   saved_recommendation: DailyReadinessRecommendation | null
 }
 
+export type SafetyEscalation = {
+  id: number
+  trigger_kind: "red_flag_stop" | "pain_requires_rest" | "return_to_run_ambiguous"
+  severity: "high" | "critical"
+  status: "open" | "acknowledged"
+  rule_version: string
+  source_rule_id: string
+  local_date: string
+  title: string
+  guidance: string
+  acknowledged_at: string | null
+  created_at: string
+  disclaimer: string
+}
+
+export type SafetyEscalationCurrent = {
+  available: boolean
+  escalation: SafetyEscalation | null
+}
+
 export type DailyReadinessActionChange = {
   field: string
   before: unknown
@@ -1672,6 +1692,8 @@ export const api = {
   applyWeeklyStrategy: (previewId: string) => request<WeeklyStrategyApplyResult>(`/weekly-reviews/strategy-previews/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   todayReadiness: () => request<DailyReadiness>("/readiness/today"),
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
+  currentSafetyEscalation: () => request<SafetyEscalationCurrent>("/safety-escalations/current"),
+  acknowledgeSafetyEscalation: (id: number) => request<SafetyEscalationCurrent>(`/safety-escalations/${id}/acknowledge`, { method: "POST", body: JSON.stringify({ acknowledgement: "understood_guidance" }) }),
   previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),
   applyTodayReadinessAction: (previewId: string) => request<DailyReadinessActionApplyResult>(`/readiness/today/actions/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   coachConversations: (limit = 20, offset = 0) => request<CoachConversation[]>(`/coach/conversations?limit=${limit}&offset=${offset}`),

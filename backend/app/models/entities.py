@@ -51,6 +51,7 @@ class User(Base, TimestampMixin):
     coach_llm_attempts: Mapped[list["CoachLlmAttempt"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     coach_delivery_preference: Mapped["CoachDeliveryPreference | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
     coach_deliveries: Mapped[list["CoachDelivery"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    safety_escalations: Mapped[list["SafetyEscalation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -478,6 +479,61 @@ class DailyReadinessCheckIn(Base, TimestampMixin):
     recommendation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     user: Mapped[User] = relationship(back_populates="daily_readiness_checkins")
+
+
+class SafetyEscalation(Base, TimestampMixin):
+    __tablename__ = "safety_escalations"
+    __table_args__ = (
+        CheckConstraint("trigger_kind IN ('red_flag_stop', 'pain_requires_rest', 'return_to_run_ambiguous')", name="ck_safety_escalation_trigger"),
+        CheckConstraint("severity IN ('high', 'critical')", name="ck_safety_escalation_severity"),
+        CheckConstraint("status IN ('open', 'acknowledged', 'superseded')", name="ck_safety_escalation_status"),
+        CheckConstraint("acknowledgement_code IS NULL OR acknowledgement_code = 'understood_guidance'", name="ck_safety_escalation_acknowledgement"),
+        CheckConstraint("(status = 'open' AND acknowledged_at IS NULL AND acknowledgement_code IS NULL AND superseded_at IS NULL) OR (status = 'acknowledged' AND acknowledged_at IS NOT NULL AND acknowledgement_code IS NOT NULL AND superseded_at IS NULL) OR (status = 'superseded' AND superseded_at IS NOT NULL)", name="ck_safety_escalation_lifecycle"),
+        UniqueConstraint("id", "user_id", name="uq_safety_escalation_owner"),
+        UniqueConstraint("user_id", "source_fingerprint", name="uq_safety_escalation_source"),
+        Index("uq_safety_escalation_active_user", "user_id", unique=True, postgresql_where=text("status IN ('open', 'acknowledged')"), sqlite_where=text("status IN ('open', 'acknowledged')")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    checkin_id: Mapped[int | None] = mapped_column(ForeignKey("daily_readiness_checkins.id", ondelete="SET NULL"), index=True)
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    trigger_kind: Mapped[str] = mapped_column(String(48), index=True)
+    severity: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    rule_version: Mapped[str] = mapped_column(String(64))
+    source_rule_version: Mapped[str] = mapped_column(String(64))
+    source_rule_id: Mapped[str] = mapped_column(String(64))
+    source_key: Mapped[str] = mapped_column(String(160))
+    source_fingerprint: Mapped[str] = mapped_column(String(64))
+    acknowledgement_code: Mapped[str | None] = mapped_column(String(48))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="safety_escalations")
+    events: Mapped[list["SafetyEscalationEvent"]] = relationship(back_populates="escalation", cascade="all, delete-orphan")
+
+
+class SafetyEscalationEvent(Base):
+    __tablename__ = "safety_escalation_events"
+    __table_args__ = (
+        CheckConstraint("event_type IN ('opened', 'acknowledged', 'superseded')", name="ck_safety_escalation_event_type"),
+        CheckConstraint("actor_kind IN ('system', 'athlete')", name="ck_safety_escalation_event_actor"),
+        CheckConstraint("(event_type IN ('opened', 'superseded') AND actor_kind = 'system') OR (event_type = 'acknowledged' AND actor_kind = 'athlete')", name="ck_safety_escalation_event_pair"),
+        ForeignKeyConstraint(["escalation_id", "user_id"], ["safety_escalations.id", "safety_escalations.user_id"], ondelete="CASCADE", name="fk_safety_escalation_event_owner"),
+        UniqueConstraint("escalation_id", "event_type", name="uq_safety_escalation_event_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    escalation_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(24))
+    actor_kind: Mapped[str] = mapped_column(String(16))
+    rule_version: Mapped[str] = mapped_column(String(64))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    escalation: Mapped[SafetyEscalation] = relationship(back_populates="events")
 
 
 class DailyReadinessActionPreview(Base):
