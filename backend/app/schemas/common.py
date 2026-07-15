@@ -1194,6 +1194,63 @@ class SafetyEscalationCurrentOut(BaseModel):
     escalation: SafetyEscalationOut | None = None
 
 
+class SafetyReviewConsentIn(BaseModel):
+    policy_version: Literal["safety-review-consent-v1"]
+    model_config = {"extra": "forbid"}
+
+
+class SafetyReviewRequestIn(BaseModel):
+    request: Literal["human_review"]
+    model_config = {"extra": "forbid"}
+
+
+class SafetyReviewStateOut(BaseModel):
+    available: bool
+    policy_version: Literal["safety-review-consent-v1"]
+    consent_status: Literal["active", "withdrawn", "case_superseded"] | None = None
+    request_status: Literal["requested", "claimed", "completed", "withdrawn", "cancelled_consent_revoked", "cancelled_case_superseded", "unable_to_review"] | None = None
+    disposition_code: Literal["reviewed_guidance_reiterated", "seek_local_professional_support", "insufficient_information", "unable_to_review"] | None = None
+    requested_at: datetime | None = None
+    completed_at: datetime | None = None
+    disclaimer: str
+
+
+class SafetyReviewerQueueItemOut(BaseModel):
+    id: int
+    status: Literal["requested", "claimed"]
+    requested_at: datetime
+    claimed_at: datetime | None = None
+
+
+class SafetyReviewerCapabilityOut(BaseModel):
+    available: Literal[True]
+
+
+class SafetyReviewContextOut(SafetyReviewerQueueItemOut):
+    trigger_kind: Literal["red_flag_stop", "pain_requires_rest", "return_to_run_ambiguous"]
+    severity: Literal["high", "critical"]
+    case_status: Literal["open", "acknowledged"]
+    rule_version: str
+    source_rule_id: str
+    local_date: date
+    title: str
+    guidance: str
+    disclaimer: str
+
+
+class SafetyReviewCompleteIn(BaseModel):
+    disposition_code: Literal["reviewed_guidance_reiterated", "seek_local_professional_support", "insufficient_information", "unable_to_review"]
+    model_config = {"extra": "forbid"}
+
+
+class SafetyReviewResultOut(BaseModel):
+    id: int
+    status: Literal["completed", "unable_to_review"]
+    disposition_code: Literal["reviewed_guidance_reiterated", "seek_local_professional_support", "insufficient_information", "unable_to_review"]
+    completed_at: datetime
+    disclaimer: str
+
+
 class DailyReadinessActionChangeOut(BaseModel):
     field: str
     before: object | None = None

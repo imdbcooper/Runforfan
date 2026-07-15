@@ -1,4 +1,4 @@
-import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, Goal, HeartPulse, Menu, Moon, Send, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
+import { Activity, BatteryCharging, BookOpen, Bot, CalendarDays, ChartSpline, ClipboardCheck, Goal, HeartPulse, Menu, Moon, Send, Settings, Shield, Sun, Trophy, Upload, X, Zap } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 
@@ -10,14 +10,14 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Select } from "@/components/ui/select"
-import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachDeliveryPreferences, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type SafetyEscalationCurrent, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
+import { api, type Activity as ActivityType, type ActivityValidation, type AnalyticsInsight, type AnalyticsSummary, type AnalyticsTimeseries, type AthleteMeasurement, type AthleteProfile, type AthleteState, type AthleteStateSignal, type AuditLogEntry, authConfig, type AuthUser, type CalendarEvent, type CalendarResponse, clearAuthToken, type CoachAction, type CoachActionPreview, type CoachContext, type CoachConversation, type CoachDeliveryPreferences, type CoachMemoryUpdate, type CoachMessage, type CoachPreviewResult, type CsvImportResult, type DailyReadiness, type DailyReadinessActionPreview, type DashboardSummary, devLogin, hasAuthToken, type ImportBatch, type ImportUploadResult, type Integration, type LlmProvider, type LlmProviderTest, onAuthExpired, type PerformancePaceZone, type PerformancePb, type PerformancePrediction, type PerformanceResult, type PerformanceVdot, type Plan, type PlanActivityMatchCandidate, type PlanBuilderPreview, type PlanRecommendationAudit, type PlanRecommendationPreview, type PlanRecommendations, type PlanRollbackPreview, type PlanVersion, type PlanWeekSummary, type PlanWorkout, type PlanWorkoutMatchCandidate, type ProfileCompleteness, type RunningGoal, type SafetyCheck, type SafetyEscalationCurrent, type SafetyReviewContext, type SafetyReviewerQueueItem, type SafetyReviewResult, type SafetyReviewState, telegramBotLink, telegramLogin, type TelegramLoginPayload, telegramStartCodeLogin, type TrainingLoadDaily, type TrainingLoadDailyPoint, type TrainingLoadFitnessFatigue, type TrainingLoadMaterializationStatus, type TrainingLoadWarning, type TrainingLoadWeekly, type WeeklyReview, type WeeklyStrategyPreview, type WorkoutMissReason, type Zone, type ZoneDistribution, type ZoneDistributionItem, type ZonePlannedActual, type Zones } from "@/lib/api"
 import { coachPreviewExpired } from "@/lib/coach-preview"
 import { getInitialLanguage, languageLocale, saveLanguage, type Language, useDomTranslations } from "@/lib/i18n"
 import { createLatestRequestGate } from "@/lib/latest-request"
 import { trustedTelegramUrl } from "@/lib/trusted-url"
 import { cn } from "@/lib/utils"
 
-type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "settings"
+type Page = "overview" | "activities" | "imports" | "calendar" | "analytics" | "load" | "zones" | "performance" | "goals" | "profile" | "planning" | "review" | "settings"
 type Theme = "dark" | "light"
 type FeedbackDraft = { rpe: string; soreness_0_10: string; fatigue: string; pain: boolean; pain_level: string; sleep_quality_0_10: string; sleep_quality: string; pain_notes: string; user_notes: string; weather_notes: string; notes: string }
 type CompletionDraft = FeedbackDraft & { actual_distance_km: string; actual_duration_minutes: string; average_heart_rate_bpm: string; completed_at: string }
@@ -195,6 +195,7 @@ const secondaryNav = [
   ["load", "Нагрузка", "Load", BatteryCharging],
   ["zones", "Зоны", "Zones", Shield],
   ["performance", "Форма", "Performance", Trophy],
+  ["review", "Проверка безопасности", "Safety review", ClipboardCheck],
   ["settings", "Настройки", "Settings", Settings],
 ] as const
 
@@ -210,6 +211,7 @@ const PAGE_PATHS: Record<Page, string> = {
   goals: "/goals",
   profile: "/profile",
   planning: "/planning",
+  review: "/review",
   settings: "/settings",
 }
 
@@ -429,6 +431,10 @@ function apiErrorMessage(caught: unknown, fallback: string) {
 
 function isUnauthorized(caught: unknown) {
   return caught instanceof Error && caught.message.startsWith("401:")
+}
+
+function isForbiddenOrNotFound(caught: unknown) {
+  return caught instanceof Error && (caught.message.startsWith("403:") || caught.message.startsWith("404:"))
 }
 
 function csvNumbers(value: FormDataEntryValue | null) {
@@ -831,6 +837,7 @@ function App() {
   const [zones, setZones] = useState<Zones | null>(null)
   const [measurements, setMeasurements] = useState<AthleteMeasurement[]>([])
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [reviewerCapability, setReviewerCapability] = useState<"loading" | "allowed" | "denied" | "error">("loading")
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeStorageGet(ONBOARDING_DISMISSED_KEY) === "true")
   const [authReady, setAuthReady] = useState(() => authConfig.devLoginEnabled || hasAuthToken())
   const [authExchangePending, setAuthExchangePending] = useState(() => new URLSearchParams(window.location.search).has("telegram_login_code"))
@@ -839,6 +846,7 @@ function App() {
   const athleteStateRequests = useRef(createLatestRequestGate())
   const weeklyReviewRequests = useRef(createLatestRequestGate())
   const safetyEscalationRequests = useRef(createLatestRequestGate())
+  const reviewerCapabilityRequests = useRef(createLatestRequestGate())
 
   function dismissOnboarding() {
     safeStorageSet(ONBOARDING_DISMISSED_KEY, "true")
@@ -947,6 +955,18 @@ function App() {
     }
   }
 
+  async function refreshReviewerCapability() {
+    const requestId = reviewerCapabilityRequests.current.begin()
+    setReviewerCapability("loading")
+    try {
+      await api.safetyReviewerCapability()
+      if (reviewerCapabilityRequests.current.isLatest(requestId)) setReviewerCapability("allowed")
+    } catch (error) {
+      if (!reviewerCapabilityRequests.current.isLatest(requestId)) return
+      setReviewerCapability(isUnauthorized(error) || isForbiddenOrNotFound(error) ? "denied" : "error")
+    }
+  }
+
   async function refreshProfileData() {
     try {
       await devLogin()
@@ -988,6 +1008,14 @@ function App() {
     if (authReady) void refreshGlobal()
   }, [authReady])
   useEffect(() => {
+    if (!currentUser) {
+      reviewerCapabilityRequests.current.begin()
+      setReviewerCapability("loading")
+      return
+    }
+    void refreshReviewerCapability()
+  }, [currentUser?.id])
+  useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light")
     document.documentElement.classList.toggle("dark", theme === "dark")
     document.documentElement.style.colorScheme = theme
@@ -1028,8 +1056,11 @@ function App() {
     if (authReady && page === "profile") void refreshProfileData()
   }, [authReady, page])
   useEffect(() => {
-    if (onboardingRequired && page !== "profile") navigate(PAGE_PATHS.profile, { replace: true })
-  }, [onboardingRequired, page, navigate])
+    if (onboardingRequired && page !== "profile" && !(page === "review" && reviewerCapability !== "denied")) navigate(PAGE_PATHS.profile, { replace: true })
+  }, [onboardingRequired, page, reviewerCapability, navigate])
+  useEffect(() => {
+    if (reviewerCapability === "denied" && page === "review") navigate(PAGE_PATHS.overview, { replace: true })
+  }, [reviewerCapability, page, navigate])
   useDomTranslations(language)
 
   if (!authReady) return <TelegramLoginGate theme={theme} onThemeToggle={toggleTheme} language={language} onLanguageChange={changeLanguage} onLogin={loginWithTelegram} initialError={authError} loading={authExchangePending} />
@@ -1037,12 +1068,12 @@ function App() {
   return (
     <div className="min-h-screen bg-[#090909] text-zinc-100">
       <div className="grid min-h-screen lg:grid-cols-[14rem_1fr]">
-        <Sidebar page={page} setPage={setPage} className="hidden lg:block" />
+        <Sidebar page={page} setPage={setPage} reviewerCapability={reviewerCapability === "allowed"} className="hidden lg:block" />
         {mobileOpen && <>
           <button aria-label={uiText("Закрыть меню", "Close menu overlay")} className="fixed inset-0 z-40 bg-black/70" onClick={() => setMobileOpen(false)} />
           <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[86vw] overflow-y-auto border-r border-zinc-800 bg-[#111] lg:hidden">
             <div className="flex h-12 items-center justify-end border-b border-zinc-800 px-2"><Button variant="ghost" size="icon" aria-label={uiText("Закрыть меню", "Close menu")} onClick={() => setMobileOpen(false)}><X /></Button></div>
-            <Sidebar page={page} setPage={(next) => { setPage(next); setMobileOpen(false) }} />
+            <Sidebar page={page} setPage={(next) => { setPage(next); setMobileOpen(false) }} reviewerCapability={reviewerCapability === "allowed"} />
           </aside>
         </>}
 
@@ -1060,6 +1091,9 @@ function App() {
             {page === "goals" && <GoalsRaces />}
             {page === "profile" && <ProfileZones profile={profile} completeness={completeness} safety={safety} zones={zones} measurements={measurements} onboardingMode={onboardingRequired} onDismissOnboarding={dismissOnboarding} onChanged={refreshProfileData} />}
             {page === "planning" && <Planning />}
+            {page === "review" && reviewerCapability === "loading" && <Card className="p-4 text-xs text-zinc-500" role="status">{uiText("Проверяем доступ reviewer...", "Checking reviewer access...")}</Card>}
+            {page === "review" && reviewerCapability === "error" && <Card className="border-rose-400/30 bg-rose-500/[0.06] p-4" role="alert"><p className="text-sm font-semibold text-rose-100">{uiText("Не удалось проверить reviewer access", "Could not verify reviewer access")}</p><p className="mt-2 text-xs text-zinc-400">{uiText("Это временная ошибка, а не отказ в доступе.", "This is a temporary error, not an access denial.")}</p><Button className="mt-3" size="sm" variant="secondary" onClick={() => void refreshReviewerCapability()}>{uiText("Повторить", "Retry")}</Button></Card>}
+            {page === "review" && reviewerCapability === "allowed" && <SafetyReviewerWorkspace />}
             {page === "settings" && <SettingsPage providers={providers} onChanged={refreshGlobal} />}
           </main>
         </div>
@@ -1137,7 +1171,7 @@ function TelegramLoginGate({ theme, onThemeToggle, language, onLanguageChange, o
   </div>
 }
 
-function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Page) => void; className?: string }) {
+function Sidebar({ page, setPage, reviewerCapability, className }: { page: Page; setPage: (page: Page) => void; reviewerCapability: boolean; className?: string }) {
   const navButton = ([key, ruLabel, enLabel, Icon]: (typeof primaryNav | typeof secondaryNav)[number]) => {
     const active = page === key
     return <button key={key} onClick={() => setPage(key)} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors lg:min-h-9 lg:px-2 lg:text-xs", active ? "bg-zinc-800 text-white before:absolute before:left-0 before:top-2 before:h-7 before:w-0.5 before:bg-orange-400 lg:before:top-1 lg:before:h-7" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")}><Icon className="h-4 w-4" />{uiText(ruLabel, enLabel)}</button>
@@ -1152,7 +1186,7 @@ function Sidebar({ page, setPage, className }: { page: Page; setPage: (page: Pag
       {primaryNav.map(navButton)}
       <details className="group pt-2" open={secondaryNav.some(([key]) => key === page)}>
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md px-3 text-xs font-semibold text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 lg:min-h-9 lg:px-2 [&::-webkit-details-marker]:hidden"><span>{uiText("Еще", "More")}</span><span className="text-orange-300 group-open:hidden">+</span><span className="hidden text-zinc-500 group-open:inline">-</span></summary>
-        <div className="mt-1 space-y-1 pl-1">{secondaryNav.map(navButton)}</div>
+        <div className="mt-1 space-y-1 pl-1">{secondaryNav.filter(([key]) => key !== "review" || reviewerCapability).map(navButton)}</div>
       </details>
     </nav>
     <div className="mt-4 border-t border-zinc-800 p-2">
@@ -1262,11 +1296,221 @@ function SafetyEscalationCard({ state, loadError, onRetry, onChanged }: { state:
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-200">{escalation.guidance}</p>
         <p className="mt-3 max-w-3xl text-xs leading-5 text-zinc-500">{escalation.disclaimer}</p>
         <p className="mt-2 text-xs leading-5 text-zinc-500">{uiText("Здесь нет дежурного специалиста или гарантированного человеческого ответа. Подтверждение прочтения не снимает ограничение и не меняет тренировочный план.", "There is no on-call specialist or guaranteed human response here. Acknowledgement does not clear the restriction or change your training plan.")}</p>
+        <SafetyReviewControls escalationId={escalationId} />
         {error ? <p className="mt-3 text-xs text-rose-300" role="alert">{error}</p> : null}
       </div>
       {escalation.status === "open" ? <Button disabled={saving} onClick={acknowledge}>{saving ? uiText("Сохраняем...", "Saving...") : uiText("Я понял(а) рекомендацию", "I understand the guidance")}</Button> : <p className="max-w-xs rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-400" role="status">{uiText("Рекомендация прочитана. Ограничение остаётся активным, пока детерминированный сигнал безопасности не изменится.", "Guidance acknowledged. The restriction remains active until the deterministic safety input changes.")}</p>}
     </div>
   </Card>
+}
+
+function SafetyReviewControls({ escalationId }: { escalationId: number }) {
+  const [state, setState] = useState<SafetyReviewState | null>(null)
+  const [consentConfirmed, setConsentConfirmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const stateRequests = useRef(createLatestRequestGate())
+
+  useEffect(() => {
+    const requestId = stateRequests.current.begin()
+    let cancelled = false
+    setState(null)
+    setError("")
+    void api.safetyReviewState(escalationId).then((next) => {
+      if (!cancelled && stateRequests.current.isLatest(requestId)) setState(next)
+    }).catch((caught) => {
+      if (!cancelled && stateRequests.current.isLatest(requestId)) setError(apiErrorMessage(caught, uiText("Статус human review временно недоступен.", "Human review status is temporarily unavailable.")))
+    })
+    return () => {
+      cancelled = true
+      stateRequests.current.begin()
+    }
+  }, [escalationId])
+
+  async function mutate(action: () => Promise<SafetyReviewState>) {
+    const requestId = stateRequests.current.begin()
+    setBusy(true)
+    setError("")
+    try {
+      const nextState = await action()
+      if (stateRequests.current.isLatest(requestId)) setState(nextState)
+    } catch (caught) {
+      if (stateRequests.current.isLatest(requestId)) setError(apiErrorMessage(caught, uiText("Не удалось изменить запрос на проверку.", "Could not update the review request.")))
+    } finally {
+      if (stateRequests.current.isLatest(requestId)) setBusy(false)
+    }
+  }
+
+  if (error && !state) return <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-400" role="status">{error}</p>
+  if (!state?.available) return null
+
+  const requestActive = state.request_status === "requested" || state.request_status === "claimed"
+  const requestFinished = state.request_status === "completed" || state.request_status === "unable_to_review"
+  const dispositionLabels: Record<string, string> = {
+    reviewed_guidance_reiterated: uiText("Проверена и повторена исходная рекомендация", "Original guidance reviewed and reiterated"),
+    seek_local_professional_support: uiText("Рекомендована местная профессиональная помощь", "Local professional support recommended"),
+    insufficient_information: uiText("Недостаточно bounded-данных для проверки", "Insufficient bounded information to review"),
+    unable_to_review: uiText("Проверка не выполнена", "Unable to review"),
+  }
+
+  return <div className="mt-4 max-w-3xl rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-400" aria-label={uiText("Асинхронная человеческая проверка", "Asynchronous human review")}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="font-semibold text-zinc-200">{uiText("Асинхронная human review", "Asynchronous human review")}</p>
+      <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{state.request_status || (state.consent_status === "active" ? uiText("согласие дано", "consent active") : uiText("не запрошено", "not requested"))}</Badge>
+    </div>
+    <p className="mt-2">{uiText("Проверяющий увидит обезличенный ID запроса, его статус, время создания и время назначения, если оно состоялось. После назначения также будут доступны тип и серьёзность safety boundary, статус case, дата, версия правила, ID исходного правила, заголовок, эта же рекомендация и системное предупреждение. Профиль, check-in, заметки, тренировки и контакты не передаются.", "A reviewer sees an opaque request ID, status, request time, and claim time when assigned. After assignment, they can also see the safety boundary type and severity, case status, date, rule version, source rule ID, title, this same guidance, and the system disclaimer. Profile, check-in, notes, workouts, and contact details are not shared.")}</p>
+    <p className="mt-2 text-zinc-500">{state.disclaimer}</p>
+    {!state.consent_status ? <div className="mt-3 grid gap-3">
+      <label className="flex items-start gap-2 text-zinc-300"><input className="mt-1 h-4 w-4 accent-orange-400" type="checkbox" checked={consentConfirmed} disabled={busy} onChange={(event) => setConsentConfirmed(event.target.checked)} /><span>{uiText("Я явно соглашаюсь передать перечисленный bounded context provisioned reviewer по политике safety-review-consent-v1.", "I explicitly consent to share the listed bounded context with a provisioned reviewer under safety-review-consent-v1.")}</span></label>
+      <div><Button size="sm" variant="secondary" disabled={!consentConfirmed || busy} onClick={() => void mutate(() => api.grantSafetyReviewConsent(escalationId))}>{busy ? uiText("Сохраняем...", "Saving...") : uiText("Зафиксировать согласие", "Record consent")}</Button></div>
+    </div> : null}
+    {state.consent_status === "active" && !state.request_status ? <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={() => void mutate(() => api.requestSafetyReview(escalationId))}>{busy ? uiText("Создаём...", "Creating...") : uiText("Запросить human review", "Request human review")}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => void mutate(() => api.withdrawSafetyReviewConsent(escalationId))}>{uiText("Отозвать согласие", "Withdraw consent")}</Button></div> : null}
+    {requestActive ? <div className="mt-3 flex flex-wrap items-center gap-3"><p role="status">{state.request_status === "claimed" ? uiText("Запрос взят provisioned reviewer. Срок ответа не гарантирован.", "A provisioned reviewer claimed the request. No response time is guaranteed.") : uiText("Запрос находится в очереди без гарантированного срока ответа.", "The request is queued with no guaranteed response time.")}</p><Button size="sm" variant="secondary" disabled={busy} onClick={() => void mutate(() => api.withdrawSafetyReviewConsent(escalationId))}>{uiText("Отозвать согласие и запрос", "Withdraw consent and request")}</Button></div> : null}
+    {requestFinished ? <div className="mt-3 rounded-md border border-zinc-800 bg-black/30 px-3 py-2" role="status"><p className="font-medium text-zinc-200">{state.disposition_code ? dispositionLabels[state.disposition_code] : uiText("Проверка завершена", "Review completed")}</p><p className="mt-1 text-zinc-500">{uiText("Это не медицинский допуск и не изменение плана.", "This is not medical clearance or a plan change.")}</p></div> : null}
+    {state.consent_status === "withdrawn" ? <p className="mt-3 text-zinc-500" role="status">{uiText("Согласие отозвано. Reviewer access закрыт; повторно открыть этот case нельзя.", "Consent was withdrawn. Reviewer access is closed and this case cannot be reopened.")}</p> : null}
+    {error ? <p className="mt-3 text-rose-300" role="alert">{error}</p> : null}
+  </div>
+}
+
+function SafetyReviewerWorkspace() {
+  const [queue, setQueue] = useState<SafetyReviewerQueueItem[]>([])
+  const [context, setContext] = useState<SafetyReviewContext | null>(null)
+  const [disposition, setDisposition] = useState<SafetyReviewResult["disposition_code"]>("reviewed_guidance_reiterated")
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const [result, setResult] = useState("")
+  const queueRequests = useRef(createLatestRequestGate())
+  const contextRequests = useRef(createLatestRequestGate())
+
+  const queueStatusLabels: Record<SafetyReviewerQueueItem["status"], string> = {
+    requested: uiText("ожидает", "requested"),
+    claimed: uiText("в работе", "claimed"),
+  }
+
+  const dispositionLabels: Record<SafetyReviewResult["disposition_code"], string> = {
+    reviewed_guidance_reiterated: uiText("Проверена и повторена исходная рекомендация", "Original guidance reviewed and reiterated"),
+    seek_local_professional_support: uiText("Рекомендована местная профессиональная помощь", "Local professional support recommended"),
+    insufficient_information: uiText("Недостаточно доступных данных для проверки", "Insufficient bounded information to review"),
+    unable_to_review: uiText("Проверку выполнить не удалось", "Unable to review"),
+  }
+
+  async function loadQueue() {
+    const requestId = queueRequests.current.begin()
+    setLoading(true)
+    setError("")
+    try {
+      const nextQueue = await api.safetyReviewerQueue()
+      if (!queueRequests.current.isLatest(requestId)) return
+      setQueue(nextQueue)
+      setContext((current) => current && nextQueue.some((item) => item.id === current.id && item.status === "claimed") ? current : null)
+    } catch (caught) {
+      if (!queueRequests.current.isLatest(requestId)) return
+      setQueue([])
+      setContext(null)
+      setError(apiErrorMessage(caught, uiText("Очередь проверок временно недоступна.", "Reviewer queue is temporarily unavailable.")))
+    } finally {
+      if (queueRequests.current.isLatest(requestId)) setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadQueue()
+    const intervalId = window.setInterval(() => void loadQueue(), 15_000)
+    return () => {
+      window.clearInterval(intervalId)
+      queueRequests.current.begin()
+      contextRequests.current.begin()
+    }
+  }, [])
+
+  async function claim(item: SafetyReviewerQueueItem) {
+    const requestId = contextRequests.current.begin()
+    queueRequests.current.begin()
+    setBusy(true)
+    setContext(null)
+    setError("")
+    setResult("")
+    try {
+      const nextContext = item.status === "claimed" ? await api.safetyReviewContext(item.id) : await api.claimSafetyReview(item.id)
+      if (!contextRequests.current.isLatest(requestId)) return
+      setContext(nextContext)
+      await loadQueue()
+    } catch (caught) {
+      if (!contextRequests.current.isLatest(requestId)) return
+      setError(apiErrorMessage(caught, uiText("Запрос уже недоступен или взят другим проверяющим.", "The request is unavailable or was claimed by another reviewer.")))
+      await loadQueue()
+    } finally {
+      if (contextRequests.current.isLatest(requestId)) setBusy(false)
+    }
+  }
+
+  async function complete() {
+    if (!context) return
+    const selectedContext = context
+    const requestId = contextRequests.current.begin()
+    setBusy(true)
+    setError("")
+    try {
+      const completed = await api.completeSafetyReview(selectedContext.id, disposition)
+      if (!contextRequests.current.isLatest(requestId)) return
+      setContext(null)
+      setResult(uiText(`Проверка #${completed.id} завершена с фиксированным результатом.`, `Review #${completed.id} completed with a bounded disposition.`))
+      await loadQueue()
+    } catch (caught) {
+      if (!contextRequests.current.isLatest(requestId)) return
+      setContext(null)
+      setError(apiErrorMessage(caught, uiText("Не удалось завершить проверку. Согласие или safety case могли измениться.", "Could not complete the review. Consent or the case may have changed.")))
+    } finally {
+      if (contextRequests.current.isLatest(requestId)) setBusy(false)
+    }
+  }
+
+  async function release() {
+    if (!context) return
+    const selectedContext = context
+    const requestId = contextRequests.current.begin()
+    setBusy(true)
+    setError("")
+    try {
+      await api.releaseSafetyReview(selectedContext.id)
+      if (!contextRequests.current.isLatest(requestId)) return
+      setContext(null)
+      setResult(uiText(`Проверка #${selectedContext.id} возвращена в обезличенную очередь.`, `Review #${selectedContext.id} returned to the opaque queue.`))
+      await loadQueue()
+    } catch (caught) {
+      if (!contextRequests.current.isLatest(requestId)) return
+      setContext(null)
+      setError(apiErrorMessage(caught, uiText("Не удалось вернуть проверку в очередь. Состояние запроса могло измениться.", "Could not return the review to the queue. Its state may have changed.")))
+    } finally {
+      if (contextRequests.current.isLatest(requestId)) setBusy(false)
+    }
+  }
+
+  return <div className="grid gap-4">
+    <Card className="border-orange-400/20 bg-zinc-950/80 p-4">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-orange-200">{uiText("НАЗНАЧЕННЫЙ ПРОВЕРЯЮЩИЙ · ОГРАНИЧЕННЫЙ ДОСТУП", "PROVISIONED REVIEWER · BOUNDED ACCESS")}</p>
+      <h2 className="mt-2 text-xl font-semibold text-white">{uiText("Очередь safety review", "Safety review queue")}</h2>
+      <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-400">{uiText("Здесь нет личности спортсмена, контактов, профиля, check-in, заметок, биометрии или права менять план. Каждый просмотр фиксируется в журнале доступа. Проверка не является экстренной службой или медицинским допуском.", "This workspace contains no athlete identity, contact details, profile, check-in, notes, biometrics, or plan authority. Views are recorded in an actor-aware ledger. Review is not emergency support or medical clearance.")}</p>
+    </Card>
+    {error ? <p className="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100" role="alert">{error}</p> : null}
+    {result ? <p className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200" role="status">{result}</p> : null}
+    <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <Card>
+        <CardHeader><div><CardTitle>{uiText("Обезличенная очередь", "Opaque queue")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Контекст появляется только после атомарного назначения.", "Context appears only after an atomic claim.")}</p></div><Button size="sm" variant="secondary" disabled={loading || busy} onClick={() => void loadQueue()}>{uiText("Обновить", "Refresh")}</Button></CardHeader>
+        <div className="grid gap-2 p-4">{queue.map((item) => <button key={item.id} type="button" disabled={busy} onClick={() => void claim(item)} className="min-h-16 rounded-md border border-zinc-800 bg-zinc-950 p-3 text-left transition-colors hover:border-orange-400/40 focus:outline-none focus:ring-2 focus:ring-orange-400/70"><div className="flex items-center justify-between gap-2"><span className="font-mono text-xs text-zinc-200" translate="no">REQUEST #{item.id}</span><Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">{queueStatusLabels[item.status]}</Badge></div><p className="mt-2 text-[11px] text-zinc-500" translate="no">{formatLocalDateTime(item.requested_at)}</p></button>)}{loading ? <p className="text-xs text-zinc-500" role="status">{uiText("Загружаем очередь...", "Loading queue...")}</p> : null}{!loading && !queue.length ? <p className="text-xs text-zinc-500">{uiText("Доступных запросов нет.", "No available requests.")}</p> : null}</div>
+      </Card>
+      <Card className="min-w-0">
+        <CardHeader><div><CardTitle>{uiText("Ограниченный контекст", "Bounded context")}</CardTitle><p className="text-xs text-zinc-500">{uiText("Без личности спортсмена и исходных данных о здоровье.", "No athlete identity or raw health data.")}</p></div>{context ? <Badge className="border-orange-400/30 bg-orange-400/10 text-orange-100">{uiText("в работе", "claimed")}</Badge> : null}</CardHeader>
+        {!context ? <p className="p-4 text-xs text-zinc-500">{uiText("Выберите доступный запрос и возьмите его в работу.", "Select an available request and perform an atomic claim.")}</p> : <div className="grid gap-4 p-4 text-xs">
+          <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{uiText("ТИП · СЕРЬЁЗНОСТЬ", "TYPE · SEVERITY")}</p><p className="mt-2 text-zinc-200" translate="no">{context.trigger_kind} · {context.severity}</p></div><div className="rounded-md border border-zinc-800 bg-zinc-950 p-3"><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">{uiText("ПРАВИЛО · ДАТА", "RULE · DATE")}</p><p className="mt-2 text-zinc-200" translate="no">{context.source_rule_id} · {context.local_date}</p></div></div>
+          <div><h3 className="text-base font-semibold text-white">{context.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">{context.guidance}</p><p className="mt-3 text-zinc-500">{context.disclaimer}</p></div>
+          <Field label={uiText("Фиксированный результат", "Bounded disposition")}><Select value={disposition} disabled={busy} onChange={(event) => setDisposition(event.target.value as SafetyReviewResult["disposition_code"])}>{Object.entries(dispositionLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</Select></Field>
+          <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void complete()}>{busy ? uiText("Сохраняем...", "Saving...") : uiText("Завершить проверку", "Complete bounded review")}</Button><Button variant="secondary" disabled={busy} onClick={() => void release()}>{uiText("Вернуть в очередь", "Return to queue")}</Button></div>
+        </div>}
+      </Card>
+    </div>
+  </div>
 }
 
 type DailyCheckInDraft = {

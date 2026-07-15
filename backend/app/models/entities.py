@@ -536,6 +536,86 @@ class SafetyEscalationEvent(Base):
     escalation: Mapped[SafetyEscalation] = relationship(back_populates="events")
 
 
+class SafetyReviewerGrant(Base):
+    __tablename__ = "safety_reviewer_grants"
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'revoked')", name="ck_safety_reviewer_grant_status"),
+        CheckConstraint("(status = 'active' AND revoked_at IS NULL) OR (status = 'revoked' AND revoked_at IS NOT NULL)", name="ck_safety_reviewer_grant_lifecycle"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SafetyReviewConsent(Base, TimestampMixin):
+    __tablename__ = "safety_review_consents"
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'withdrawn', 'case_superseded')", name="ck_safety_review_consent_status"),
+        CheckConstraint("policy_version = 'safety-review-consent-v1'", name="ck_safety_review_consent_policy"),
+        CheckConstraint("(status = 'active' AND closed_at IS NULL) OR (status IN ('withdrawn', 'case_superseded') AND closed_at IS NOT NULL)", name="ck_safety_review_consent_lifecycle"),
+        ForeignKeyConstraint(["escalation_id", "user_id"], ["safety_escalations.id", "safety_escalations.user_id"], ondelete="CASCADE", name="fk_safety_review_consent_owner"),
+        UniqueConstraint("escalation_id", name="uq_safety_review_consent_escalation"),
+        UniqueConstraint("id", "user_id", name="uq_safety_review_consent_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    escalation_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    policy_version: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SafetyReviewRequest(Base, TimestampMixin):
+    __tablename__ = "safety_review_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('requested', 'claimed', 'completed', 'withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded', 'unable_to_review')", name="ck_safety_review_request_status"),
+        CheckConstraint("disposition_code IS NULL OR disposition_code IN ('reviewed_guidance_reiterated', 'seek_local_professional_support', 'insufficient_information', 'unable_to_review')", name="ck_safety_review_request_disposition"),
+        CheckConstraint("reviewer_user_id IS NULL OR reviewer_user_id <> user_id", name="ck_safety_review_request_no_self_review"),
+        CheckConstraint("(status = 'requested' AND reviewer_user_id IS NULL AND claimed_at IS NULL AND completed_at IS NULL AND closed_at IS NULL AND disposition_code IS NULL) OR (status = 'claimed' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NULL AND closed_at IS NULL AND disposition_code IS NULL) OR (status = 'completed' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND closed_at IS NULL AND disposition_code IS NOT NULL) OR (status = 'unable_to_review' AND reviewer_user_id IS NOT NULL AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND closed_at IS NULL AND disposition_code = 'unable_to_review') OR (status IN ('withdrawn', 'cancelled_consent_revoked', 'cancelled_case_superseded') AND completed_at IS NULL AND closed_at IS NOT NULL AND disposition_code IS NULL)", name="ck_safety_review_request_lifecycle"),
+        ForeignKeyConstraint(["escalation_id", "user_id"], ["safety_escalations.id", "safety_escalations.user_id"], ondelete="CASCADE", name="fk_safety_review_request_owner"),
+        ForeignKeyConstraint(["consent_id", "user_id"], ["safety_review_consents.id", "safety_review_consents.user_id"], ondelete="CASCADE", name="fk_safety_review_request_consent_owner"),
+        UniqueConstraint("escalation_id", name="uq_safety_review_request_escalation"),
+        UniqueConstraint("id", "user_id", name="uq_safety_review_request_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    escalation_id: Mapped[int] = mapped_column(Integer, index=True)
+    consent_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reviewer_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="requested", index=True)
+    disposition_code: Mapped[str | None] = mapped_column(String(64))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SafetyReviewEvent(Base):
+    __tablename__ = "safety_review_events"
+    __table_args__ = (
+        CheckConstraint("event_type IN ('requested', 'claimed', 'released', 'viewed', 'completed', 'withdrawn', 'consent_revoked', 'case_superseded', 'unable_to_review')", name="ck_safety_review_event_type"),
+        CheckConstraint("actor_kind IN ('athlete', 'reviewer', 'system')", name="ck_safety_review_event_actor"),
+        CheckConstraint("(event_type IN ('requested', 'withdrawn') AND actor_kind = 'athlete' AND actor_user_id IS NOT NULL) OR (event_type IN ('claimed', 'released', 'viewed', 'completed', 'unable_to_review') AND actor_kind = 'reviewer' AND actor_user_id IS NOT NULL) OR (event_type IN ('consent_revoked', 'case_superseded') AND actor_kind = 'system' AND actor_user_id IS NULL)", name="ck_safety_review_event_pair"),
+        CheckConstraint("disposition_code IS NULL OR disposition_code IN ('reviewed_guidance_reiterated', 'seek_local_professional_support', 'insufficient_information', 'unable_to_review')", name="ck_safety_review_event_disposition"),
+        ForeignKeyConstraint(["request_id", "user_id"], ["safety_review_requests.id", "safety_review_requests.user_id"], ondelete="CASCADE", name="fk_safety_review_event_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    actor_kind: Mapped[str] = mapped_column(String(16))
+    disposition_code: Mapped[str | None] = mapped_column(String(64))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class DailyReadinessActionPreview(Base):
     __tablename__ = "daily_readiness_action_previews"
 

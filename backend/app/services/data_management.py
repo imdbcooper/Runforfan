@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -39,6 +39,10 @@ from app.models import (
     RunningGoal,
     SafetyEscalation,
     SafetyEscalationEvent,
+    SafetyReviewConsent,
+    SafetyReviewEvent,
+    SafetyReviewerGrant,
+    SafetyReviewRequest,
     ScreenshotSource,
     TrainingPlan,
     TrainingPlanRecommendationAudit,
@@ -52,6 +56,7 @@ from app.models import (
     WeeklyReview,
     WeeklyStrategyPreview,
 )
+from app.services.safety_reviews import release_reviewer_claims
 
 
 def value_to_json(value: Any) -> Any:
@@ -161,7 +166,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-15.0032",
+        "version": "2026-07-15.0033",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],
@@ -190,6 +195,9 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
         "coach_delivery_attempts": [model_to_dict(item) for item in db.scalars(select(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user.id).order_by(CoachDeliveryAttempt.created_at.asc(), CoachDeliveryAttempt.id.asc()))],
         "safety_escalations": [model_to_dict(item, exclude={"source_key", "source_fingerprint"}) for item in db.scalars(select(SafetyEscalation).where(SafetyEscalation.user_id == user.id).order_by(SafetyEscalation.created_at.asc(), SafetyEscalation.id.asc()))],
         "safety_escalation_events": [model_to_dict(item) for item in db.scalars(select(SafetyEscalationEvent).where(SafetyEscalationEvent.user_id == user.id).order_by(SafetyEscalationEvent.occurred_at.asc(), SafetyEscalationEvent.id.asc()))],
+        "safety_review_consents": [model_to_dict(item) for item in db.scalars(select(SafetyReviewConsent).where(SafetyReviewConsent.user_id == user.id).order_by(SafetyReviewConsent.created_at.asc(), SafetyReviewConsent.id.asc()))],
+        "safety_review_requests": [model_to_dict(item, exclude={"reviewer_user_id"}) for item in db.scalars(select(SafetyReviewRequest).where(SafetyReviewRequest.user_id == user.id).order_by(SafetyReviewRequest.requested_at.asc(), SafetyReviewRequest.id.asc()))],
+        "safety_review_events": [model_to_dict(item, exclude={"actor_user_id"}) for item in db.scalars(select(SafetyReviewEvent).where(SafetyReviewEvent.user_id == user.id).order_by(SafetyReviewEvent.occurred_at.asc(), SafetyReviewEvent.id.asc()))],
         "coaching_events": [model_to_dict(item) for item in coaching_events],
         "imports": [model_to_dict(item) for item in db.scalars(select(ImportBatch).where(ImportBatch.user_id == user.id).order_by(ImportBatch.created_at.desc()))],
         "screenshot_sources": [screenshot_source_export(item) for item in db.scalars(select(ScreenshotSource).where(ScreenshotSource.user_id == user.id).order_by(ScreenshotSource.created_at.desc()))],
@@ -321,12 +329,27 @@ def process_pending_upload_deletions(db: Session, upload_dir: Path) -> int:
 
 
 def delete_user_data(db: Session, user_id: int) -> dict[str, int]:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('runforfan.safety_review_erasure_user_id', :user_id, true)"), {"user_id": str(user_id)})
     counts = {
         "derived_activity_metrics": int(db.scalar(select(func.count()).select_from(DerivedActivityMetric).join(Activity, DerivedActivityMetric.activity_id == Activity.id).where(Activity.user_id == user_id)) or 0),
         "planned_workout_blocks": int(db.scalar(select(func.count()).select_from(TrainingPlanWorkoutBlock).join(TrainingPlanWorkout, TrainingPlanWorkoutBlock.workout_id == TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id)) or 0),
         "coach_delivery_attempts": int(db.scalar(select(func.count()).select_from(CoachDeliveryAttempt).join(CoachDelivery).where(CoachDelivery.user_id == user_id)) or 0),
     }
     counts.update({name: count_rows_for_user(db, model, user_id) for name, model in DELETE_MODELS if hasattr(model, "user_id")})
+    counts["safety_review_events"] = count_rows_for_user(db, SafetyReviewEvent, user_id)
+    counts["safety_review_requests"] = count_rows_for_user(db, SafetyReviewRequest, user_id)
+    counts["safety_review_consents"] = count_rows_for_user(db, SafetyReviewConsent, user_id)
+    reviewer_grant = db.scalar(select(SafetyReviewerGrant).where(SafetyReviewerGrant.user_id == user_id).with_for_update())
+    claimed_review_count = int(db.scalar(select(func.count()).select_from(SafetyReviewRequest).where(SafetyReviewRequest.reviewer_user_id == user_id, SafetyReviewRequest.status == "claimed")) or 0)
+    counts["safety_reviewer_grants_revoked"] = 1 if reviewer_grant is not None and reviewer_grant.status == "active" else 0
+    counts["safety_review_claims_released"] = claimed_review_count
+    if claimed_review_count:
+        release_reviewer_claims(db, user_id)
+    if reviewer_grant is not None and reviewer_grant.status == "active":
+        reviewer_grant.status = "revoked"
+        reviewer_grant.revoked_at = datetime.now(UTC)
+    db.flush()
     db.execute(delete(DerivedActivityMetric).where(DerivedActivityMetric.activity_id.in_(select(Activity.id).where(Activity.user_id == user_id))))
     db.execute(delete(TrainingPlanWorkoutBlock).where(TrainingPlanWorkoutBlock.workout_id.in_(select(TrainingPlanWorkout.id).join(TrainingPlan).where(TrainingPlan.user_id == user_id))))
     for _, model in DELETE_MODELS:

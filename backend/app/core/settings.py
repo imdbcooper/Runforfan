@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     coach_delivery_max_attempts: int = 5
     coach_delivery_retry_base_seconds: int = 60
     safety_escalation_enabled: bool = False
+    safety_review_enabled: bool = False
+    safety_review_reviewer_api_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="RUNFORFAN_",

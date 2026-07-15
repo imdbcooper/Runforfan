@@ -77,6 +77,9 @@ def escalation_response(escalation: SafetyEscalation | None) -> dict[str, object
 
 
 def _supersede(db: Session, escalation: SafetyEscalation, now: datetime) -> None:
+    from app.services.safety_reviews import close_for_supersession
+
+    close_for_supersession(db, escalation, now)
     escalation.status = "superseded"
     escalation.superseded_at = now
     db.add(SafetyEscalationEvent(

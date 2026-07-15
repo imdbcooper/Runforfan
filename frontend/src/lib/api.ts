@@ -864,6 +864,44 @@ export type SafetyEscalationCurrent = {
   escalation: SafetyEscalation | null
 }
 
+export type SafetyReviewState = {
+  available: boolean
+  policy_version: "safety-review-consent-v1"
+  consent_status: "active" | "withdrawn" | "case_superseded" | null
+  request_status: "requested" | "claimed" | "completed" | "withdrawn" | "cancelled_consent_revoked" | "cancelled_case_superseded" | "unable_to_review" | null
+  disposition_code: "reviewed_guidance_reiterated" | "seek_local_professional_support" | "insufficient_information" | "unable_to_review" | null
+  requested_at: string | null
+  completed_at: string | null
+  disclaimer: string
+}
+
+export type SafetyReviewerQueueItem = {
+  id: number
+  status: "requested" | "claimed"
+  requested_at: string
+  claimed_at: string | null
+}
+
+export type SafetyReviewContext = SafetyReviewerQueueItem & {
+  trigger_kind: "red_flag_stop" | "pain_requires_rest" | "return_to_run_ambiguous"
+  severity: "high" | "critical"
+  case_status: "open" | "acknowledged"
+  rule_version: string
+  source_rule_id: string
+  local_date: string
+  title: string
+  guidance: string
+  disclaimer: string
+}
+
+export type SafetyReviewResult = {
+  id: number
+  status: "completed" | "unable_to_review"
+  disposition_code: "reviewed_guidance_reiterated" | "seek_local_professional_support" | "insufficient_information" | "unable_to_review"
+  completed_at: string
+  disclaimer: string
+}
+
 export type DailyReadinessActionChange = {
   field: string
   before: unknown
@@ -1694,6 +1732,16 @@ export const api = {
   saveTodayReadiness: (payload: Record<string, unknown>) => request<DailyReadiness>("/readiness/today", { method: "PUT", body: JSON.stringify(payload) }),
   currentSafetyEscalation: () => request<SafetyEscalationCurrent>("/safety-escalations/current"),
   acknowledgeSafetyEscalation: (id: number) => request<SafetyEscalationCurrent>(`/safety-escalations/${id}/acknowledge`, { method: "POST", body: JSON.stringify({ acknowledgement: "understood_guidance" }) }),
+  safetyReviewState: (id: number) => request<SafetyReviewState>(`/safety-escalations/${id}/review`),
+  grantSafetyReviewConsent: (id: number) => request<SafetyReviewState>(`/safety-escalations/${id}/review-consent`, { method: "POST", body: JSON.stringify({ policy_version: "safety-review-consent-v1" }) }),
+  requestSafetyReview: (id: number) => request<SafetyReviewState>(`/safety-escalations/${id}/review-request`, { method: "POST", body: JSON.stringify({ request: "human_review" }) }),
+  withdrawSafetyReviewConsent: (id: number) => request<SafetyReviewState>(`/safety-escalations/${id}/review-consent`, { method: "DELETE" }),
+  safetyReviewerCapability: () => request<{ available: true }>("/safety-reviewer/capability"),
+  safetyReviewerQueue: () => request<SafetyReviewerQueueItem[]>("/safety-reviewer/requests"),
+  claimSafetyReview: (id: number) => request<SafetyReviewContext>(`/safety-reviewer/requests/${id}/claim`, { method: "POST", body: "{}" }),
+  safetyReviewContext: (id: number) => request<SafetyReviewContext>(`/safety-reviewer/requests/${id}/context`),
+  releaseSafetyReview: (id: number) => request<SafetyReviewerQueueItem>(`/safety-reviewer/requests/${id}/release`, { method: "POST", body: "{}" }),
+  completeSafetyReview: (id: number, dispositionCode: SafetyReviewResult["disposition_code"]) => request<SafetyReviewResult>(`/safety-reviewer/requests/${id}/complete`, { method: "POST", body: JSON.stringify({ disposition_code: dispositionCode }) }),
   previewTodayReadinessAction: () => request<DailyReadinessActionPreview>("/readiness/today/action-preview", { method: "POST", body: "{}" }),
   applyTodayReadinessAction: (previewId: string) => request<DailyReadinessActionApplyResult>(`/readiness/today/actions/${encodeURIComponent(previewId)}/apply`, { method: "POST", body: "{}" }),
   coachConversations: (limit = 20, offset = 0) => request<CoachConversation[]>(`/coach/conversations?limit=${limit}&offset=${offset}`),
