@@ -29,6 +29,8 @@ class CoachDeliveryTests(unittest.TestCase):
         self.assertTrue(response["linked"])
         self.assertNotIn("telegram_chat_id", response)
         self.assertIsNone(response["bot_url"])
+        self.assertFalse(response["post_workout_available"])
+        self.assertFalse(response["weekly_review_available"])
 
     def test_preference_response_tolerates_live_bot_api_failure(self):
         user = User(id=1, display_name="Runner", is_demo=False)
@@ -39,6 +41,24 @@ class CoachDeliveryTests(unittest.TestCase):
 
     def test_unknown_action_does_not_select_a_delivery_template(self):
         self.assertIsNone(coach_delivery._template_key("unrecognized"))
+
+    def test_weekly_templates_are_bounded_and_partial_is_conservative(self):
+        self.assertEqual(coach_delivery._weekly_template({"resolution_status": "partial_legacy", "recommended_strategy": "conservative_progression"}), "weekly_partial")
+        self.assertEqual(coach_delivery._weekly_template({"resolution_status": "complete", "recommended_strategy": "conservative_progression"}), "weekly_progression")
+
+    def test_nonexistent_dst_schedule_advances_to_first_valid_minute(self):
+        scheduled = coach_delivery._local_schedule(date(2026, 3, 29), time(2, 30), "Europe/Berlin")
+        self.assertEqual(scheduled.astimezone(coach_delivery.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%d %H:%M"), "2026-03-29 03:00")
+
+    def test_event_messages_are_static_and_do_not_include_source_notes(self):
+        for delivery_type, template_key, rule_version in (
+            ("post_workout_debrief", "workout_feedback_saved", coach_delivery.POST_WORKOUT_RULE_VERSION),
+            ("weekly_review", "weekly_partial", coach_delivery.WEEKLY_REVIEW_DELIVERY_RULE_VERSION),
+        ):
+            delivery = CoachDelivery(id=template_key, user_id=1, delivery_type=delivery_type, local_date=date(2026, 7, 14), timezone="Europe/Moscow", rule_version=rule_version, source_key="source", template_key=template_key, content_fingerprint="fingerprint", scheduled_for=datetime.now(UTC))
+            message = coach_delivery._message(delivery)
+            self.assertNotIn("secret note", message)
+            self.assertIn("не медицинская", message)
 
     def test_enabling_requires_global_kill_switch(self):
         db = SimpleNamespace(scalar=lambda *_args, **_kwargs: CoachDeliveryPreference(user_id=1, telegram_chat_id=123, telegram_chat_verified_at=datetime.now(UTC)))
@@ -54,6 +74,15 @@ class CoachDeliveryTests(unittest.TestCase):
         with patch.object(coach_delivery, "get_settings", return_value=SimpleNamespace(coach_delivery_enabled=False)):
             with self.assertRaises(HTTPException) as caught:
                 coach_delivery.update_preference(db, user, telegram_enabled=None, daily_brief_local_time=time(9))
+        self.assertEqual(caught.exception.status_code, 403)
+
+    def test_stage62_opt_in_requires_its_own_rollout_switch(self):
+        db = SimpleNamespace()
+        user = User(id=1, display_name="Runner", is_demo=False)
+        settings = SimpleNamespace(coach_delivery_enabled=True, coach_post_workout_delivery_enabled=False, coach_weekly_review_delivery_enabled=False)
+        with patch.object(coach_delivery, "get_settings", return_value=settings):
+            with self.assertRaises(HTTPException) as caught:
+                coach_delivery.update_preference(db, user, telegram_enabled=None, daily_brief_local_time=None, post_workout_enabled=True)
         self.assertEqual(caught.exception.status_code, 403)
 
     def test_safe_message_does_not_use_workout_notes(self):

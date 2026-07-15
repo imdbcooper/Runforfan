@@ -159,7 +159,7 @@ def export_user_data(db: Session, user: User) -> dict[str, Any]:
 
     return {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "2026-07-14.0030",
+        "version": "2026-07-15.0031",
         "user": model_to_dict(user, exclude={"is_active"}),
         "profile": model_to_dict(user.athlete_profile) if user.athlete_profile else None,
         "measurements": [model_to_dict(item) for item in db.scalars(select(AthleteMeasurement).where(AthleteMeasurement.user_id == user.id).order_by(AthleteMeasurement.measured_at.desc().nullslast()))],

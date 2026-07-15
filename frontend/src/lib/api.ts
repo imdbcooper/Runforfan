@@ -1504,14 +1504,22 @@ export type CoachDeliveryPreferences = {
   available: boolean
   linked: boolean
   enabled: boolean
+  post_workout_available: boolean
+  post_workout_enabled: boolean
+  weekly_review_available: boolean
+  weekly_review_enabled: boolean
   daily_brief_local_time: string | null
+  weekly_review_local_time: string | null
   timezone: string | null
   bot_url: string | null
 }
 
 export type CoachDeliveryPreferencesUpdate = {
   telegram_enabled?: boolean
+  post_workout_enabled?: boolean
+  weekly_review_enabled?: boolean
   daily_brief_local_time?: string
+  weekly_review_local_time?: string
 }
 
 let token = safeStorageGet("runforfan_token")

@@ -17,8 +17,8 @@ try:
     from app.api.errors import add_exception_handlers
     from app.api.routes import coach_delivery as coach_delivery_routes
     from app.db.base import Base
-    from app.db.migrations.runner import run_migrations
-    from app.models import CoachDelivery, CoachDeliveryAttempt, CoachDeliveryPreference, User
+    from app.db.migrations.runner import MIGRATIONS, run_migrations
+    from app.models import Activity, CoachDelivery, CoachDeliveryAttempt, CoachDeliveryPreference, CoachingEvent, User, WeeklyReview
     from app.services import coach_delivery, telegram_bot
     from app.services.data_management import delete_user_data, export_user_data
     from app.services.telegram_bot import TelegramDeliveryError, TelegramDeliveryResult
@@ -63,28 +63,32 @@ class CoachDeliveryPostgresTests(unittest.TestCase):
             self.user_id = user.id
             self.other_user_id = other.id
 
-    def settings(self, *, enabled=True, worker_enabled=True):
+    def settings(self, *, enabled=True, worker_enabled=True, post_workout_enabled=True, weekly_review_enabled=True):
         return patch.object(
             coach_delivery,
             "get_settings",
             return_value=SimpleNamespace(
                 coach_delivery_enabled=enabled,
                 coach_delivery_worker_enabled=worker_enabled,
+                coach_post_workout_delivery_enabled=post_workout_enabled,
+                coach_weekly_review_delivery_enabled=weekly_review_enabled,
                 coach_delivery_batch_size=25,
                 coach_delivery_max_attempts=3,
                 coach_delivery_retry_base_seconds=60,
             ),
         )
 
-    def delivery(self, user_id=None, *, delivery_id="delivery-1", local_date=None, status="pending", scheduled_for=None, retry_at=None, attempt_count=0, max_attempts=3):
+    def delivery(self, user_id=None, *, delivery_id="delivery-1", local_date=None, status="pending", scheduled_for=None, retry_at=None, attempt_count=0, max_attempts=3, delivery_type="daily_brief", source_key=None, template_key="proceed", rule_version=None):
         now = datetime.now(UTC)
         return CoachDelivery(
             id=delivery_id,
             user_id=user_id or self.user_id,
+            delivery_type=delivery_type,
             local_date=local_date or date.today(),
             timezone="Europe/Moscow",
-            rule_version=coach_delivery.DAILY_BRIEF_RULE_VERSION,
-            template_key="proceed",
+            rule_version=rule_version or coach_delivery.DAILY_BRIEF_RULE_VERSION,
+            source_key=source_key,
+            template_key=template_key,
             content_fingerprint="a" * 64,
             status=status,
             scheduled_for=scheduled_for or now - timedelta(minutes=1),
@@ -95,13 +99,18 @@ class CoachDeliveryPostgresTests(unittest.TestCase):
             locked_by="test-worker" if status == "sending" else None,
         )
 
-    def enabled_preference(self, db, user_id=None, chat_id=101):
+    def enabled_preference(self, db, user_id=None, chat_id=101, *, daily=True, post_workout=False, weekly=False, enabled_at=None):
         preference = CoachDeliveryPreference(
             user_id=user_id or self.user_id,
             telegram_chat_id=chat_id,
             telegram_chat_verified_at=datetime.now(UTC),
-            telegram_enabled=True,
+            telegram_enabled=daily,
             daily_brief_local_time=time(8),
+            post_workout_enabled=post_workout,
+            post_workout_enabled_at=enabled_at if post_workout else None,
+            weekly_review_enabled=weekly,
+            weekly_review_enabled_at=enabled_at if weekly else None,
+            weekly_review_local_time=time(8),
         )
         db.add(preference)
         return preference
@@ -110,17 +119,47 @@ class CoachDeliveryPostgresTests(unittest.TestCase):
         with self.engine.begin() as connection:
             connection.execute(text("DROP TABLE IF EXISTS coach_delivery_attempts, coach_deliveries, coach_delivery_preferences CASCADE"))
             connection.execute(text("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(255) PRIMARY KEY, applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now())"))
-            connection.execute(text("DELETE FROM schema_migrations WHERE version IN ('20260714_0029_coach_delivery', '20260714_0030_coach_delivery_constraints')"))
+            connection.execute(text("DELETE FROM schema_migrations WHERE version IN ('20260714_0029_coach_delivery', '20260714_0030_coach_delivery_constraints', '20260715_0031_coach_event_delivery')"))
         run_migrations(self.engine)
         with self.engine.connect() as connection:
             tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")).scalars())
             constraints = set(connection.execute(text("SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = current_schema() AND table_name IN ('coach_delivery_preferences', 'coach_deliveries', 'coach_delivery_attempts')")).scalars())
             indexes = set(connection.execute(text("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()")).scalars())
-            migrations = set(connection.execute(text("SELECT version FROM schema_migrations WHERE version LIKE '20260714_00%_coach_delivery%'")).scalars())
+            migrations = set(connection.execute(text("SELECT version FROM schema_migrations WHERE version IN ('20260714_0029_coach_delivery', '20260714_0030_coach_delivery_constraints', '20260715_0031_coach_event_delivery')")).scalars())
         self.assertTrue({"coach_delivery_preferences", "coach_deliveries", "coach_delivery_attempts"}.issubset(tables))
-        self.assertTrue({"ck_coach_delivery_preference_enabled_destination", "uq_coach_delivery_daily", "ck_coach_delivery_attempt_counts", "ck_coach_delivery_retry_scheduled_at", "ck_coach_delivery_attempt_number", "uq_coach_delivery_attempt"}.issubset(constraints))
-        self.assertTrue({"ix_coach_delivery_due_queue", "ix_coach_delivery_user_history", "ix_coach_delivery_attempts_delivery_id"}.issubset(indexes))
-        self.assertEqual(migrations, {"20260714_0029_coach_delivery", "20260714_0030_coach_delivery_constraints"})
+        self.assertTrue({"ck_coach_delivery_preference_enabled_destination", "ck_coach_delivery_source_identity", "ck_coach_delivery_attempt_counts", "ck_coach_delivery_retry_scheduled_at", "ck_coach_delivery_attempt_number", "uq_coach_delivery_attempt"}.issubset(constraints))
+        self.assertTrue({"ix_coach_delivery_due_queue", "ix_coach_delivery_user_history", "ix_coach_delivery_attempts_delivery_id", "uq_coach_delivery_daily", "uq_coach_delivery_source", "ix_coaching_events_delivery_scan"}.issubset(indexes))
+        self.assertEqual(migrations, {"20260714_0029_coach_delivery", "20260714_0030_coach_delivery_constraints", "20260715_0031_coach_event_delivery"})
+
+    def test_stage62_migration_preserves_populated_stage61_ledger(self):
+        stage61_versions = {"20260714_0029_coach_delivery", "20260714_0030_coach_delivery_constraints"}
+        stage62_version = "20260715_0031_coach_event_delivery"
+        with self.engine.begin() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS coach_delivery_attempts, coach_deliveries, coach_delivery_preferences CASCADE"))
+            for version, statements in MIGRATIONS:
+                if version in stage61_versions:
+                    for statement in statements:
+                        connection.execute(text(statement))
+            connection.execute(text("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(255) PRIMARY KEY, applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now())"))
+            connection.execute(text("DELETE FROM schema_migrations"))
+            connection.execute(
+                text("INSERT INTO schema_migrations (version) VALUES (:version) ON CONFLICT DO NOTHING"),
+                [{"version": version} for version, _ in MIGRATIONS if version != stage62_version],
+            )
+            connection.execute(text("INSERT INTO coach_deliveries (id, user_id, local_date, timezone, rule_version, template_key, content_fingerprint, scheduled_for) VALUES ('stage61-row', :user_id, :local_date, 'Europe/Moscow', 'coach-daily-brief-v1', 'proceed', :fingerprint, now())"), {"user_id": self.user_id, "local_date": date.today(), "fingerprint": "a" * 64})
+
+        run_migrations(self.engine)
+
+        with self.engine.connect() as connection:
+            preserved = connection.execute(text("SELECT delivery_type, source_key FROM coach_deliveries WHERE id = 'stage61-row'")).one()
+            migrated = connection.execute(text("SELECT 1 FROM schema_migrations WHERE version = :version"), {"version": stage62_version}).scalar_one()
+        self.assertEqual(tuple(preserved), ("daily_brief", None))
+        self.assertEqual(migrated, 1)
+
+        with self.SessionLocal() as db:
+            db.add(self.delivery(delivery_id="same-day-new-version", rule_version="coach-daily-brief-v2"))
+            with self.assertRaises(IntegrityError):
+                db.commit()
 
     def test_database_enforces_preference_delivery_and_attempt_constraints(self):
         invalid = [
@@ -198,6 +237,141 @@ class CoachDeliveryPostgresTests(unittest.TestCase):
             db.rollback()
             with self.settings():
                 self.assertEqual(coach_delivery.claim_due_deliveries(db, "worker", datetime.now(UTC)), [])
+
+    def test_post_workout_import_wins_and_delivery_is_unique_per_activity(self):
+        now = datetime.now(UTC)
+        with self.SessionLocal() as db:
+            self.enabled_preference(db, daily=False, post_workout=True, enabled_at=now - timedelta(hours=2))
+            activity = Activity(user_id=self.user_id, title="secret imported title", activity_type="outdoor_run", started_at=now - timedelta(days=10), distance_km=5.0, duration_seconds=1800, source_note="secret source note")
+            db.add(activity)
+            db.flush()
+            completed = CoachingEvent(user_id=self.user_id, event_type="workout_completed", category="outcome", source="manual_completion", occurred_at=activity.started_at, activity_id=activity.id, payload_json={"secret": "do not render"}, created_at=now - timedelta(minutes=30))
+            imported = CoachingEvent(user_id=self.user_id, event_type="activity_imported", category="fact", source="activity_import", occurred_at=activity.started_at, activity_id=activity.id, payload_json={"secret": "do not render"}, created_at=now - timedelta(minutes=20))
+            db.add_all([completed, imported])
+            db.commit()
+
+            with self.settings():
+                self.assertEqual(coach_delivery.enqueue_due_deliveries(db, now), 1)
+                self.assertEqual(coach_delivery.enqueue_due_deliveries(db, now), 0)
+            rows = list(db.scalars(select(CoachDelivery).where(CoachDelivery.delivery_type == "post_workout_debrief")))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].source_event_id, imported.id)
+            self.assertEqual(rows[0].source_key, f"activity:{activity.id}")
+            self.assertEqual(rows[0].template_key, "historical_activity_imported")
+            message = coach_delivery._message(rows[0])
+            self.assertNotIn("secret", message)
+            self.assertNotIn(activity.title, message)
+
+    def test_post_workout_does_not_backfill_events_before_explicit_opt_in(self):
+        now = datetime.now(UTC)
+        with self.SessionLocal() as db:
+            self.enabled_preference(db, daily=False, post_workout=True, enabled_at=now - timedelta(minutes=15))
+            activity = Activity(user_id=self.user_id, title="Old run", activity_type="outdoor_run", started_at=now - timedelta(hours=2), distance_km=5.0, duration_seconds=1800)
+            db.add(activity)
+            db.flush()
+            db.add(CoachingEvent(user_id=self.user_id, event_type="activity_imported", category="fact", source="activity_import", occurred_at=activity.started_at, activity_id=activity.id, payload_json={}, created_at=now - timedelta(hours=1)))
+            db.commit()
+            with self.settings():
+                self.assertEqual(coach_delivery.enqueue_due_deliveries(db, now), 0)
+
+    def test_pre_opt_in_import_cannot_become_source_for_post_opt_in_completion(self):
+        now = datetime.now(UTC)
+        with self.SessionLocal() as db:
+            preference = self.enabled_preference(db, daily=False, post_workout=True, enabled_at=now - timedelta(minutes=30))
+            activity = Activity(user_id=self.user_id, title="Imported before consent", activity_type="outdoor_run", started_at=now - timedelta(hours=2), distance_km=5.0, duration_seconds=1800)
+            db.add(activity)
+            db.flush()
+            imported = CoachingEvent(user_id=self.user_id, event_type="activity_imported", category="fact", source="activity_import", occurred_at=activity.started_at, activity_id=activity.id, payload_json={}, created_at=now - timedelta(hours=1))
+            completed = CoachingEvent(user_id=self.user_id, event_type="workout_completed", category="outcome", source="manual_link", occurred_at=activity.started_at, activity_id=activity.id, payload_json={}, created_at=now - timedelta(minutes=20))
+            db.add_all([imported, completed])
+            db.commit()
+            with self.settings():
+                self.assertIsNone(coach_delivery.compose_post_workout_delivery(db, db.get(User, self.user_id), preference, completed, now))
+
+    def test_historical_manual_completion_is_not_sent_as_fresh_post_workout(self):
+        now = datetime.now(UTC)
+        with self.SessionLocal() as db:
+            preference = self.enabled_preference(db, daily=False, post_workout=True, enabled_at=now - timedelta(hours=2))
+            activity = Activity(user_id=self.user_id, title="Old linked run", activity_type="outdoor_run", started_at=now - timedelta(days=10), distance_km=5.0, duration_seconds=1800)
+            db.add(activity)
+            db.flush()
+            event = CoachingEvent(user_id=self.user_id, event_type="workout_completed", category="outcome", source="manual_link", occurred_at=activity.started_at, activity_id=activity.id, payload_json={}, created_at=now - timedelta(minutes=20))
+            db.add(event)
+            db.commit()
+            with self.settings():
+                self.assertIsNone(coach_delivery.compose_post_workout_delivery(db, db.get(User, self.user_id), preference, event, now))
+
+    def test_removed_completion_is_cancelled_before_transport(self):
+        now = datetime.now(UTC)
+        with self.SessionLocal() as db:
+            self.enabled_preference(db, daily=False, post_workout=True, enabled_at=now - timedelta(hours=2))
+            activity = Activity(user_id=self.user_id, title="Run", activity_type="outdoor_run", started_at=now - timedelta(hours=1), distance_km=5.0, duration_seconds=1800)
+            db.add(activity)
+            db.flush()
+            source = CoachingEvent(user_id=self.user_id, event_type="workout_completed", category="outcome", source="manual_completion", occurred_at=activity.started_at, activity_id=activity.id, payload_json={}, created_at=now - timedelta(minutes=30))
+            db.add(source)
+            db.flush()
+            delivery = self.delivery(delivery_id="removed-completion", status="sending", delivery_type="post_workout_debrief", source_key=f"activity:{activity.id}", template_key="workout_completed", rule_version=coach_delivery.POST_WORKOUT_RULE_VERSION)
+            delivery.source_event_id = source.id
+            delivery.activity_id = activity.id
+            db.add(delivery)
+            db.flush()
+            db.add(CoachingEvent(user_id=self.user_id, event_type="workout_completion_removed", category="correction", source="manual_unlink", occurred_at=now, activity_id=activity.id, payload_json={}, created_at=now - timedelta(minutes=10)))
+            db.commit()
+            with self.settings(), patch.object(coach_delivery.TelegramDeliveryClient, "send") as send:
+                coach_delivery.process_delivery(db, delivery.id)
+            send.assert_not_called()
+            self.assertEqual(db.get(CoachDelivery, delivery.id).status, "cancelled")
+
+    def test_worker_switch_is_rechecked_before_transport(self):
+        with self.SessionLocal() as db:
+            self.enabled_preference(db)
+            db.add(self.delivery(delivery_id="worker-stopped", status="sending"))
+            db.commit()
+            with self.settings(worker_enabled=False), patch.object(coach_delivery.TelegramDeliveryClient, "send") as send:
+                coach_delivery.process_delivery(db, "worker-stopped")
+            send.assert_not_called()
+            delivery = db.get(CoachDelivery, "worker-stopped")
+            self.assertEqual(delivery.status, "pending")
+            self.assertIsNone(delivery.locked_at)
+
+    def test_resaving_enabled_loops_preserves_explicit_opt_in_timestamps(self):
+        enabled_at = datetime.now(UTC) - timedelta(days=2)
+        with self.SessionLocal() as db:
+            self.enabled_preference(db, daily=True, post_workout=True, weekly=True, enabled_at=enabled_at)
+            db.commit()
+            with self.settings():
+                coach_delivery.update_preference(
+                    db,
+                    db.get(User, self.user_id),
+                    telegram_enabled=True,
+                    daily_brief_local_time=time(9),
+                    post_workout_enabled=True,
+                    weekly_review_enabled=True,
+                    weekly_review_local_time=time(10),
+                )
+            preference = db.scalar(select(CoachDeliveryPreference).where(CoachDeliveryPreference.user_id == self.user_id))
+            self.assertEqual(preference.post_workout_enabled_at, enabled_at)
+            self.assertEqual(preference.weekly_review_enabled_at, enabled_at)
+
+    def test_weekly_delivery_is_one_per_local_week_even_if_review_changes(self):
+        now = datetime.now(UTC)
+        week_start = date(2026, 7, 6)
+        with self.SessionLocal() as db:
+            preference = self.enabled_preference(db, daily=False, weekly=True, enabled_at=now - timedelta(days=2))
+            first_review = WeeklyReview(user_id=self.user_id, week_start=week_start, week_end=week_start + timedelta(days=6), timezone="Europe/Moscow", review_version="weekly-review-v3", rule_version="weekly-review-rules-v3", input_fingerprint="a" * 64, resolution_status="complete", snapshot_json={}, as_of_at=now, trigger_type="on_read")
+            second_review = WeeklyReview(user_id=self.user_id, week_start=week_start, week_end=week_start + timedelta(days=6), timezone="Europe/Moscow", review_version="weekly-review-v3", rule_version="weekly-review-rules-v3", input_fingerprint="b" * 64, resolution_status="complete", snapshot_json={}, as_of_at=now, trigger_type="on_read")
+            db.add_all([first_review, second_review])
+            db.commit()
+            first_payload = {"review_id": first_review.id, "input_fingerprint": first_review.input_fingerprint, "resolution_status": "complete", "recommended_strategy": "hold"}
+            second_payload = {"review_id": second_review.id, "input_fingerprint": second_review.input_fingerprint, "resolution_status": "complete", "recommended_strategy": "deload"}
+            with self.settings(), patch.object(coach_delivery, "materialize_weekly_review", side_effect=[first_payload, second_payload]):
+                first = coach_delivery.compose_weekly_review_delivery(db, db.get(User, self.user_id), preference, week_start, now, now)
+                second = coach_delivery.compose_weekly_review_delivery(db, db.get(User, self.user_id), preference, week_start, now, now)
+            db.commit()
+            self.assertIsNotNone(first)
+            self.assertIsNone(second)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CoachDelivery).where(CoachDelivery.delivery_type == "weekly_review")), 1)
 
     def test_claiming_due_retry_clears_retry_schedule(self):
         with self.SessionLocal() as db:

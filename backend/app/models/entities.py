@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,7 +82,7 @@ class TelegramLoginCode(Base):
 class CoachDeliveryPreference(Base, TimestampMixin):
     __tablename__ = "coach_delivery_preferences"
     __table_args__ = (
-        CheckConstraint("NOT telegram_enabled OR (telegram_chat_id IS NOT NULL AND telegram_chat_verified_at IS NOT NULL)", name="ck_coach_delivery_preference_enabled_destination"),
+        CheckConstraint("NOT (telegram_enabled OR post_workout_enabled OR weekly_review_enabled) OR (telegram_chat_id IS NOT NULL AND telegram_chat_verified_at IS NOT NULL)", name="ck_coach_delivery_preference_enabled_destination"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -93,6 +93,11 @@ class CoachDeliveryPreference(Base, TimestampMixin):
     daily_brief_local_time: Mapped[time] = mapped_column(default=time(8, 0), server_default=text("'08:00:00'"))
     enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    post_workout_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("FALSE"))
+    post_workout_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    weekly_review_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("FALSE"))
+    weekly_review_local_time: Mapped[time] = mapped_column(default=time(8, 0), server_default=text("'08:00:00'"))
+    weekly_review_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="coach_delivery_preference")
 
@@ -101,14 +106,16 @@ class CoachDelivery(Base, TimestampMixin):
     __tablename__ = "coach_deliveries"
     __table_args__ = (
         CheckConstraint("channel = 'telegram'", name="ck_coach_delivery_channel"),
-        CheckConstraint("delivery_type = 'daily_brief'", name="ck_coach_delivery_type"),
-        CheckConstraint("template_key IN ('checkin_required', 'proceed', 'conservative', 'rest', 'stop')", name="ck_coach_delivery_template"),
+        CheckConstraint("delivery_type IN ('daily_brief', 'post_workout_debrief', 'weekly_review')", name="ck_coach_delivery_type"),
+        CheckConstraint("(delivery_type = 'daily_brief' AND template_key IN ('checkin_required', 'proceed', 'conservative', 'rest', 'stop')) OR (delivery_type = 'post_workout_debrief' AND template_key IN ('workout_completed', 'workout_feedback_saved', 'activity_imported', 'historical_activity_imported')) OR (delivery_type = 'weekly_review' AND template_key IN ('weekly_partial', 'weekly_hold', 'weekly_deload', 'weekly_resume', 'weekly_progression'))", name="ck_coach_delivery_template"),
+        CheckConstraint("(delivery_type = 'daily_brief' AND source_key IS NULL) OR (delivery_type IN ('post_workout_debrief', 'weekly_review') AND source_key IS NOT NULL)", name="ck_coach_delivery_source_identity"),
         CheckConstraint("status IN ('pending', 'sending', 'sent', 'retry_scheduled', 'permanent_failure', 'cancelled')", name="ck_coach_delivery_status"),
         CheckConstraint("attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts", name="ck_coach_delivery_attempt_counts"),
         CheckConstraint("retry_at IS NULL OR status = 'retry_scheduled'", name="ck_coach_delivery_retry_status"),
         CheckConstraint("status != 'retry_scheduled' OR retry_at IS NOT NULL", name="ck_coach_delivery_retry_scheduled_at"),
         CheckConstraint("status != 'sending' OR (locked_at IS NOT NULL AND locked_by IS NOT NULL)", name="ck_coach_delivery_sending_lock"),
-        UniqueConstraint("user_id", "channel", "delivery_type", "local_date", "rule_version", name="uq_coach_delivery_daily"),
+        Index("uq_coach_delivery_daily", "user_id", "channel", "delivery_type", "local_date", unique=True, postgresql_where=text("delivery_type = 'daily_brief'"), sqlite_where=text("delivery_type = 'daily_brief'")),
+        Index("uq_coach_delivery_source", "user_id", "channel", "delivery_type", "source_key", unique=True, postgresql_where=text("source_key IS NOT NULL"), sqlite_where=text("source_key IS NOT NULL")),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -121,6 +128,10 @@ class CoachDelivery(Base, TimestampMixin):
     athlete_state_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("athlete_state_snapshots.id", ondelete="SET NULL"))
     readiness_checkin_id: Mapped[int | None] = mapped_column(ForeignKey("daily_readiness_checkins.id", ondelete="SET NULL"))
     workout_id: Mapped[int | None] = mapped_column(ForeignKey("training_plan_workouts.id", ondelete="SET NULL"))
+    source_key: Mapped[str | None] = mapped_column(String(160))
+    source_event_id: Mapped[int | None] = mapped_column(ForeignKey("coaching_events.id", ondelete="SET NULL"), index=True)
+    activity_id: Mapped[int | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"), index=True)
+    weekly_review_id: Mapped[int | None] = mapped_column(ForeignKey("weekly_reviews.id", ondelete="SET NULL"), index=True)
     template_key: Mapped[str] = mapped_column(String(32))
     content_fingerprint: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)

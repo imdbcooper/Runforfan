@@ -926,6 +926,41 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             """,
         ),
     ),
+    (
+        "20260715_0031_coach_event_delivery",
+        (
+            "ALTER TABLE coach_delivery_preferences ADD COLUMN IF NOT EXISTS post_workout_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE coach_delivery_preferences ADD COLUMN IF NOT EXISTS post_workout_enabled_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE coach_delivery_preferences ADD COLUMN IF NOT EXISTS weekly_review_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE coach_delivery_preferences ADD COLUMN IF NOT EXISTS weekly_review_local_time TIME NOT NULL DEFAULT '08:00:00'",
+            "ALTER TABLE coach_delivery_preferences ADD COLUMN IF NOT EXISTS weekly_review_enabled_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE coach_delivery_preferences DROP CONSTRAINT IF EXISTS ck_coach_delivery_preference_enabled_destination",
+            "ALTER TABLE coach_delivery_preferences ADD CONSTRAINT ck_coach_delivery_preference_enabled_destination CHECK (NOT (telegram_enabled OR post_workout_enabled OR weekly_review_enabled) OR (telegram_chat_id IS NOT NULL AND telegram_chat_verified_at IS NOT NULL))",
+            "ALTER TABLE coach_deliveries ADD COLUMN IF NOT EXISTS source_key VARCHAR(160)",
+            "ALTER TABLE coach_deliveries ADD COLUMN IF NOT EXISTS source_event_id INTEGER REFERENCES coaching_events(id) ON DELETE SET NULL",
+            "ALTER TABLE coach_deliveries ADD COLUMN IF NOT EXISTS activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL",
+            "ALTER TABLE coach_deliveries ADD COLUMN IF NOT EXISTS weekly_review_id INTEGER REFERENCES weekly_reviews(id) ON DELETE SET NULL",
+            "ALTER TABLE coach_deliveries DROP CONSTRAINT IF EXISTS uq_coach_delivery_daily",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_coach_delivery_daily ON coach_deliveries (user_id, channel, delivery_type, local_date) WHERE delivery_type = 'daily_brief'",
+            "ALTER TABLE coach_deliveries DROP CONSTRAINT IF EXISTS ck_coach_delivery_type",
+            "ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_type CHECK (delivery_type IN ('daily_brief', 'post_workout_debrief', 'weekly_review'))",
+            "ALTER TABLE coach_deliveries DROP CONSTRAINT IF EXISTS ck_coach_delivery_template",
+            "ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_template CHECK ((delivery_type = 'daily_brief' AND template_key IN ('checkin_required', 'proceed', 'conservative', 'rest', 'stop')) OR (delivery_type = 'post_workout_debrief' AND template_key IN ('workout_completed', 'workout_feedback_saved', 'activity_imported', 'historical_activity_imported')) OR (delivery_type = 'weekly_review' AND template_key IN ('weekly_partial', 'weekly_hold', 'weekly_deload', 'weekly_resume', 'weekly_progression')))",
+            """
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'coach_deliveries'::regclass AND conname = 'ck_coach_delivery_source_identity') THEN
+                    ALTER TABLE coach_deliveries ADD CONSTRAINT ck_coach_delivery_source_identity CHECK ((delivery_type = 'daily_brief' AND source_key IS NULL) OR (delivery_type IN ('post_workout_debrief', 'weekly_review') AND source_key IS NOT NULL));
+                END IF;
+            END $$
+            """,
+            "DROP INDEX IF EXISTS uq_coach_delivery_source",
+            "CREATE UNIQUE INDEX uq_coach_delivery_source ON coach_deliveries (user_id, channel, delivery_type, source_key) WHERE source_key IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_coach_deliveries_source_event_id ON coach_deliveries (source_event_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_deliveries_activity_id ON coach_deliveries (activity_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_deliveries_weekly_review_id ON coach_deliveries (weekly_review_id)",
+            "CREATE INDEX IF NOT EXISTS ix_coaching_events_delivery_scan ON coaching_events (user_id, created_at, id) WHERE event_type IN ('workout_completed', 'activity_imported')",
+        ),
+    ),
 )
 
 

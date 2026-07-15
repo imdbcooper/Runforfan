@@ -84,6 +84,8 @@ jobs:
       RUNFORFAN_COACH_ENABLED: ${{ vars.RUNFORFAN_COACH_ENABLED || 'false' }}
       RUNFORFAN_COACH_DELIVERY_ENABLED: ${{ vars.RUNFORFAN_COACH_DELIVERY_ENABLED || 'false' }}
       RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED: ${{ vars.RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED || 'false' }}
+      RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED: ${{ vars.RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED || 'false' }}
+      RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED: ${{ vars.RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED || 'false' }}
       RUNFORFAN_POSTGRES_PASSWORD: ${{ secrets.RUNFORFAN_POSTGRES_PASSWORD }}
       RUNFORFAN_SECRET_KEY: ${{ secrets.RUNFORFAN_SECRET_KEY }}
       RUNFORFAN_TELEGRAM_BOT_TOKEN: ${{ secrets.RUNFORFAN_TELEGRAM_BOT_TOKEN }}
@@ -136,6 +138,8 @@ jobs:
           RUNFORFAN_COACH_ENABLED=$RUNFORFAN_COACH_ENABLED
           RUNFORFAN_COACH_DELIVERY_ENABLED=$RUNFORFAN_COACH_DELIVERY_ENABLED
           RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED=$RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED
+          RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED=$RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED
+          RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED=$RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED
           RUNFORFAN_COACH_DELIVERY_POLL_SECONDS=30
           RUNFORFAN_COACH_DELIVERY_BATCH_SIZE=25
           RUNFORFAN_COACH_DELIVERY_MAX_ATTEMPTS=5
@@ -203,8 +207,8 @@ jobs:
           else
             ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T backend python -c 'from app.core.settings import get_settings; assert not get_settings().coach_enabled'"
           fi
-          ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T backend python -c 'from app.core.settings import get_settings; assert get_settings().coach_delivery_enabled == (\"$RUNFORFAN_COACH_DELIVERY_ENABLED\".lower() == \"true\"); assert get_settings().coach_delivery_worker_enabled == (\"$RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED\".lower() == \"true\")'"
-          test "$(ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T db psql -U runforfan -d runforfan -tAc \"SELECT 1 FROM schema_migrations WHERE version = '20260714_0030_coach_delivery_constraints'\"")" = "1"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T backend python -c 'from app.core.settings import get_settings; s = get_settings(); assert s.coach_delivery_enabled == (\"$RUNFORFAN_COACH_DELIVERY_ENABLED\".lower() == \"true\"); assert s.coach_delivery_worker_enabled == (\"$RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED\".lower() == \"true\"); assert s.coach_post_workout_delivery_enabled == (\"$RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED\".lower() == \"true\"); assert s.coach_weekly_review_delivery_enabled == (\"$RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED\".lower() == \"true\")'"
+          test "$(ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose exec -T db psql -U runforfan -d runforfan -tAc \"SELECT 1 FROM schema_migrations WHERE version = '20260715_0031_coach_event_delivery'\"")" = "1"
           curl -fsS --retry 12 --retry-delay 5 "https://$RUNFORFAN_DOMAIN/health"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/")" = "302:https://$RUNFORFAN_DOMAIN/app/"
           test "$(curl -fsS -o /dev/null -w '%{http_code}:%{redirect_url}' "https://$RUNFORFAN_DOMAIN/admin/")" = "301:https://$RUNFORFAN_DOMAIN/app/"

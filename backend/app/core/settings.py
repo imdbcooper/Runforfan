@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     coach_pending_turn_limit: int = 3
     coach_delivery_enabled: bool = False
     coach_delivery_worker_enabled: bool = False
+    coach_post_workout_delivery_enabled: bool = False
+    coach_weekly_review_delivery_enabled: bool = False
     coach_delivery_poll_seconds: float = 30.0
     coach_delivery_batch_size: int = 25
     coach_delivery_max_attempts: int = 5

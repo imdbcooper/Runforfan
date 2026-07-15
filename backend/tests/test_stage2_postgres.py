@@ -2,7 +2,7 @@ import os
 import threading
 import unittest
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 try:
     from sqlalchemy import create_engine, func, select, text
@@ -50,15 +50,16 @@ class Stage2PostgresTests(unittest.TestCase):
     def setUp(self):
         Base.metadata.drop_all(bind=self.engine)
         Base.metadata.create_all(bind=self.engine)
+        today = date.today()
         with self.SessionLocal() as db:
             user = User(display_name="Stage 2 Runner", is_demo=False)
             db.add(user)
             db.flush()
             db.add(AthleteProfile(user_id=user.id, sex="unspecified", timezone="Europe/Moscow", locale="ru-RU", unit_system="metric", recovery_status="normal"))
-            plan = TrainingPlan(user_id=user.id, title="Stage 2 Plan", goal_type="10k", target_date=date(2026, 7, 31), available_days_per_week=3, status="active")
+            plan = TrainingPlan(user_id=user.id, title="Stage 2 Plan", goal_type="10k", target_date=today + timedelta(days=30), available_days_per_week=3, status="active")
             plan.workouts = [
-                TrainingPlanWorkout(scheduled_date=date(2026, 7, 14), status="planned", week_index=1, day_index=1, workout_type="easy", title="Easy", distance_km=8.0, duration_seconds=3000, intensity="easy"),
-                TrainingPlanWorkout(scheduled_date=date(2026, 7, 18), status="planned", week_index=1, day_index=2, workout_type="tempo", title="Tempo", distance_km=6.0, duration_seconds=2400, intensity="threshold"),
+                TrainingPlanWorkout(scheduled_date=today + timedelta(days=1), status="planned", week_index=1, day_index=1, workout_type="easy", title="Easy", distance_km=8.0, duration_seconds=3000, intensity="easy"),
+                TrainingPlanWorkout(scheduled_date=today + timedelta(days=5), status="planned", week_index=1, day_index=2, workout_type="tempo", title="Tempo", distance_km=6.0, duration_seconds=2400, intensity="threshold"),
             ]
             db.add(plan)
             db.commit()

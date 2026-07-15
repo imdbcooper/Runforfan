@@ -83,8 +83,8 @@ GET /health
 - `POST /api/coach/conversations/{id}/turns` — получить русскоязычное explanation/clarification поверх Athlete State, readiness и Weekly Review. Endpoint не создаёт preview, не применяет изменение и при отказе provider сохраняет детерминированный fallback.
 - `GET /api/coach/memory`, `PUT /api/coach/memory`, `DELETE /api/coach/memory` — управлять только явно подтверждёнными allowlisted предпочтениями: стиль ответа, coaching focus и доступные дни. Медицинские заметки и произвольный sensitive text в coach memory не сохраняются.
 - `POST /api/coach/conversations/{id}/previews` — по отдельному user click повторно авторизовать typed handoff из сохранённого assistant message и создать существующий readiness/coach-action/weekly preview без apply. Применение остаётся только в соответствующем доменном endpoint и требует отдельного подтверждения.
-- `GET /api/coach-delivery/preferences` — получить безопасное состояние controlled rollout ежедневного Telegram-брифа: доступность, факт привязки private chat, explicit opt-in, локальное время, серверный timezone и trusted bot URL. Telegram chat ID никогда не возвращается.
-- `PUT /api/coach-delivery/preferences` — изменить только explicit opt-in и время ежедневного брифа. Включение требует открытого global rollout и ранее подтверждённого private chat; при закрытом rollout разрешено только явное выключение.
+- `GET /api/coach-delivery/preferences` — получить безопасное состояние controlled rollout Telegram coaching loops: доступность, факт привязки private chat, отдельные daily/post-workout/weekly opt-in, локальное расписание, серверный timezone и trusted bot URL. Telegram chat ID никогда не возвращается.
+- `PUT /api/coach-delivery/preferences` — изменить только explicit opt-in и расписание доступных read-only loops. Включение требует открытого global и соответствующего per-loop rollout, а также ранее подтверждённого private chat; закрытый rollout не позволяет расширить согласие.
 - `GET /api/calendar?from=&to=` — календарь плановых workouts активного плана и фактических activities за диапазон до 42 дней.
 - `POST /api/imports/screenshots` — загрузка скриншотов и запуск LLM/template recognition pipeline.
 - `GET /api/imports` — история импортов.
@@ -198,6 +198,7 @@ API настроек AI:
 - Hybrid Conversational Coach создаётся миграцией `20260713_0027_conversational_coach`: `coach_conversations`, `coach_messages`, `coach_memory`, `coach_llm_attempts` с ownership/check constraints и dependency-safe export/delete lifecycle.
 - Recovery and Wearable Signals создаются миграцией `20260714_0028_recovery_signal_observations`: normalized append-oriented observations, canonical units, source-record uniqueness, quality/provenance constraints и soft weather/surface/time поля daily check-in. Migration runner сериализует concurrent PostgreSQL startup advisory lock.
 - Stage 6.1 Coach Delivery создаётся миграциями `20260714_0029_coach_delivery` и `20260714_0030_coach_delivery_constraints`: private destination preference, unique daily delivery ledger, bounded attempt metadata, queue indexes и DB constraints для retry/lock ownership. Ledger не хранит message body, Telegram chat ID, raw provider response или vendor message ID.
+- Stage 6.2 расширяет тот же privacy-safe ledger миграцией `20260715_0031_coach_event_delivery`: отдельные post-workout/weekly opt-in, source-keyed delivery identity, event/activity/Weekly Review provenance и partial indexes. Unique identity не зависит от rule version: один daily brief на локальную дату, один debrief на activity и один weekly brief на завершённую локальную неделю.
 - Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
@@ -235,6 +236,7 @@ API настроек AI:
 - Performance Analytics хранит race/time trial results, считает VDOT только из eligible hard sources, показывает Riegel predictions, PBs, threshold trend и pace zones derived from threshold/VDOT.
 - Hybrid Conversational Coach реализован как explanation/clarification layer над детерминированными решениями. LLM не имеет доступа к apply services, не назначает произвольную нагрузку и может только запросить отдельный server-generated preview разрешённого действия.
 - Stage 6.1 добавляет deterministic read-only daily brief поверх текущих Athlete State и readiness. Telegram не создаёт preview, не вызывает apply и не меняет план; сообщение содержит только allowlisted template, немедицинский disclaimer и deep link в web app. `/start` подтверждает destination только при открытом delivery rollout и никогда не включает рассылку автоматически.
+- Stage 6.2 добавляет отдельные post-workout и weekly read-only loops. Post-workout использует persisted completion/import facts после explicit opt-in, дедуплицирует matched import/completion по activity и отменяется при снятии completion до send. Weekly использует immutable review только за завершённую Monday-Sunday неделю; incomplete coverage никогда не превращается в progression wording. Свободные заметки, activity title/source metadata и raw event payload не рендерятся.
 - Delivery worker запускается отдельным процессом `python -m app.workers.coach_delivery`, использует `FOR UPDATE SKIP LOCKED`, unique daily ledger и capped retries только для явного Telegram `429`. Timeout/network/upstream, stale `sending` и неожиданные transport failures завершаются fail-closed без автоматического повтора, поскольку Telegram `sendMessage` не поддерживает idempotency key.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
@@ -308,7 +310,7 @@ UI-стиль frontend:
 
 Production deployment выполняет `.github/workflows/deploy.yml` при push в `master` или через `workflow_dispatch`. Workflow собирает и публикует backend/frontend images, обновляет production compose/Caddy и проверяет `/health`, redirects, app shell, alpha guide, manifest, service worker и Telegram bot link.
 
-Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Stage 6.1 delivery имеет два независимых kill switch: `RUNFORFAN_COACH_DELIVERY_ENABLED` и `RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED`; оба по умолчанию `false`. Release workflow передаёт effective settings в backend и отдельный worker, разворачивает immutable OCI digests и подтверждает migration `20260714_0030_coach_delivery_constraints` до успешного завершения deploy.
+Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Coach delivery имеет global/worker kill switches `RUNFORFAN_COACH_DELIVERY_ENABLED` и `RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED`, а Stage 6.2 дополнительно использует `RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED` и `RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED`; все delivery flags по умолчанию `false`. Release workflow передаёт effective settings в backend и отдельный worker, разворачивает immutable OCI digests и подтверждает migration `20260715_0031_coach_event_delivery` до успешного завершения deploy.
 
 ## Что уже обработано
 

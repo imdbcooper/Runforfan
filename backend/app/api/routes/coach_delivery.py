@@ -16,5 +16,13 @@ def get_preferences(user: User = Depends(get_current_user), db: Session = Depend
 
 @router.put("/preferences", response_model=CoachDeliveryPreferenceOut)
 def put_preferences(payload: CoachDeliveryPreferenceUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    preference = update_preference(db, user, telegram_enabled=payload.telegram_enabled, daily_brief_local_time=payload.daily_brief_local_time)
+    preference = update_preference(
+        db,
+        user,
+        telegram_enabled=payload.telegram_enabled,
+        post_workout_enabled=payload.post_workout_enabled,
+        weekly_review_enabled=payload.weekly_review_enabled,
+        daily_brief_local_time=payload.daily_brief_local_time,
+        weekly_review_local_time=payload.weekly_review_local_time,
+    )
     return preference_response(user, preference)

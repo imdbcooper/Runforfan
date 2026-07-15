@@ -37,22 +37,30 @@ class CoachDeliveryPreferenceOut(BaseModel):
     available: bool
     linked: bool
     enabled: bool
+    post_workout_available: bool
+    post_workout_enabled: bool
+    weekly_review_available: bool
+    weekly_review_enabled: bool
     daily_brief_local_time: time
+    weekly_review_local_time: time
     timezone: str
     bot_url: str | None = None
 
 
 class CoachDeliveryPreferenceUpdate(BaseModel):
     telegram_enabled: StrictBool | None = None
+    post_workout_enabled: StrictBool | None = None
+    weekly_review_enabled: StrictBool | None = None
     daily_brief_local_time: time | None = None
+    weekly_review_local_time: time | None = None
 
     model_config = {"extra": "forbid"}
 
-    @field_validator("daily_brief_local_time")
+    @field_validator("daily_brief_local_time", "weekly_review_local_time")
     @classmethod
     def validate_daily_brief_local_time(cls, value: time | None) -> time | None:
         if value is not None and (value.second or value.microsecond or value.tzinfo is not None):
-            raise ValueError("daily_brief_local_time must use local HH:MM precision")
+            raise ValueError("delivery times must use local HH:MM precision")
         return value
 
 
