@@ -1529,6 +1529,42 @@ MIGRATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             """,
         ),
     ),
+    (
+        "20260715_0035_coach_evaluation_runs",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS coach_evaluation_runs (
+                id VARCHAR(64) PRIMARY KEY,
+                evaluation_version VARCHAR(64) NOT NULL,
+                threshold_version VARCHAR(64) NOT NULL,
+                window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+                window_end TIMESTAMP WITH TIME ZONE NOT NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                metrics_json JSONB NOT NULL,
+                incidents_json JSONB NOT NULL,
+                gates_json JSONB NOT NULL,
+                generated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                CONSTRAINT ck_coach_evaluation_run_status CHECK (status IN ('pass', 'block', 'insufficient_data')),
+                CONSTRAINT ck_coach_evaluation_run_window CHECK (window_end > window_start),
+                CONSTRAINT uq_coach_evaluation_run_input UNIQUE (evaluation_version, threshold_version, window_start, window_end, input_fingerprint)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_coach_evaluation_runs_window_start ON coach_evaluation_runs (window_start)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_evaluation_runs_window_end ON coach_evaluation_runs (window_end)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_evaluation_runs_status ON coach_evaluation_runs (status)",
+            "CREATE INDEX IF NOT EXISTS ix_coach_evaluation_runs_generated_at ON coach_evaluation_runs (generated_at)",
+            """
+            CREATE OR REPLACE FUNCTION enforce_coach_evaluation_run_immutable() RETURNS trigger AS $$
+            BEGIN
+                RAISE EXCEPTION 'coach evaluation runs are immutable';
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_coach_evaluation_run_immutable ON coach_evaluation_runs",
+            "CREATE TRIGGER trg_coach_evaluation_run_immutable BEFORE UPDATE OR DELETE ON coach_evaluation_runs FOR EACH ROW EXECUTE FUNCTION enforce_coach_evaluation_run_immutable()",
+        ),
+    ),
 )
 
 

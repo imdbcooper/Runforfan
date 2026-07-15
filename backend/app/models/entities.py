@@ -630,6 +630,27 @@ class SafetyReviewEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class CoachEvaluationRun(Base):
+    __tablename__ = "coach_evaluation_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('pass', 'block', 'insufficient_data')", name="ck_coach_evaluation_run_status"),
+        CheckConstraint("window_end > window_start", name="ck_coach_evaluation_run_window"),
+        UniqueConstraint("evaluation_version", "threshold_version", "window_start", "window_end", "input_fingerprint", name="uq_coach_evaluation_run_input"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    evaluation_version: Mapped[str] = mapped_column(String(64))
+    threshold_version: Mapped[str] = mapped_column(String(64))
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    incidents_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    gates_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class DailyReadinessActionPreview(Base):
     __tablename__ = "daily_readiness_action_previews"
 

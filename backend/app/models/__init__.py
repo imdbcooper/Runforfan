@@ -14,6 +14,7 @@ from app.models.entities import (  # noqa: F401
     CoachDelivery,
     CoachDeliveryAttempt,
     CoachDeliveryPreference,
+    CoachEvaluationRun,
     CoachLlmAttempt,
     CoachMemory,
     CoachMessage,

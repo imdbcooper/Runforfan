@@ -208,6 +208,7 @@ API настроек AI:
 - Stage 6.3a создаётся миграцией `20260715_0032_safety_escalations`: один активный user-owned safety case, append-oriented lifecycle events, source deduplication, ownership FK и DB-enforced `open/acknowledged/superseded` transitions. Ledger не копирует pain level, illness/injury/health notes, biometrics, activity/chat content или raw payload; export исключает internal source key/fingerprint.
 - Stage 6.3b foundation создаётся миграцией `20260715_0033_safety_review_workflow`: terminal operator-provisioned reviewer grants, versioned athlete consent, bounded request/claim/completion lifecycle и actor-aware access events. PostgreSQL запрещает cross-owner links, self-review, claim без active grant/consent/case, незаконные transitions и event/state mismatch.
 - Stage 6.3c operational controls создаются миграцией `20260715_0034_safety_review_operational_controls`: terminal controlled-audience enrollment, DB-enforced audience gate, atomic access cutoff при revoke и aggregate-only queue/access-ledger status. Athlete export использует schema `2026-07-15.0034` и исключает reviewer/actor user IDs.
+- Stage 6.4 evaluation создаётся миграцией `20260715_0035_coach_evaluation_runs`: immutable operator-only aggregate dashboard с versioned thresholds, deterministic incident categories и трёхсостоянием `pass/block/insufficient_data`. Runs не содержат user/request/plan IDs, free text или health context.
 - Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
@@ -249,6 +250,7 @@ API настроек AI:
 - Stage 6.3a добавляет athlete-facing safety boundary для существующих deterministic stop/rest/return-to-run signals. Acknowledgement не снимает restriction, не меняет план и не вызывает Telegram/LLM.
 - Stage 6.3b добавляет default-off bounded staffed-review foundation. Athlete принимает отдельный versioned consent и отдельно создаёт request; reviewer до atomic claim видит только opaque queue, после claim только trigger/severity/date/rule/guidance. UI и API не обещают SLA/on-call response, не передают исходные health/profile/activity/chat данные и не дают reviewer plan authority.
 - Stage 6.3c требует отдельного operator-controlled audience enrollment до consent/request. Локальная status-команда показывает только counts, queue age buckets и access event aggregates; она не доказывает reviewer presence, coverage, monitoring или response guarantee.
+- Stage 6.4 материализует evaluation window только из persisted ledgers. Safety gate блокируется при progression mutation во время active safety case; adherence/completion quality и pain/overload guardrails требуют минимальную выборку. Retention и user trust честно остаются `not_measured`, поэтому отсутствие product evidence не считается pass.
 - Delivery worker запускается отдельным процессом `python -m app.workers.coach_delivery`, использует `FOR UPDATE SKIP LOCKED`, unique daily ledger и capped retries только для явного Telegram `429`. Timeout/network/upstream, stale `sending` и неожиданные transport failures завершаются fail-closed без автоматического повтора, поскольку Telegram `sendMessage` не поддерживает idempotency key.
 - Поддерживаются разные цели и дистанции: 5K, 10K, полумарафон, марафон и custom distance.
 
@@ -322,7 +324,7 @@ UI-стиль frontend:
 
 Production deployment выполняет `.github/workflows/deploy.yml` при push в `master` или через `workflow_dispatch`. Workflow собирает и публикует backend/frontend images, обновляет production compose/Caddy и проверяет `/health`, redirects, app shell, alpha guide, manifest, service worker и Telegram bot link.
 
-Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Coach delivery имеет global/worker kill switches `RUNFORFAN_COACH_DELIVERY_ENABLED` и `RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED`, а Stage 6.2 дополнительно использует `RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED` и `RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED`; все delivery flags по умолчанию `false`. Stage 6.3a отдельно закрыт `RUNFORFAN_SAFETY_ESCALATION_ENABLED=false`; этот flag управляет только case ledger/UI и не отключает базовые readiness safety rules. Stage 6.3b дополнительно требует одновременно `RUNFORFAN_SAFETY_REVIEW_ENABLED=true` и `RUNFORFAN_SAFETY_REVIEW_REVIEWER_API_ENABLED=true`; оба по умолчанию `false`. Release workflow передаёт effective settings, разворачивает immutable OCI digests и подтверждает migration `20260715_0034_safety_review_operational_controls` до успешного завершения deploy.
+Hybrid Conversational Coach в production управляется переменной `RUNFORFAN_COACH_ENABLED`. Coach delivery имеет global/worker kill switches `RUNFORFAN_COACH_DELIVERY_ENABLED` и `RUNFORFAN_COACH_DELIVERY_WORKER_ENABLED`, а Stage 6.2 дополнительно использует `RUNFORFAN_COACH_POST_WORKOUT_DELIVERY_ENABLED` и `RUNFORFAN_COACH_WEEKLY_REVIEW_DELIVERY_ENABLED`; все delivery flags по умолчанию `false`. Stage 6.3a отдельно закрыт `RUNFORFAN_SAFETY_ESCALATION_ENABLED=false`; этот flag управляет только case ledger/UI и не отключает базовые readiness safety rules. Stage 6.3b дополнительно требует одновременно `RUNFORFAN_SAFETY_REVIEW_ENABLED=true` и `RUNFORFAN_SAFETY_REVIEW_REVIEWER_API_ENABLED=true`; оба по умолчанию `false`. Release workflow передаёт effective settings, разворачивает immutable OCI digests и подтверждает migration `20260715_0035_coach_evaluation_runs` до успешного завершения deploy.
 
 Reviewer grant создаётся и отзывается только внутри backend container оператором, после проверки конкретного non-demo user ID:
 
@@ -335,6 +337,15 @@ python -m app.workers.safety_reviewer_admin status --access-hours 24 --format js
 ```
 
 Grant и audience enrollment не включают rollout flags. Оба revoke terminal; reviewer revoke возвращает claims в очередь, audience revoke закрывает active requests и reviewer access. Обязательный checklist и kill-switch procedure описаны в `Docs/safety-review-operations.md`. Наличие grant/status report само по себе не означает on-call service или SLA.
+
+Operator evaluation dashboard запускается внутри backend container с явным UTC window или bounded rolling window:
+
+```bash
+python -m app.workers.coach_evaluation --start 2026-06-01T00:00:00Z --end 2026-07-01T00:00:00Z --format json
+python -m app.workers.coach_evaluation --days 28
+```
+
+Threshold version `coach-release-thresholds-v1`: unsafe progression count `0`; минимум `20` complete weekly reviews; average session adherence не ниже `0.70`; минимум `10` execution samples с average не ниже `0.75`; pain/overload week rate не выше `0.10`; минимум `20` LLM attempts с failure rate не выше `0.05`. `insufficient_data` не является pass.
 
 ## Что уже обработано
 
