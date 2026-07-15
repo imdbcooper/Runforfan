@@ -209,6 +209,7 @@ API настроек AI:
 - Stage 6.3b foundation создаётся миграцией `20260715_0033_safety_review_workflow`: terminal operator-provisioned reviewer grants, versioned athlete consent, bounded request/claim/completion lifecycle и actor-aware access events. PostgreSQL запрещает cross-owner links, self-review, claim без active grant/consent/case, незаконные transitions и event/state mismatch.
 - Stage 6.3c operational controls создаются миграцией `20260715_0034_safety_review_operational_controls`: terminal controlled-audience enrollment, DB-enforced audience gate, atomic access cutoff при revoke и aggregate-only queue/access-ledger status. Athlete export использует schema `2026-07-15.0034` и исключает reviewer/actor user IDs.
 - Stage 6.4 evaluation создаётся миграцией `20260715_0035_coach_evaluation_runs`: immutable operator-only aggregate dashboard с versioned thresholds, deterministic incident categories и трёхсостоянием `pass/block/insufficient_data`. Runs не содержат user/request/plan IDs, free text или health context.
+- Stage 6.5 software release gate выполняет production decision engine на versioned synthetic offline corpus, покрывает полный strategy allowlist и safety/fallback branch classes, проверяет byte-stable output и golden manifest внутри executable runner, блокирует deploy при drift или открытом delivery/safety rollout. Pre-image CI отдельно выполняет полный backend/PostgreSQL mutation regression и frontend gates. Replay version: `stage6-strategy-replay-v1`; golden manifest: `95f5ddadaa8d310c0689684ca316f92d61e9ffb88ff0318c02e9c713452e5d98`.
 - Для production/deploy сценария можно выставить `RUNFORFAN_AUTO_CREATE_SCHEMA=false` и полагаться на migration runner вместо ad-hoc `create_all`.
 
 Планировщик программ:
@@ -346,6 +347,14 @@ python -m app.workers.coach_evaluation --days 28
 ```
 
 Threshold version `coach-release-thresholds-v1`: unsafe progression count `0`; минимум `20` complete weekly reviews; average session adherence не ниже `0.70`; минимум `10` execution samples с average не ниже `0.75`; pain/overload week rate не выше `0.10`; минимум `20` LLM attempts с failure rate не выше `0.05`. `insufficient_data` не является pass.
+
+Offline Stage 6 software gate:
+
+```bash
+python -m app.workers.stage6_release_gate
+```
+
+Команда завершается non-zero при replay drift или открытом controlled-rollout flag. Успешный software gate означает только готовность default-off implementation: он не закрывает полный Stage 6 acceptance, не включает delivery/review, не заменяет staffed operations checklist и не доказывает adherence/retention/user trust outcomes.
 
 ## Что уже обработано
 

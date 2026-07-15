@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--end", type=_timestamp)
     parser.add_argument("--days", type=int, default=28)
     parser.add_argument("--format", choices=("json", "text"), default="text")
+    parser.add_argument("--fail-on-block", action="store_true")
     args = parser.parse_args()
     now = datetime.now(UTC)
     end = args.end or now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -29,11 +30,13 @@ def main() -> None:
         report = run_to_dict(materialize_evaluation(db, start, end))
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=True, sort_keys=True))
-        return
-    print(f"evaluation: {report['id']} {report['status']} ({report['window_start']} to {report['window_end']})")
-    for name, gate in report["gates"].items():
-        print(f"{name}: {gate['status']}")
-    print(report["disclaimer"])
+    else:
+        print(f"evaluation: {report['id']} {report['status']} ({report['window_start']} to {report['window_end']})")
+        for name, gate in report["gates"].items():
+            print(f"{name}: {gate['status']}")
+        print(report["disclaimer"])
+    if args.fail_on_block and report["status"] == "block":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
